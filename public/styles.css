@@ -101,6 +101,23 @@ body{
   z-index:9999;
 }
 
+.miniCard{
+  width:56px;
+  height:76px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,0.04);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  font-size:18px;
+  user-select:none;
+  touch-action:none;
+}
+.miniCard:active{ transform: translateY(1px); }
+
+
 .dragGhost{
   position:absolute;
   width:140px;
