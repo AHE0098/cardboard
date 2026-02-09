@@ -67,6 +67,7 @@ p.textContent = id;
 p.dataset.cardId = String(id);
 p.dataset.fromZoneKey = zoneKey;
 p.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+p.addEventListener("click", (e) => e.stopPropagation());
 preview.appendChild(p);
 
     });
