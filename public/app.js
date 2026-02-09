@@ -74,54 +74,25 @@ preview.appendChild(p);
     tile.appendChild(head);
     tile.appendChild(preview);
 
-   // Long-press zone to open focus (zoomed) view
-tile.addEventListener("pointerdown", (e) => {
-  if (!clickable) return;
-  if (dragging) return;
+  if (clickable) {
+  let lastTapAt = 0;
+  const dblMs = 320;
 
-  const pointerId = e.pointerId;
-  tile.setPointerCapture(pointerId);
+  tile.addEventListener("click", () => {
+    if (dragging) return;
 
-  const startX = e.clientX;
-  const startY = e.clientY;
-  let moved = false;
-
-  const holdMs = 220;
-  const t = setTimeout(() => {
-    if (moved || dragging) return;
-    view = { type: "focus", zoneKey };
-    render();
-    cleanup();
-  }, holdMs);
-
-  const onMove = (ev) => {
-    if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) {
-      moved = true;
-      clearTimeout(t);
+    const now = performance.now();
+    if (now - lastTapAt <= dblMs) {
+      // double-tap confirmed
+      view = { type: "focus", zoneKey };
+      render();
+      lastTapAt = 0;
+    } else {
+      lastTapAt = now;
     }
-  };
+  });
+}
 
-  const onUp = () => {
-    clearTimeout(t);
-    cleanup();
-  };
-
-  const onCancel = () => {
-    clearTimeout(t);
-    cleanup();
-  };
-
-  function cleanup() {
-    tile.releasePointerCapture(pointerId);
-    tile.removeEventListener("pointermove", onMove);
-    tile.removeEventListener("pointerup", onUp);
-    tile.removeEventListener("pointercancel", onCancel);
-  }
-
-  tile.addEventListener("pointermove", onMove, { passive: true });
-  tile.addEventListener("pointerup", onUp, { passive: true });
-  tile.addEventListener("pointercancel", onCancel, { passive: true });
-}, { passive: true });
 
 
     return tile;
