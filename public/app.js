@@ -4,9 +4,10 @@
   const dragLayer = document.getElementById("dragLayer");
 
   const state = structuredClone(window.DEMO_STATE || {
-    playerName: "Player 1",
-    zones: { lands: [1,2,3], permanents: [] }
-  });
+  playerName: "Player 1",
+  zones: { hand: [1,2,3], lands: [], permanents: [] }
+});
+
 
   subtitle.textContent = state.playerName;
 
