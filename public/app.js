@@ -62,22 +62,67 @@
     const max = 9;
     cards.slice(0, max).forEach(id => {
       const p = document.createElement("div");
-      p.className = "previewCard";
-      p.textContent = id;
-      preview.appendChild(p);
+p.className = "miniCard";
+p.textContent = id;
+p.dataset.cardId = String(id);
+p.dataset.fromZoneKey = zoneKey;
+p.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+preview.appendChild(p);
+
     });
 
     tile.appendChild(head);
     tile.appendChild(preview);
 
-    if (clickable) {
-      tile.addEventListener("click", (e) => {
-        // Don’t trigger focus if we were dragging
-        if (dragging) return;
-        view = { type: "focus", zoneKey };
-        render();
-      });
+   // Long-press zone to open focus (zoomed) view
+tile.addEventListener("pointerdown", (e) => {
+  if (!clickable) return;
+  if (dragging) return;
+
+  const pointerId = e.pointerId;
+  tile.setPointerCapture(pointerId);
+
+  const startX = e.clientX;
+  const startY = e.clientY;
+  let moved = false;
+
+  const holdMs = 220;
+  const t = setTimeout(() => {
+    if (moved || dragging) return;
+    view = { type: "focus", zoneKey };
+    render();
+    cleanup();
+  }, holdMs);
+
+  const onMove = (ev) => {
+    if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) {
+      moved = true;
+      clearTimeout(t);
     }
+  };
+
+  const onUp = () => {
+    clearTimeout(t);
+    cleanup();
+  };
+
+  const onCancel = () => {
+    clearTimeout(t);
+    cleanup();
+  };
+
+  function cleanup() {
+    tile.releasePointerCapture(pointerId);
+    tile.removeEventListener("pointermove", onMove);
+    tile.removeEventListener("pointerup", onUp);
+    tile.removeEventListener("pointercancel", onCancel);
+  }
+
+  tile.addEventListener("pointermove", onMove, { passive: true });
+  tile.addEventListener("pointerup", onUp, { passive: true });
+  tile.addEventListener("pointercancel", onCancel, { passive: true });
+}, { passive: true });
+
 
     return tile;
   }
