@@ -13,10 +13,12 @@
   let view = { type: "overview" }; // or {type:"focus", zoneKey:"lands"}
   let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
 
-  const ZONES = [
-    { key: "lands", label: "Lands" },
-    { key: "permanents", label: "Permanents" }
-  ];
+ const ZONES = [
+  { key: "hand", label: "Hand" },
+  { key: "lands", label: "Lands" },
+  { key: "permanents", label: "Permanents" }
+];
+
 
   function render() {
     root.innerHTML = "";
