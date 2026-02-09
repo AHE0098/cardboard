@@ -121,7 +121,7 @@
     // show both zones as drop targets even in focus mode
     const targets = document.createElement("div");
     targets.style.display = "grid";
-    targets.style.gridTemplateColumns = "1fr 1fr";
+    targets.style.gridTemplateColumns = "1fr 1fr 1fr";
     targets.style.gap = "10px";
     targets.style.marginTop = "12px";
 
