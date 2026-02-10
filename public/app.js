@@ -23,9 +23,12 @@ const state = structuredClone(window.DEMO_STATE || {
   { key: "hand", label: "Hand" }
 ];
 
+function removeInspectorOverlay() {
+  const existing = document.getElementById("inspectorOverlay");
+  if (existing) existing.remove();
+}
 
-
- function render() {
+function render() {
   root.innerHTML = "";
 
   const board = document.createElement("div");
@@ -34,24 +37,29 @@ const state = structuredClone(window.DEMO_STATE || {
   ZONES.forEach(z => board.appendChild(renderDropArea(z.key)));
 
   root.appendChild(board);
-if (inspector) {
-  renderInspector(inspector.zoneKey);
-} else {
-  syncDropTargetHighlights(null);
+
+  if (inspector) {
+    renderInspector(inspector.zoneKey);
+  } else {
+    removeInspectorOverlay();          // <-- add this line
+    syncDropTargetHighlights(null);
+  }
 }
 
-}
 
 function renderInspector(zoneKey) {
+  removeInspectorOverlay(); // <-- prevents stacking multiple overlays
   const zoneCards = state.zones[zoneKey];
 
   // Create overlay
   const overlay = document.createElement("div");
+  overlay.id = "inspectorOverlay";     // <-- give it a stable id
   overlay.className = "inspectorOverlay";
 
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       inspector = null;
+      removeInspectorOverlay();
       render();
     }
   });
@@ -63,6 +71,7 @@ function renderInspector(zoneKey) {
   closeBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     inspector = null;
+    removeInspectorOverlay();
     render();
   });
 
