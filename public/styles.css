@@ -294,12 +294,14 @@ body{
   z-index: 9999;
   font-size: 20px;
   padding: 6px 12px;
-  background: rgba(0,0,0,0.6);
+  background: rgba(0, 0, 0, 0.6);
   border: none;
   border-radius: 12px;
   color: white;
   cursor: pointer;
+  pointer-events: auto; /* <-- this is the correct CSS way */
 }
+
 
 
 
