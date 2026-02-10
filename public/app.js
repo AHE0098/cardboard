@@ -3,10 +3,12 @@
   const subtitle = document.getElementById("subtitle");
   const dragLayer = document.getElementById("dragLayer");
 
-  const state = structuredClone(window.DEMO_STATE || {
+const state = structuredClone(window.DEMO_STATE || {
   playerName: "Player 1",
-  zones: { hand: [1,2,3], lands: [], permanents: [] }
+  zones: { hand: [1,2,3], lands: [], permanents: [] },
+  tapped: {}
 });
+
 
 
   subtitle.textContent = state.playerName;
@@ -15,26 +17,59 @@
   let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
 
  const ZONES = [
-  { key: "hand", label: "Hand" },
+  { key: "permanents", label: "Permanents" },
   { key: "lands", label: "Lands" },
-  { key: "permanents", label: "Permanents" }
+  { key: "hand", label: "Hand" }
 ];
 
 
-  function render() {
-    root.innerHTML = "";
-    const wrap = document.createElement("div");
-    wrap.className = "view";
 
-    if (view.type === "overview") {
-      ZONES.forEach(z => wrap.appendChild(renderZoneTile(z.key, z.label, true)));
-    } else {
-      wrap.appendChild(renderFocus(view.zoneKey));
+ function render() {
+  root.innerHTML = "";
+
+  const board = document.createElement("div");
+  board.className = "board";
+
+  ZONES.forEach(z => board.appendChild(renderDropArea(z.key)));
+
+  root.appendChild(board);
+  syncDropTargetHighlights(null);
+}
+
+  function renderDropArea(zoneKey) {
+  const area = document.createElement("section");
+  area.className = "dropArea";
+  area.dataset.zoneKey = zoneKey;
+
+  const row = document.createElement("div");
+  row.className = "row" + (zoneKey === "hand" ? " handRow" : "");
+
+  state.zones[zoneKey].forEach(id => {
+    const c = document.createElement("div");
+    c.className = zoneKey === "hand" ? "miniCard" : "card";
+    c.textContent = id;
+    c.dataset.cardId = String(id);
+    c.dataset.fromZoneKey = zoneKey;
+
+    // drag
+    c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+
+    // prevent bubbling to area (safer)
+    c.addEventListener("click", (e) => e.stopPropagation());
+
+    // double-tap to toggle tapped (only non-hand)
+    if (zoneKey !== "hand") {
+      attachDoubleTapToToggleTapped(c, id);
+      if (state.tapped?.[String(id)]) c.classList.add("tapped");
     }
 
-    root.appendChild(wrap);
-    syncDropTargetHighlights(null);
-  }
+    row.appendChild(c);
+  });
+
+  area.appendChild(row);
+  return area;
+}
+
 
   function renderZoneTile(zoneKey, label, clickable) {
     const tile = document.createElement("section");
@@ -266,13 +301,37 @@ preview.appendChild(p);
     return zoneEl ? zoneEl.dataset.zoneKey : null;
   }
 
-  function syncDropTargetHighlights(activeZoneKey) {
-    document.querySelectorAll(".zoneTile").forEach(tile => {
-      const z = tile.dataset.zoneKey;
-      tile.classList.toggle("dropTargetActive", !!activeZoneKey && z === activeZoneKey);
-    });
-  }
+ function syncDropTargetHighlights(activeZoneKey) {
+  document.querySelectorAll(".dropArea").forEach(area => {
+    const z = area.dataset.zoneKey;
+    area.classList.toggle("active", !!activeZoneKey && z === activeZoneKey);
+  });
+}
 
+
+function attachDoubleTapToToggleTapped(el, cardId) {
+  let lastTapAt = 0;
+  const dblMs = 380;
+
+  el.addEventListener("click", () => {
+    if (dragging) return;
+
+    const now = performance.now();
+    if (now - lastTapAt <= dblMs) {
+      const key = String(cardId);
+      state.tapped[key] = !state.tapped[key];
+
+      // quick visual toggle without full render
+      el.classList.toggle("tapped", !!state.tapped[key]);
+
+      lastTapAt = 0;
+    } else {
+      lastTapAt = now;
+    }
+  });
+}
+
+  
   function finalizeDrop(toZoneKey) {
     const d = dragging;
     if (!d) return;
