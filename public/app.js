@@ -292,8 +292,9 @@ const row = document.createElement("div");
 row.className = "slotRow";
 
 const ids = state.zones[zoneKey];
-const slotCount = Math.max(6, ids.length + 1); // grows if needed (keeps symmetry)
-
+const minSlots = (zoneKey === "hand") ? 7 : 6;
+const slotCount = Math.max(minSlots, ids.length + 1);
+    
 for (let i = 0; i < slotCount; i++) {
   const slot = document.createElement("div");
   slot.className = "slot";
