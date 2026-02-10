@@ -29,6 +29,34 @@ function removeInspectorOverlay() {
   if (existing) existing.remove();
 }
 
+  function removeBoardOverlay() {
+  const existing = document.getElementById("boardOverlay");
+  if (existing) existing.remove();
+}
+
+function renderBoardOverlay() {
+  removeBoardOverlay();
+
+  const wrap = document.createElement("div");
+  wrap.id = "boardOverlay";
+  wrap.className = "boardOverlay";
+
+  const inner = document.createElement("div");
+  inner.className = "boardOverlayInner";
+
+  const board = document.createElement("div");
+  board.className = "board";
+
+  // reuse same drop areas (they already have dataset.zoneKey)
+  ZONES.forEach(z => board.appendChild(renderDropArea(z.key, { overlay: true })));
+
+
+  inner.appendChild(board);
+  wrap.appendChild(inner);
+  document.body.appendChild(wrap);
+}
+
+
 function render() {
   root.innerHTML = "";
 
@@ -47,31 +75,15 @@ function render() {
   }
 }
 
-function hitTestDockZone(x, y) {
-  const els = document.elementsFromPoint(x, y);
-  const el = els.find(n => n?.dataset?.dockZoneKey);
-  return el ? el.dataset.dockZoneKey : null;
-}
-
-function setDockHover(zoneKey) {
-  document.querySelectorAll(".dockZone").forEach(btn => {
-    btn.classList.toggle("hover", btn.dataset.dockZoneKey === zoneKey);
-  });
-}
 
 function showDock(active) {
-  const dock = document.getElementById("inspectorDock");
   const overlay = document.getElementById("inspectorOverlay");
-  if (dock) dock.classList.toggle("active", !!active);
-
   if (overlay) {
     overlay.classList.toggle("dragging", !!active);
-    // Stop horisontal swipe/scroll mens vi dragger
     overlay.style.overflowX = active ? "hidden" : "auto";
   }
-
-  if (!active) setDockHover(null);
 }
+
 
 
 function moveCard(cardId, fromZoneKey, toZoneKey) {
@@ -117,7 +129,9 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       positionGhost(ghost, e.clientX, e.clientY);
 
       inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-      showDock(true);
+showDock(true);           // you can remove dock entirely later
+renderBoardOverlay();     // <-- NEW
+syncDropTargetHighlights(null);
 
       if (navigator.vibrate) navigator.vibrate(10);
     };
@@ -138,8 +152,8 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
       if (inspectorDragging?.ghostEl) {
         positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
-        const over = hitTestDockZone(ev.clientX, ev.clientY);
-        setDockHover(over);
+const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+syncDropTargetHighlights(overZoneKey);
       }
     };
 
@@ -149,14 +163,19 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
       
       if (inspectorDragging) {
-        const over = hitTestDockZone(ev.clientX, ev.clientY);
+       const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
 
         // cleanup ghost
         const g = inspectorDragging.ghostEl;
         if (g && g.parentNode) g.parentNode.removeChild(g);
 
+
+  removeBoardOverlay();                 // <-- HER
+  syncDropTargetHighlights(null);        // <-- HER
+        
         // move if dropped on a dock zone
-        if (over) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, over);
+       if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
+
 
         inspectorDragging = null;
         showDock(false);
@@ -175,6 +194,10 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       if (inspectorDragging) {
         const g = inspectorDragging.ghostEl;
         if (g && g.parentNode) g.parentNode.removeChild(g);
+
+  removeBoardOverlay();                 // <-- HER
+  syncDropTargetHighlights(null);        // <-- HER
+        
         inspectorDragging = null;
         showDock(false);
         render();
@@ -213,12 +236,19 @@ function renderInspector(zoneKey) {
   const closeBtn = document.createElement("button");
   closeBtn.className = "inspectorCloseBtn";
   closeBtn.textContent = "✕";
-  closeBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    inspector = null;
-    removeInspectorOverlay();
-    render();
-  });
+closeBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  inspector = null;
+
+  removeInspectorOverlay();
+  removeBoardOverlay();
+  syncDropTargetHighlights(null);
+
+  inspectorDragging = null;
+  showDock(false);
+
+  render();
+});
 
   // Create inspector content track
   const track = document.createElement("div");
@@ -265,35 +295,22 @@ attachInspectorLongPress(card, id, zoneKey);
   // Build hierarchy: closeBtn and track INSIDE overlay
   overlay.appendChild(closeBtn);
   overlay.appendChild(track);
-
-  const dock = document.createElement("div");
-dock.id = "inspectorDock";
-dock.className = "inspectorDock";
-
-ZONES
-  .filter(z => z.key !== zoneKey) // don't show current zone as a target
-  .forEach(z => {
-    const b = document.createElement("div");
-    b.className = "dockZone";
-    b.textContent = z.label;
-    b.dataset.dockZoneKey = z.key;
-    dock.appendChild(b);
-  });
-
-overlay.appendChild(dock);
   document.body.appendChild(overlay);
 }
 
 
 
-  function renderDropArea(zoneKey) {
+  function renderDropArea(zoneKey, opts = {}) {
+  const { overlay = false } = opts;
 const area = document.createElement("section");
 area.className = "dropArea";
 area.dataset.zoneKey = zoneKey;
 area.classList.add(`zone-${zoneKey}`);
-area.addEventListener("click", () => {
-  inspector = { zoneKey };
-  render();
+if (!opts.overlay) {
+  area.addEventListener("click", () => {
+    inspector = { zoneKey };
+    render();
+  });
 });
 
 
@@ -317,14 +334,17 @@ for (let i = 0; i < slotCount; i++) {
     c.dataset.fromZoneKey = zoneKey;
 
     // drag
-    c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-    c.addEventListener("click", (e) => e.stopPropagation());
-
+if (!opts.overlay) {
+  c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+  c.addEventListener("click", (e) => e.stopPropagation());
+}
     // double-tap to toggle tapped (non-hand)
-    if (zoneKey !== "hand") {
-      attachDoubleTapToToggleTapped(c, id);
-      if (state.tapped?.[String(id)]) c.classList.add("tapped");
-    }
+if (!opts.overlay && zoneKey !== "hand") {
+  attachDoubleTapToToggleTapped(c, id);
+  if (state.tapped?.[String(id)]) c.classList.add("tapped");
+} else {
+  if (state.tapped?.[String(id)]) c.classList.add("tapped");
+}
 
     slot.appendChild(c);
   }
@@ -598,17 +618,7 @@ function attachDoubleTapToToggleTapped(el, cardId) {
   });
 }
 
-  function showDock(active) {
-  const dock = document.getElementById("inspectorDock");
-  if (!dock) return;
-  dock.classList.toggle("active", !!active);
 
-  // add/remove a class on overlay too
-  const overlay = document.getElementById("inspectorOverlay");
-  if (overlay) overlay.classList.toggle("dragging", !!active);
-
-  if (!active) setDockHover(null);
-}
   
   function finalizeDrop(toZoneKey) {
     const d = dragging;
