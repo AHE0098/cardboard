@@ -120,14 +120,16 @@ body{
   display:flex;
   flex-direction:column;
   gap:12px;
+  justify-content:flex-end; /* <-- push zones to bottom */
 }
+
 
 /* Hand sits at bottom + divider */
 .zone-hand{
-  margin-top:auto;
   padding-top:14px;
   border-top:1px solid rgba(255,255,255,0.14);
 }
+
 
 /* Zones fill from bottom */
 .dropArea{
@@ -149,11 +151,17 @@ body{
 /* Fixed symmetric slots: cards fill left->right into reserved positions */
 .slotRow{
   display:grid;
-  grid-template-columns: repeat(auto-fill, 56px); /* as many as fit */
-  justify-content:center;                        /* symmetric */
-  gap:12px;                                      /* room for tapped cards */
+  grid-template-columns: repeat(auto-fit, 56px);
+  gap:12px;
+  justify-content:center;
   align-items:end;
+
+  width:100%;
+  max-width:100%;
+  padding:0 6px;     /* prevents left clipping */
+  margin:0 auto;
 }
+
 
 
 .slot{
@@ -182,10 +190,12 @@ body{
   will-change: transform;
   transition: transform 120ms ease;
 }
-.miniCard:active{ transform: translateY(1px); }
-
-/* Tap rotates inside its reserved slot */
-.tapped{
-  transform: rotate(90deg);
-  z-index:2;
+.miniCard{
+  transform-origin: center;
+  transition: transform 140ms cubic-bezier(.2,.9,.2,1);
 }
+
+.tapped{
+  transform: rotate(90deg) translateY(-6px);
+}
+
