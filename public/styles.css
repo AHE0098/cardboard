@@ -6,6 +6,8 @@
   --muted:#9bb0d6;
   --border:rgba(255,255,255,0.10);
   --glow:rgba(130,180,255,0.35);
+  --cardW:56px;
+  --handGap:12px;
 }
 
 *{box-sizing:border-box}
@@ -124,16 +126,6 @@ body{
 }
 
 
-/* Hand sits at bottom + divider */
-.zone-hand {
-  background: rgba(255, 255, 255, 0.015);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 8px 12px -10px rgba(0, 0, 0, 0.5);
-  padding-top: 8px;
-}
-
-
-
 /* Zones fill from bottom */
 .dropArea{
   border:0;
@@ -233,6 +225,10 @@ body{
   -webkit-overflow-scrolling: touch;
 }
 
+.inspectorOverlay.dragging{
+  cursor: grabbing;
+}
+
 .inspectorTrack {
   display: flex;
   gap: 20px;
@@ -323,22 +319,26 @@ body{
   flex-wrap:nowrap;
   justify-content:flex-start;
   align-items:flex-end;
-  gap:12px;
+   gap: var(--handGap);
 
   /* Important: clip overflow so >7 cards are "off-screen" */
   overflow:hidden;
-
+  
+  /* This makes exactly 7 “card widths” visible (clip the rest) */
+  max-width: calc((7 * var(--cardW)) + (6 * var(--handGap)));
+  width: 100%;
+  
   padding: 0 6px;
-  margin: 0 auto;
+ margin-left: 6px;
 }
 
 .zone-hand .slot{
   flex: 0 0 auto; /* fixed width, don't shrink */
 }
 
-/* Optional: slightly smaller gap on very narrow screens */
+/* tweak the variable on small screens */
 @media (max-width: 380px){
-  .zone-hand .slotRow{ gap:10px; }
+  :root{ --handGap:10px; }
 }
 
 /* ===== Inspector drag dock (drop targets inside overlay) ===== */
