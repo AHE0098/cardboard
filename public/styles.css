@@ -264,4 +264,24 @@ body{
   width: 100%;
 }
 
+.inspectorCloseBtn {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 18px;
+  font-weight: bold;
+  z-index: 10;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+}
+.inspectorCloseBtn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+
 
