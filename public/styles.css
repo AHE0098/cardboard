@@ -161,6 +161,10 @@ body{
   box-shadow: 0 0 0 6px rgba(130,180,255,0.10), 0 16px 32px rgba(0,0,0,0.25);
 }
 
+.zone-hand.dropArea{
+  padding: 6px 4px 8px;   /* eller endda 4px 2px 6px */
+}
+
 /* Fixed symmetric slots: cards fill left->right into reserved positions */
 .slotRow{
   display:grid;
@@ -319,17 +323,17 @@ body{
   flex-wrap:nowrap;
   justify-content:flex-start;
   align-items:flex-end;
-   gap: var(--handGap);
+   gap: 0;
 
   /* Important: clip overflow so >7 cards are "off-screen" */
   overflow:hidden;
   
   /* This makes exactly 7 “card widths” visible (clip the rest) */
-  max-width: calc((7 * var(--cardW)) + (6 * var(--handGap)));
+   max-width: calc(7 * var(--cardW));
   width: 100%;
   
-  padding: 0 6px;
- margin-left: 6px;
+  padding: 0;
+ margin-left: 2px;
 }
 
 .zone-hand .slot{
