@@ -149,11 +149,12 @@ body{
 /* Fixed symmetric slots: cards fill left->right into reserved positions */
 .slotRow{
   display:grid;
-  grid-template-columns: repeat(6, 56px); /* adjust slot count as you like */
-  justify-content:center;
-  gap:12px; /* reserves room so tapped cards don't collide */
+  grid-template-columns: repeat(auto-fill, 56px); /* as many as fit */
+  justify-content:center;                        /* symmetric */
+  gap:12px;                                      /* room for tapped cards */
   align-items:end;
 }
+
 
 .slot{
   width:56px;
