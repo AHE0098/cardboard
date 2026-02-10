@@ -43,32 +43,42 @@ area.dataset.zoneKey = zoneKey;
 area.classList.add(`zone-${zoneKey}`);
 
 
-  const row = document.createElement("div");
-  row.className = "row" + (zoneKey === "hand" ? " handRow" : "");
+const row = document.createElement("div");
+row.className = "slotRow";
 
-  state.zones[zoneKey].forEach(id => {
+const ids = state.zones[zoneKey];
+const slotCount = Math.max(6, ids.length + 1); // grows if needed (keeps symmetry)
+
+for (let i = 0; i < slotCount; i++) {
+  const slot = document.createElement("div");
+  slot.className = "slot";
+
+  const id = ids[i];
+  if (id !== undefined) {
     const c = document.createElement("div");
-    c.className = zoneKey === "hand" ? "miniCard" : "card";
+    c.className = "miniCard";
     c.textContent = id;
     c.dataset.cardId = String(id);
     c.dataset.fromZoneKey = zoneKey;
 
     // drag
     c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-
-    // prevent bubbling to area (safer)
     c.addEventListener("click", (e) => e.stopPropagation());
 
-    // double-tap to toggle tapped (only non-hand)
+    // double-tap to toggle tapped (non-hand)
     if (zoneKey !== "hand") {
       attachDoubleTapToToggleTapped(c, id);
       if (state.tapped?.[String(id)]) c.classList.add("tapped");
     }
 
-    row.appendChild(c);
-  });
+    slot.appendChild(c);
+  }
 
-  area.appendChild(row);
+  row.appendChild(slot);
+}
+
+area.appendChild(row);
+
   return area;
 }
 
