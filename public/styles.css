@@ -228,6 +228,7 @@ body{
   display: flex;
   align-items: center;
   overflow-x: auto;
+  pointer-events: none;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
 }
@@ -237,6 +238,7 @@ body{
   gap: 20px;
   padding: 20px;
   width: 100%;
+  pointer-events: auto;
 }
 
 .inspectorCard {
@@ -297,6 +299,7 @@ body{
   font-size: 18px;
   font-weight: bold;
   z-index: 9999;
+   pointer-events: auto;
   cursor: pointer;
   backdrop-filter: blur(4px);
 }
