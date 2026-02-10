@@ -588,6 +588,17 @@ function attachDoubleTapToToggleTapped(el, cardId) {
   });
 }
 
+  function showDock(active) {
+  const dock = document.getElementById("inspectorDock");
+  if (!dock) return;
+  dock.classList.toggle("active", !!active);
+
+  // add/remove a class on overlay too
+  const overlay = document.getElementById("inspectorOverlay");
+  if (overlay) overlay.classList.toggle("dragging", !!active);
+
+  if (!active) setDockHover(null);
+}
   
   function finalizeDrop(toZoneKey) {
     const d = dragging;
