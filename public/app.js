@@ -61,10 +61,18 @@ function setDockHover(zoneKey) {
 
 function showDock(active) {
   const dock = document.getElementById("inspectorDock");
-  if (!dock) return;
-  dock.classList.toggle("active", !!active);
+  const overlay = document.getElementById("inspectorOverlay");
+  if (dock) dock.classList.toggle("active", !!active);
+
+  if (overlay) {
+    overlay.classList.toggle("dragging", !!active);
+    // Stop horisontal swipe/scroll mens vi dragger
+    overlay.style.overflowX = active ? "hidden" : "auto";
+  }
+
   if (!active) setDockHover(null);
 }
+
 
 function moveCard(cardId, fromZoneKey, toZoneKey) {
   if (!toZoneKey || toZoneKey === fromZoneKey) return;
@@ -192,7 +200,7 @@ function renderInspector(zoneKey) {
   overlay.className = "inspectorOverlay";
 
  overlay.addEventListener("click", (e) => {
-  if (inspectorDragging) return;           // <-- add
+  if (inspectorDragging) return;     // <-- vigtig
   if (e.target === overlay) {
     inspector = null;
     removeInspectorOverlay();
