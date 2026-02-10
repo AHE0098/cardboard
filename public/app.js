@@ -16,6 +16,7 @@ const state = structuredClone(window.DEMO_STATE || {
   let view = { type: "overview" }; // or {type:"focus", zoneKey:"lands"}
   let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
   let inspector = null;
+  let inspectorDragging = null;
 
  const ZONES = [
   { key: "permanents", label: "Permanents" },
@@ -46,6 +47,140 @@ function render() {
   }
 }
 
+function hitTestDockZone(x, y) {
+  const els = document.elementsFromPoint(x, y);
+  const el = els.find(n => n?.dataset?.dockZoneKey);
+  return el ? el.dataset.dockZoneKey : null;
+}
+
+function setDockHover(zoneKey) {
+  document.querySelectorAll(".dockZone").forEach(btn => {
+    btn.classList.toggle("hover", btn.dataset.dockZoneKey === zoneKey);
+  });
+}
+
+function showDock(active) {
+  const dock = document.getElementById("inspectorDock");
+  if (!dock) return;
+  dock.classList.toggle("active", !!active);
+  if (!active) setDockHover(null);
+}
+
+function moveCard(cardId, fromZoneKey, toZoneKey) {
+  if (!toZoneKey || toZoneKey === fromZoneKey) return;
+
+  const fromArr = state.zones[fromZoneKey];
+  const toArr = state.zones[toZoneKey];
+  const idx = fromArr.indexOf(cardId);
+  if (idx >= 0) {
+    fromArr.splice(idx, 1);
+    toArr.push(cardId);
+  }
+}
+
+function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
+  let holdTimer = null;
+  let lifted = false;
+
+  cardEl.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+
+    const pointerId = e.pointerId;
+    cardEl.setPointerCapture(pointerId);
+
+    const start = { x: e.clientX, y: e.clientY };
+    lifted = false;
+
+    const cancel = () => {
+      clearTimeout(holdTimer);
+      try { cardEl.releasePointerCapture(pointerId); } catch {}
+      cardEl.removeEventListener("pointermove", onMove);
+      cardEl.removeEventListener("pointerup", onUp);
+      cardEl.removeEventListener("pointercancel", onCancel);
+    };
+
+    const lift = () => {
+      lifted = true;
+
+      const ghost = document.createElement("div");
+      ghost.className = "dragGhost";
+      ghost.textContent = cardId;
+      dragLayer.appendChild(ghost);
+      positionGhost(ghost, e.clientX, e.clientY);
+
+      inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
+      showDock(true);
+
+      if (navigator.vibrate) navigator.vibrate(10);
+    };
+
+    // user asked 2–3 seconds: pick 2200ms
+    holdTimer = setTimeout(lift, 2200);
+
+    const onMove = (ev) => {
+      ev.preventDefault();
+
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+
+      // if they move a lot before lift, cancel the long-press
+      if (!lifted && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+        clearTimeout(holdTimer);
+      }
+
+      if (inspectorDragging?.ghostEl) {
+        positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
+        const over = hitTestDockZone(ev.clientX, ev.clientY);
+        setDockHover(over);
+      }
+    };
+
+    const onUp = (ev) => {
+      ev.preventDefault();
+      clearTimeout(holdTimer);
+
+      if (inspectorDragging) {
+        const over = hitTestDockZone(ev.clientX, ev.clientY);
+
+        // cleanup ghost
+        const g = inspectorDragging.ghostEl;
+        if (g && g.parentNode) g.parentNode.removeChild(g);
+
+        // move if dropped on a dock zone
+        if (over) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, over);
+
+        inspectorDragging = null;
+        showDock(false);
+
+        // keep inspector open, but re-render everything
+        render();
+      }
+
+      cancel();
+    };
+
+    const onCancel = (ev) => {
+      ev.preventDefault();
+      clearTimeout(holdTimer);
+
+      if (inspectorDragging) {
+        const g = inspectorDragging.ghostEl;
+        if (g && g.parentNode) g.parentNode.removeChild(g);
+        inspectorDragging = null;
+        showDock(false);
+        render();
+      }
+
+      cancel();
+    };
+
+    cardEl.addEventListener("pointermove", onMove, { passive: false });
+    cardEl.addEventListener("pointerup", onUp, { passive: false });
+    cardEl.addEventListener("pointercancel", onCancel, { passive: false });
+  }, { passive: false });
+}
+
+  
 
 function renderInspector(zoneKey) {
   removeInspectorOverlay(); // <-- prevents stacking multiple overlays
@@ -111,6 +246,8 @@ function renderInspector(zoneKey) {
       idTag.textContent = `#${id}`;
       card.appendChild(idTag);
 
+attachInspectorLongPress(card, id, zoneKey);
+      
       track.appendChild(card);
     });
   }
@@ -118,6 +255,22 @@ function renderInspector(zoneKey) {
   // Build hierarchy: closeBtn and track INSIDE overlay
   overlay.appendChild(closeBtn);
   overlay.appendChild(track);
+
+  const dock = document.createElement("div");
+dock.id = "inspectorDock";
+dock.className = "inspectorDock";
+
+ZONES
+  .filter(z => z.key !== zoneKey) // don't show current zone as a target
+  .forEach(z => {
+    const b = document.createElement("div");
+    b.className = "dockZone";
+    b.textContent = z.label;
+    b.dataset.dockZoneKey = z.key;
+    dock.appendChild(b);
+  });
+
+overlay.appendChild(dock);
   document.body.appendChild(overlay);
 }
 
