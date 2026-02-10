@@ -109,8 +109,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
     const lift = () => {
       lifted = true;
-       console.log("LIFT", cardId);
-
+      
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
       ghost.textContent = cardId;
@@ -148,7 +147,6 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       ev.preventDefault();
       clearTimeout(holdTimer);
 
-console.log("UP", ev.clientX, ev.clientY, "dragging?", !!inspectorDragging);
       
       if (inspectorDragging) {
         const over = hitTestDockZone(ev.clientX, ev.clientY);
