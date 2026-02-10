@@ -191,13 +191,14 @@ function renderInspector(zoneKey) {
   overlay.id = "inspectorOverlay";     // <-- give it a stable id
   overlay.className = "inspectorOverlay";
 
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) {
-      inspector = null;
-      removeInspectorOverlay();
-      render();
-    }
-  });
+ overlay.addEventListener("click", (e) => {
+  if (inspectorDragging) return;           // <-- add
+  if (e.target === overlay) {
+    inspector = null;
+    removeInspectorOverlay();
+    render();
+  }
+});
 
   // Create close button
   const closeBtn = document.createElement("button");
