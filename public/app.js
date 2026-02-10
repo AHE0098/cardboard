@@ -33,14 +33,76 @@ const state = structuredClone(window.DEMO_STATE || {
   ZONES.forEach(z => board.appendChild(renderDropArea(z.key)));
 
   root.appendChild(board);
+if (inspector) {
+  renderInspector(inspector.zoneKey);
+} else {
   syncDropTargetHighlights(null);
 }
+
+}
+
+  function renderInspector(zoneKey) {
+  const zoneCards = state.zones[zoneKey];
+  const overlay = document.createElement("div");
+  overlay.className = "inspectorOverlay";
+  overlay.addEventListener("click", () => {
+    inspector = null;
+    render();
+  });
+
+  const track = document.createElement("div");
+  track.className = "inspectorTrack";
+
+  if (zoneCards.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "inspectorEmpty";
+    empty.innerHTML = "<div>🗄️</div><p>No cards in this zone.</p>";
+    track.appendChild(empty);
+  } else {
+    zoneCards.forEach(id => {
+      const data = window.CARD_REPO?.[id] || {};
+      const card = document.createElement("div");
+      card.className = "inspectorCard";
+
+      const img = document.createElement("img");
+      img.src = data.image || "https://via.placeholder.com/200x280?text=Card";
+      card.appendChild(img);
+
+      const name = document.createElement("div");
+      name.className = "inspectorName";
+      name.textContent = data.name || `Card ${id}`;
+      card.appendChild(name);
+
+      if (data.power !== undefined) {
+        const stats = document.createElement("div");
+        stats.className = "inspectorStats";
+        stats.textContent = `${data.power}/${data.toughness}`;
+        card.appendChild(stats);
+      }
+
+      const idTag = document.createElement("div");
+      idTag.className = "inspectorId";
+      idTag.textContent = `#${id}`;
+      card.appendChild(idTag);
+
+      track.appendChild(card);
+    });
+  }
+
+  overlay.appendChild(track);
+  document.body.appendChild(overlay);
+}
+
 
   function renderDropArea(zoneKey) {
 const area = document.createElement("section");
 area.className = "dropArea";
 area.dataset.zoneKey = zoneKey;
 area.classList.add(`zone-${zoneKey}`);
+area.addEventListener("click", () => {
+  inspector = { zoneKey };
+  render();
+});
 
 
 const row = document.createElement("div");
