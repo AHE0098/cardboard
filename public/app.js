@@ -97,6 +97,7 @@ closeBtn.addEventListener("click", (e) => {
   inspector = null;
   render();
 });
+  overlay.appendChild(closeBtn);
   overlay.appendChild(track);
   document.body.appendChild(overlay);
 }
