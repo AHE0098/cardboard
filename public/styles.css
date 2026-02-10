@@ -231,6 +231,7 @@ body{
 
 .inspectorOverlay.dragging{
   cursor: grabbing;
+  touch-action: none;
 }
 
 .inspectorTrack {
@@ -263,6 +264,7 @@ body{
   width: 100%;
   border-radius: 12px;
   margin-bottom: 10px;
+  pointer-events: none;
 }
 
 .inspectorName {
