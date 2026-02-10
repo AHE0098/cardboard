@@ -138,10 +138,16 @@ body{
 
 
 .board{
+  min-height: calc(100vh - 90px);
   display:flex;
   flex-direction:column;
   gap:12px;
 }
+
+.zone-hand{
+  margin-top:auto;       /* pushes hand to the bottom */
+}
+
 
 .dropArea{
   border:1px dashed rgba(255,255,255,0.10);
