@@ -89,7 +89,14 @@ if (inspector) {
       track.appendChild(card);
     });
   }
-
+const closeBtn = document.createElement("button");
+closeBtn.className = "inspectorCloseBtn";
+closeBtn.textContent = "✕";
+closeBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  inspector = null;
+  render();
+});
   overlay.appendChild(track);
   document.body.appendChild(overlay);
 }
