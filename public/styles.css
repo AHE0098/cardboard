@@ -125,10 +125,13 @@ body{
 
 
 /* Hand sits at bottom + divider */
-.zone-hand{
-  padding-top:14px;
-  border-top:1px solid rgba(255,255,255,0.14);
+.zone-hand {
+  background: rgba(255, 255, 255, 0.015);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 8px 12px -10px rgba(0, 0, 0, 0.5);
+  padding-top: 8px;
 }
+
 
 
 /* Zones fill from bottom */
@@ -141,6 +144,24 @@ body{
   display:flex;
   flex-direction:column;
   justify-content:flex-end; /* bottom-fill */
+  position: relative;  /* <-- Add this */
+}
+
+.dropArea::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.08) 0%,
+    transparent 25%,
+    transparent 75%,
+    rgba(255, 255, 255, 0.08) 100%
+  );
+  background-repeat: repeat-x;
 }
 
 .dropArea.active{
