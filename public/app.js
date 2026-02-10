@@ -37,9 +37,11 @@ const state = structuredClone(window.DEMO_STATE || {
 }
 
   function renderDropArea(zoneKey) {
-  const area = document.createElement("section");
-  area.className = "dropArea";
-  area.dataset.zoneKey = zoneKey;
+const area = document.createElement("section");
+area.className = "dropArea";
+area.dataset.zoneKey = zoneKey;
+area.classList.add(`zone-${zoneKey}`);
+
 
   const row = document.createElement("div");
   row.className = "row" + (zoneKey === "hand" ? " handRow" : "");
