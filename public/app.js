@@ -114,9 +114,10 @@ closeBtn.addEventListener("click", (e) => {
   render();
 });
 
-  overlay.appendChild(closeBtn);
-  overlay.appendChild(track);
-  document.body.appendChild(overlay);
+overlay.appendChild(track);
+document.body.appendChild(overlay);
+document.body.appendChild(closeBtn); // <- outside the scrollable overlay
+
 }
 
 
