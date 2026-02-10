@@ -15,6 +15,7 @@ const state = structuredClone(window.DEMO_STATE || {
 
   let view = { type: "overview" }; // or {type:"focus", zoneKey:"lands"}
   let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
+  let inspector = null;
 
  const ZONES = [
   { key: "permanents", label: "Permanents" },
