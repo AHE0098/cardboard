@@ -158,14 +158,25 @@ body{
 
 .row{
   display:flex;
-  gap:10px;
+  gap:12px;
   flex-wrap:wrap;
+  align-items:flex-end;
 }
+
 
 .handRow{
   justify-content:center;
 }
 
+.miniCard{
+  position:relative;
+  will-change: transform;
+  transition: transform 120ms ease;
+}
+
 .tapped{
   transform: rotate(90deg);
+  margin: 18px 14px;     /* reserves room so it won’t collide */
+  z-index: 2;
 }
+
