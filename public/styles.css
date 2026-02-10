@@ -412,6 +412,7 @@ body{
   padding: 14px 12px 22px;
   background: rgba(0,0,0,0.55);
   backdrop-filter: blur(2px);
+    touch-action: none;
 }
 
 .boardOverlayInner{
@@ -433,7 +434,9 @@ body{
   opacity: 0.35;
 }
 
-
+.boardOverlay .miniCard{
+  pointer-events: none;
+}
 
 
 
