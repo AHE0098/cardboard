@@ -1,4 +1,3 @@
-
 :root{
   --bg:#0b0f19;
   --panel:#11182a;
@@ -26,6 +25,7 @@ body{
 
 .view{display:flex;flex-direction:column;gap:12px}
 
+/* Old tile UI (kept harmless if still referenced somewhere) */
 .zoneTile{
   background:linear-gradient(180deg,var(--panel),var(--panel2));
   border:1px solid var(--border);
@@ -33,14 +33,10 @@ body{
   padding:12px;
   box-shadow: 0 10px 24px rgba(0,0,0,0.25);
 }
-
 .zoneHead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .zoneName{font-weight:800}
 .zoneMeta{color:var(--muted);font-size:12px}
-
-.previewRow{
-  display:flex;gap:8px;overflow:hidden;
-}
+.previewRow{display:flex;gap:8px;overflow:hidden;}
 .previewCard{
   width:42px;height:58px;border-radius:10px;
   border:1px solid var(--border);
@@ -48,7 +44,12 @@ body{
   display:flex;align-items:center;justify-content:center;
   color:var(--muted);font-weight:700;font-size:12px;
 }
+.zoneTile.dropTargetActive{
+  outline:2px solid var(--glow);
+  box-shadow: 0 0 0 6px rgba(130,180,255,0.12), 0 16px 32px rgba(0,0,0,0.35);
+}
 
+/* Old focus UI (kept harmless if still referenced somewhere) */
 .focusTop{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .backBtn{
   border:1px solid var(--border);
@@ -58,20 +59,17 @@ body{
   padding:10px 12px;
   font-weight:700;
 }
-
 .zoneDropHint{
   margin-top:8px;
   color:var(--muted);
   font-size:12px;
 }
-
 .grid{
   margin-top:10px;
   display:grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap:10px;
 }
-
 .card{
   height:130px;
   border-radius:18px;
@@ -89,34 +87,13 @@ body{
   touch-action:none;
 }
 
-.zoneTile.dropTargetActive{
-  outline:2px solid var(--glow);
-  box-shadow: 0 0 0 6px rgba(130,180,255,0.12), 0 16px 32px rgba(0,0,0,0.35);
-}
-
+/* Drag layer */
 .dragLayer{
   position:fixed;
   inset:0;
   pointer-events:none;
   z-index:9999;
 }
-
-.miniCard{
-  width:56px;
-  height:76px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background:rgba(255,255,255,0.04);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:900;
-  font-size:18px;
-  user-select:none;
-  touch-action:none;
-}
-.miniCard:active{ transform: translateY(1px); }
-
 
 .dragGhost{
   position:absolute;
@@ -136,6 +113,7 @@ body{
   transform: translate(-50%, -50%) rotate(-2deg);
 }
 
+/* ===== New board + invisible zones + fixed slot positions ===== */
 
 .board{
   min-height: calc(100vh - 90px);
@@ -144,17 +122,23 @@ body{
   gap:12px;
 }
 
+/* Hand sits at bottom + divider */
 .zone-hand{
-  margin-top:auto;       /* pushes hand to the bottom */
+  margin-top:auto;
+  padding-top:14px;
+  border-top:1px solid rgba(255,255,255,0.14);
 }
 
-
+/* Zones fill from bottom */
 .dropArea{
-  border:1px dashed rgba(255,255,255,0.10);
+  border:0;
   border-radius:18px;
   padding:10px;
-  min-height:110px;
-  background:rgba(255,255,255,0.02);
+  min-height:120px;
+  background:transparent;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end; /* bottom-fill */
 }
 
 .dropArea.active{
@@ -162,27 +146,45 @@ body{
   box-shadow: 0 0 0 6px rgba(130,180,255,0.10), 0 16px 32px rgba(0,0,0,0.25);
 }
 
-.row{
-  display:flex;
-  gap:12px;
-  flex-wrap:wrap;
-  align-items:flex-end;
+/* Fixed symmetric slots: cards fill left->right into reserved positions */
+.slotRow{
+  display:grid;
+  grid-template-columns: repeat(6, 56px); /* adjust slot count as you like */
+  justify-content:center;
+  gap:12px; /* reserves room so tapped cards don't collide */
+  align-items:end;
 }
 
-
-.handRow{
+.slot{
+  width:56px;
+  height:76px;
+  display:flex;
+  align-items:end;
   justify-content:center;
 }
 
+/* Universal card silhouette (always the same) */
 .miniCard{
+  width:56px;
+  height:76px;
+  border-radius:14px;
+  border:1px solid var(--border);
+  background:rgba(255,255,255,0.04);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight:900;
+  font-size:18px;
+  user-select:none;
+  touch-action:none;
   position:relative;
   will-change: transform;
   transition: transform 120ms ease;
 }
+.miniCard:active{ transform: translateY(1px); }
 
+/* Tap rotates inside its reserved slot */
 .tapped{
   transform: rotate(90deg);
-  margin: 18px 14px;     /* reserves room so it won’t collide */
-  z-index: 2;
+  z-index:2;
 }
-
