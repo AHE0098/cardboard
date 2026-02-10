@@ -42,29 +42,31 @@ if (inspector) {
 
 }
 
-  function renderInspector(zoneKey) {
+function renderInspector(zoneKey) {
   const zoneCards = state.zones[zoneKey];
+
+  // Create overlay
   const overlay = document.createElement("div");
   overlay.className = "inspectorOverlay";
-    overlay.style.position = "fixed";
-overlay.style.inset = "0";
-overlay.style.background = "rgba(0,0,0,0.92)";
-overlay.style.zIndex = "9998"; // behind close button
-overlay.style.display = "flex";
-overlay.style.alignItems = "center";
-overlay.style.overflowX = "auto";
-overlay.style.scrollSnapType = "x mandatory";
-overlay.style.webkitOverflowScrolling = "touch";
-overlay.style.pointerEvents = "auto";
 
- overlay.addEventListener("click", (e) => {
-  if (e.target === overlay) {
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) {
+      inspector = null;
+      render();
+    }
+  });
+
+  // Create close button
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "inspectorCloseBtn";
+  closeBtn.textContent = "✕";
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     inspector = null;
     render();
-  }
-});
+  });
 
-
+  // Create inspector content track
   const track = document.createElement("div");
   track.className = "inspectorTrack";
 
@@ -74,7 +76,7 @@ overlay.style.pointerEvents = "auto";
     empty.innerHTML = "<div>🗄️</div><p>No cards in this zone.</p>";
     track.appendChild(empty);
   } else {
-    zoneCards.forEach(id => {
+    zoneCards.forEach((id) => {
       const data = window.CARD_REPO?.[id] || {};
       const card = document.createElement("div");
       card.className = "inspectorCard";
@@ -103,22 +105,13 @@ overlay.style.pointerEvents = "auto";
       track.appendChild(card);
     });
   }
-const closeBtn = document.createElement("button");
-closeBtn.className = "inspectorCloseBtn";
-closeBtn.textContent = "✕";
-closeBtn.style.pointerEvents = "auto"; // <- ensure it's clickable
-closeBtn.style.zIndex = "9999"; // <- ensure it's above the overlay
-closeBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  inspector = null;
-  render();
-});
 
-overlay.appendChild(track);
-document.body.appendChild(overlay);
-document.body.appendChild(closeBtn); // <- outside the scrollable overlay
-
+  // Build hierarchy: closeBtn and track INSIDE overlay
+  overlay.appendChild(closeBtn);
+  overlay.appendChild(track);
+  document.body.appendChild(overlay);
 }
+
 
 
   function renderDropArea(zoneKey) {
