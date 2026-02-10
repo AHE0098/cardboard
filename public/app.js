@@ -46,10 +46,13 @@ if (inspector) {
   const zoneCards = state.zones[zoneKey];
   const overlay = document.createElement("div");
   overlay.className = "inspectorOverlay";
-  overlay.addEventListener("click", () => {
+ overlay.addEventListener("click", (e) => {
+  if (e.target === overlay) {
     inspector = null;
     render();
-  });
+  }
+});
+
 
   const track = document.createElement("div");
   track.className = "inspectorTrack";
