@@ -228,7 +228,7 @@ body{
   display: flex;
   align-items: center;
   overflow-x: auto;
-  pointer-events: none;
+  pointer-events: auto;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
 }
