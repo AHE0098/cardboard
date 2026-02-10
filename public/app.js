@@ -46,6 +46,17 @@ if (inspector) {
   const zoneCards = state.zones[zoneKey];
   const overlay = document.createElement("div");
   overlay.className = "inspectorOverlay";
+    overlay.style.position = "fixed";
+overlay.style.inset = "0";
+overlay.style.background = "rgba(0,0,0,0.92)";
+overlay.style.zIndex = "9998"; // behind close button
+overlay.style.display = "flex";
+overlay.style.alignItems = "center";
+overlay.style.overflowX = "auto";
+overlay.style.scrollSnapType = "x mandatory";
+overlay.style.webkitOverflowScrolling = "touch";
+overlay.style.pointerEvents = "auto";
+
  overlay.addEventListener("click", (e) => {
   if (e.target === overlay) {
     inspector = null;
@@ -95,11 +106,14 @@ if (inspector) {
 const closeBtn = document.createElement("button");
 closeBtn.className = "inspectorCloseBtn";
 closeBtn.textContent = "✕";
+closeBtn.style.pointerEvents = "auto"; // <- ensure it's clickable
+closeBtn.style.zIndex = "9999"; // <- ensure it's above the overlay
 closeBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   inspector = null;
   render();
 });
+
   overlay.appendChild(closeBtn);
   overlay.appendChild(track);
   document.body.appendChild(overlay);
