@@ -163,24 +163,46 @@ function renderBoardOverlay() {
   document.body.appendChild(wrap);
 }
 
-
 function render() {
   root.innerHTML = "";
 
-  const board = document.createElement("div");
-  board.className = "board";
+  if (view?.type === "focus" && view.zoneKey) {
+    root.appendChild(renderFocus(view.zoneKey));
+  } else {
+    // default
+    root.appendChild(renderOverview());
+  }
 
-  ZONES.forEach(z => board.appendChild(renderDropArea(z.key)));
-
-  root.appendChild(board);
-
+  // Inspector overlay handling stays global
   if (inspector) {
     renderInspector(inspector.zoneKey);
   } else {
-    removeInspectorOverlay();         
-    removeBoardOverlay();   
+    removeInspectorOverlay();
+    removeBoardOverlay();
     syncDropTargetHighlights(null);
   }
+}
+
+function renderOverview() {
+  const wrap = document.createElement("div");
+  wrap.className = "overview";
+
+  const tiles = document.createElement("div");
+  tiles.className = "zoneTiles";
+
+  ZONES.forEach(z => {
+    tiles.appendChild(renderZoneTile(z.key, z.label, true));
+  });
+
+  wrap.appendChild(tiles);
+
+  // (Optional) tiny hint row
+  const hint = document.createElement("div");
+  hint.className = "overviewHint";
+  hint.textContent = "Tap a zone to inspect. Double-tap a zone to focus.";
+  wrap.appendChild(hint);
+
+  return wrap;
 }
 
 
@@ -473,7 +495,8 @@ closeBtn.addEventListener("click", (e) => {
       card.dataset.cardId = String(id);
       
       const img = document.createElement("img");
-      img.src = data.image || "https://via.placeholder.com/200x280?text=Card";
+     img.src = getCardImgSrc(id);
+     img.onerror = () => { img.src = "https://via.placeholder.com/200x280?text=Card"; };
       card.appendChild(img);
 
       const name = document.createElement("div");
@@ -534,213 +557,167 @@ function renderDropArea(zoneKey, opts = {}) {
 
   const ids = state.zones[zoneKey];
 
-  // ===== HAND: render cards directly + fan layout =====
-  if (zoneKey === "hand") {
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-
-      const c = document.createElement("div");
-      c.className = "miniCard";
-      // c.textContent = id;              // ❌ remove
-      c.dataset.cardId = String(id);
-      c.dataset.fromZoneKey = zoneKey;
-
-      // ✅ inject image into silhouette frame
-      decorateMiniCardEl(c, id);
-
-      if (!overlay) {
-        c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-        c.addEventListener("click", (e) => e.stopPropagation());
-      }
-
-      if (state.tapped?.[String(id)]) c.classList.add("tapped");
-      if (state.tarped?.[String(id)]) c.classList.add("tarped");
-
-      row.appendChild(c);
-    }
-
-    layoutHandFan(row, ids);
-
-    area.appendChild(row);
-    return area;
-  }
-
-  // ===== NON-HAND =====
-  const minSlots = 6;
-  const slotCount = Math.max(minSlots, ids.length + 1);
-
-  for (let i = 0; i < slotCount; i++) {
-    const slot = document.createElement("div");
-    slot.className = "slot";
-
+ // ===== HAND: render cards directly + fan layout =====
+if (zoneKey === "hand") {
+  for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
-    if (id !== undefined) {
-      const c = document.createElement("div");
-      c.className = "miniCard";
-      // c.textContent = id;              // ❌ remove
-      c.dataset.cardId = String(id);
-      c.dataset.fromZoneKey = zoneKey;
-
-      // ✅ inject image
-      decorateMiniCardEl(c, id);
-
-      if (!overlay) {
-        c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-        c.addEventListener("click", (e) => e.stopPropagation());
-      }
-
-      if (!overlay) {
-        attachTapStates(c, id);
-      }
-
-      if (state.tapped?.[String(id)]) c.classList.add("tapped");
-      if (state.tarped?.[String(id)]) c.classList.add("tarped");
-
-      slot.appendChild(c);
-    }
-
-    row.appendChild(slot);
+    row.appendChild(makeMiniCardEl(id, zoneKey, { overlay }));
   }
+
+  layoutHandFan(row, ids);
 
   area.appendChild(row);
   return area;
 }
 
+// ===== NON-HAND =====
+const minSlots = 6;
+const slotCount = Math.max(minSlots, ids.length + 1);
 
+for (let i = 0; i < slotCount; i++) {
+  const slot = document.createElement("div");
+  slot.className = "slot";
 
-  function renderZoneTile(zoneKey, label, clickable) {
-    const tile = document.createElement("section");
-    tile.className = "zoneTile";
-    tile.dataset.zoneKey = zoneKey;
+  const id = ids[i];
+  if (id !== undefined) {
+    const c = makeMiniCardEl(id, zoneKey, { overlay });
 
-    const head = document.createElement("div");
-    head.className = "zoneHead";
+    // tapped/tarp toggles only on real board
+    if (!overlay) attachTapStates(c, id);
 
-    const left = document.createElement("div");
-    left.className = "zoneName";
-    left.textContent = label;
+    slot.appendChild(c);
+  }
 
-    const right = document.createElement("div");
-    right.className = "zoneMeta";
-    right.textContent = `${state.zones[zoneKey].length} cards`;
+  row.appendChild(slot);
+}
 
-    head.appendChild(left);
-    head.appendChild(right);
-
-    const preview = document.createElement("div");
-    preview.className = "previewRow";
-
-    const cards = state.zones[zoneKey];
-    const max = 9;
-    cards.slice(0, max).forEach(id => {
-      const p = document.createElement("div");
-p.className = "miniCard";
-p.textContent = id;
-p.dataset.cardId = String(id);
-p.dataset.fromZoneKey = zoneKey;
-if (state.tapped?.[String(id)]) p.classList.add("tapped");
-if (state.tarped?.[String(id)]) p.classList.add("tarped");
-p.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-p.addEventListener("click", (e) => e.stopPropagation());
-preview.appendChild(p);
-
-    });
-
-    tile.appendChild(head);
-    tile.appendChild(preview);
-
-  if (clickable) {
-  let lastTapAt = 0;
-  const dblMs = 320;
-
-  tile.addEventListener("click", () => {
-    if (dragging) return;
-
-    const now = performance.now();
-    if (now - lastTapAt <= dblMs) {
-      // double-tap confirmed
-      view = { type: "focus", zoneKey };
-      render();
-      lastTapAt = 0;
-    } else {
-      lastTapAt = now;
-    }
-  });
+area.appendChild(row);
+return area;
 }
 
 
+function renderZoneTile(zoneKey, label, clickable) {
+  const tile = document.createElement("section");
+  tile.className = "zoneTile";
+  tile.dataset.zoneKey = zoneKey;
 
-    return tile;
+  const head = document.createElement("div");
+  head.className = "zoneHead";
+
+  const left = document.createElement("div");
+  left.className = "zoneName";
+  left.textContent = label;
+
+  const right = document.createElement("div");
+  right.className = "zoneMeta";
+  right.textContent = `${state.zones[zoneKey].length} cards`;
+
+  head.appendChild(left);
+  head.appendChild(right);
+
+  const preview = document.createElement("div");
+  preview.className = "previewRow";
+
+  const cards = state.zones[zoneKey];
+  const max = 9;
+
+  cards.slice(0, max).forEach((id) => {
+    // Note: these will be draggable because overlay:false.
+    // If you *don’t* want drag from previews, set overlay:true and style them smaller.
+    const p = makeMiniCardEl(id, zoneKey, { overlay: true });
+    preview.appendChild(p);
+  });
+
+  tile.appendChild(head);
+  tile.appendChild(preview);
+
+  if (clickable) {
+    let lastTapAt = 0;
+    let singleTimer = null;
+    const dblMs = 320;
+
+    tile.addEventListener("click", () => {
+      if (dragging || inspectorDragging) return;
+
+      const now = performance.now();
+
+      // double tap
+      if (now - lastTapAt <= dblMs) {
+        if (singleTimer) clearTimeout(singleTimer);
+        singleTimer = null;
+        lastTapAt = 0;
+
+        inspector = null; // close inspector if open
+        removeInspectorOverlay();
+        view = { type: "focus", zoneKey };
+        render();
+        return;
+      }
+
+      // single tap (defer slightly in case it becomes a double)
+      lastTapAt = now;
+      if (singleTimer) clearTimeout(singleTimer);
+
+      singleTimer = setTimeout(() => {
+        singleTimer = null;
+        inspector = { zoneKey };
+        render();
+      }, dblMs);
+    });
   }
 
-  function renderFocus(zoneKey) {
-    const container = document.createElement("div");
+  return tile;
+}
+function renderFocus(zoneKey) {
+  const container = document.createElement("div");
+  container.className = "focusView";
 
-    const top = document.createElement("div");
-    top.className = "focusTop";
+  const top = document.createElement("div");
+  top.className = "focusTop";
 
-    const back = document.createElement("button");
-    back.className = "backBtn";
-    back.textContent = "Back";
-    back.addEventListener("click", () => {
-      view = { type: "overview" };
-      render();
-    });
+  const back = document.createElement("button");
+  back.className = "backBtn";
+  back.textContent = "Back";
+  back.addEventListener("click", () => {
+    view = { type: "overview" };
+    render();
+  });
 
-    const title = document.createElement("div");
-    title.style.display = "flex";
-    title.style.flexDirection = "column";
-    title.style.gap = "2px";
+  const title = document.createElement("div");
+  title.style.display = "flex";
+  title.style.flexDirection = "column";
+  title.style.gap = "2px";
 
-    const t1 = document.createElement("div");
-    t1.style.fontWeight = "900";
-    t1.style.fontSize = "18px";
-    t1.textContent = ZONES.find(z => z.key === zoneKey)?.label || zoneKey;
+  const t1 = document.createElement("div");
+  t1.style.fontWeight = "900";
+  t1.style.fontSize = "18px";
+  t1.textContent = ZONES.find(z => z.key === zoneKey)?.label || zoneKey;
 
-    const t2 = document.createElement("div");
-    t2.className = "zoneDropHint";
-    t2.textContent = "Press-hold a card, drag it onto the other zone.";
+  const t2 = document.createElement("div");
+  t2.className = "zoneDropHint";
+  t2.textContent = "Press-hold a card to drag. Drop onto another zone.";
 
-    title.appendChild(t1);
-    title.appendChild(t2);
+  title.appendChild(t1);
+  title.appendChild(t2);
 
-    top.appendChild(back);
-    top.appendChild(title);
+  top.appendChild(back);
+  top.appendChild(title);
+  container.appendChild(top);
 
-    container.appendChild(top);
+  // Board in focus: still show all zones as drop targets,
+  // but add a class to the focused one for styling.
+  const board = document.createElement("div");
+  board.className = "board focusBoard";
 
-    // show both zones as drop targets even in focus mode
-    const targets = document.createElement("div");
-    targets.style.display = "grid";
-    targets.style.gridTemplateColumns = "1fr 1fr 1fr";
-    targets.style.gap = "10px";
-    targets.style.marginTop = "12px";
+  ZONES.forEach(z => {
+    const area = renderDropArea(z.key);
+    if (z.key === zoneKey) area.classList.add("isFocusZone");
+    board.appendChild(area);
+  });
 
-    ZONES.forEach(z => {
-      const tile = renderZoneTile(z.key, z.label, false);
-      tile.style.cursor = "default";
-      targets.appendChild(tile);
-    });
-    container.appendChild(targets);
-
-    const grid = document.createElement("div");
-    grid.className = "grid";
-    state.zones[zoneKey].forEach(cardId => {
-      const el = document.createElement("div");
-      el.className = "card";
-      el.textContent = cardId;
-      el.dataset.cardId = String(cardId);
-      el.dataset.fromZoneKey = zoneKey;
-
-      // pointer-driven drag
-      el.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-
-      grid.appendChild(el);
-    });
-
-    container.appendChild(grid);
-    return container;
-  }
+  container.appendChild(board);
+  return container;
+}
 
   function onCardPointerDown(e) {
     e.preventDefault();
@@ -834,12 +811,13 @@ preview.appendChild(p);
     el.style.top = `${y}px`;
   }
 
-  function hitTestZone(x, y) {
-    const els = document.elementsFromPoint(x, y);
-    const zoneEl = els.find(n => n?.dataset?.zoneKey);
-    return zoneEl ? zoneEl.dataset.zoneKey : null;
-  }
+function hitTestZone(x, y) {
+  const els = document.elementsFromPoint(x, y);
 
+  // Prefer real board drop areas only
+  const area = els.find(n => n?.classList?.contains("dropArea") && n?.dataset?.zoneKey);
+  return area ? area.dataset.zoneKey : null;
+}
  function syncDropTargetHighlights(activeZoneKey) {
   document.querySelectorAll(".dropArea").forEach(area => {
     const z = area.dataset.zoneKey;
