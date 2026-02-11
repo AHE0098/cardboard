@@ -695,3 +695,73 @@ body{
 .miniPic{ z-index: 0; }
 .miniId{ z-index: 2; }
 
+/* ===== New overview layout ===== */
+.overview{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.zoneTiles{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.overviewHint{
+  color: var(--muted);
+  font-size: 12px;
+  text-align:center;
+  opacity: 0.9;
+  padding-bottom: 4px;
+}
+
+/* Slightly tighter previews in tiles (your miniCards are 56x76) */
+.zoneTile .previewRow{
+  gap: 10px;
+}
+.zoneTile .miniCard{
+  width: 44px;
+  height: 60px;
+  border-radius: 12px;
+}
+.zoneTile .miniId{
+  font-size: 10px;
+  left: 5px;
+  bottom: 5px;
+}
+
+/* Ensure tile taps aren’t hijacked by preview children */
+.zoneTile .previewRow{
+  pointer-events: none;
+}
+.zoneTile .zoneHead{
+  pointer-events: none;
+}
+
+/* But keep the tile itself clickable */
+.zoneTile{
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ===== Focus view polish ===== */
+.focusView{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.focusBoard{
+  height: auto;        /* let board decide */
+  min-height: 0;
+}
+
+/* Give focus zone a subtle “primary” feel */
+.isFocusZone{
+  background: rgba(255,255,255,0.02);
+  border-radius: 18px;
+}
+.isFocusZone.active{
+  outline: 2px solid var(--glow);
+}
