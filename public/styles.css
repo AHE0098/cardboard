@@ -8,6 +8,7 @@
   --glow:rgba(130,180,255,0.35);
   --cardW:56px;
   --handGap:12px;
+  --hand-overlap: 0.55;
 }
 
 *{box-sizing:border-box}
