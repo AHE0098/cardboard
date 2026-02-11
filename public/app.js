@@ -355,13 +355,16 @@ closeBtn.addEventListener("click", (e) => {
 
 attachInspectorLongPress(card, id, zoneKey);
 
-/* ✅ allow tap/untap from inspector too (not in hand) */
+/* allow tap/tarp from inspector too (not in hand) */
 if (zoneKey !== "hand") {
   attachTapStates(card, id);
 }
 
-track.appendChild(card);
+// ✅ add these:
+if (state.tapped?.[String(id)]) card.classList.add("tapped");
+if (state.tarped?.[String(id)]) card.classList.add("tarped");
 
+track.appendChild(card);
     });
   }
 
@@ -450,7 +453,8 @@ function renderDropArea(zoneKey, opts = {}) {
       }
 
       // Vis tapped-tilstand både på board og overlay (ren visual)
-      if (state.tapped?.[String(id)]) c.classList.add("tapped");
+    if (state.tapped?.[String(id)]) c.classList.add("tapped");
+    if (state.tarped?.[String(id)]) c.classList.add("tarped");
 
       slot.appendChild(c);
     }
