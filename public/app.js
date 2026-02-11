@@ -165,7 +165,8 @@ function renderBoardOverlay() {
 
 function render() {
   root.innerHTML = "";
-
+ document.body.classList.toggle("isFocus", view?.type === "focus");
+  document.body.classList.toggle("isOverview", view?.type !== "focus");
   if (view?.type === "focus" && view.zoneKey) {
     root.appendChild(renderFocus(view.zoneKey));
   } else {
