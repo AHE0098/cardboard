@@ -438,5 +438,63 @@ body{
   pointer-events: none;
 }
 
+/* ===== Hand fan (arc) layout ===== */
+
+:root{
+  /* Slideable overlap control: bigger = more overlap (tighter spread) */
+  --hand-overlap: 0.55; /* 0.25 wide spread -> 0.85 tight overlap */
+  --hand-card-w: 54px;  /* match your miniCard width */
+  --hand-card-h: 76px;  /* match your miniCard height */
+  --hand-arc-rx: 340px; /* horizontal radius */
+  --hand-arc-ry: 130px; /* vertical radius (curve depth) */
+  --hand-arc-y: 18px;   /* baseline lift of the arc inside hand zone */
+  --hand-line-gap: 18px;/* distance from arc line to top of cards */
+}
+
+/* Make the hand zone a clipping stage */
+.dropArea.zone-hand{
+  position: relative;
+  overflow: hidden;  /* key: lets >7 cards “disappear” off the curve */
+  padding-top: 22px; /* room for the curved demarkation line */
+  min-height: 140px; /* ensure enough vertical room for curve */
+}
+
+/* Replace the old straight slotRow visuals for hand */
+.dropArea.zone-hand .slotRow{
+  position: relative;
+  height: 110px;      /* stage height */
+  display: block;     /* stop flex row layout */
+}
+
+/* Fan container: we’ll render cards into slotRow, but make them absolute */
+.dropArea.zone-hand .miniCard{
+  position: absolute;
+  left: 50%;
+  bottom: 8px; /* base; actual vertical comes from transform translateY */
+  transform-origin: 50% 110%;
+  will-change: transform;
+  /* Optional: a little depth */
+  filter: drop-shadow(0 10px 18px rgba(0,0,0,0.35));
+}
+
+/* Curved demarkation line (arc) above the cards */
+.dropArea.zone-hand::before{
+  content:"";
+  position:absolute;
+  left: 50%;
+  bottom: calc(8px + var(--hand-card-h) + var(--hand-line-gap));
+  width: calc(var(--hand-arc-rx) * 2);
+  height: calc(var(--hand-arc-ry) * 2);
+  transform: translateX(-50%);
+  border-top: 1px solid rgba(255,255,255,0.16);
+  border-radius: 999px;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Keep your “tapped” rotation rule, but you probably won’t tap in hand anyway */
+.dropArea.zone-hand .miniCard.tapped{
+  transform: rotate(90deg); /* this will get overridden by inline transforms */
+}
 
 
