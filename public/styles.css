@@ -240,6 +240,10 @@ body{
   transform: rotate(90deg) translateY(-6px);
 }
 
+.tarped{
+  transform: rotate(180deg);
+}
+
 .inspectorOverlay {
   position: fixed;
   inset: 0;
@@ -581,6 +585,13 @@ body{
   transform-origin: 50% 60%;
   transition: transform 140ms cubic-bezier(.2,.9,.2,1);
 }
+
+.inspectorCard.tarped{
+  transform: rotate(180deg);
+  transform-origin: 50% 60%;
+  transition: transform 140ms cubic-bezier(.2,.9,.2,1);
+}
+
 
 /* === Bottom-lock the board by making .app fill the viewport === */
 html, body{
