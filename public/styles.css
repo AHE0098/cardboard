@@ -532,7 +532,7 @@ body{
 .board::before{
   content:"";
   display:block;
-  height: 10vh;   /* tune 6–14vh */
+  height: 0;   /* tune 6–14vh */
   flex: 0 0 auto;
 }
 
