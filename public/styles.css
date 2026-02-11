@@ -632,3 +632,23 @@ body{
   right: 0;
   bottom: 0;
 }
+
+/* === Permanents: never wrap, never grow taller; overflow clips to the right === */
+.dropArea.zone-permanents{
+  overflow: hidden;           /* ✅ box stays fixed */
+}
+
+.dropArea.zone-permanents .slotRow{
+  display: flex !important;   /* ✅ override the grid */
+  flex-wrap: nowrap;          /* ✅ no wrapping => no extra rows => no height growth */
+  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 12px;                  /* keep your current “spacing look” */
+  overflow: hidden;           /* ✅ clip the cards instead of pushing the zone taller */
+}
+
+/* keep slot wrappers from forcing weird layout */
+.dropArea.zone-permanents .slot{
+  flex: 0 0 auto;
+}
+
