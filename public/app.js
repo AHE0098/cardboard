@@ -353,8 +353,14 @@ closeBtn.addEventListener("click", (e) => {
       card.appendChild(idTag);
 
 attachInspectorLongPress(card, id, zoneKey);
-      
-      track.appendChild(card);
+
+/* ✅ allow tap/untap from inspector too (not in hand) */
+if (zoneKey !== "hand") {
+  attachDoubleTapToToggleTapped(card, id);
+}
+
+track.appendChild(card);
+
     });
   }
 
@@ -699,7 +705,7 @@ function attachDoubleTapToToggleTapped(el, cardId) {
   const dblMs = 380;
 
   el.addEventListener("click", () => {
-    if (dragging) return;
+    if (dragging || inspectorDragging) return;
 
     const now = performance.now();
     if (now - lastTapAt <= dblMs) {
