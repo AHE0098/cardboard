@@ -34,6 +34,71 @@ function removeInspectorOverlay() {
   if (existing) existing.remove();
 }
 
+function layoutHandFan(slotRowEl, cardIds) {
+  // Tweak these constants to taste (they map to CSS vars too)
+  const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
+
+  const rx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-rx")) || 340;
+  const ry = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-ry")) || 130;
+  const arcY = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-y")) || 18;
+
+  // The “nice” spread for up to 7 cards
+  const niceMax = 7;
+  const n = cardIds.length;
+
+  // Angle range for the "nice" portion (degrees)
+  const baseRange = 42; // total spread (~-21..+21) at overlap ~0.55
+  const range = baseRange * (1.15 - overlap); // higher overlap -> smaller range
+
+  // For >7, keep the first 7 nicely centered, and let the rest march to the right
+  const niceN = Math.min(n, niceMax);
+  const startIdx = 0;
+
+  // Centering for the nice set
+  const centerNice = (niceN - 1) / 2;
+
+  // Step for angles inside the nice range
+  const niceStep = niceN > 1 ? (range / centerNice) : 0;
+
+  // Extra cards: extend angles to the right; overlap controls how fast they “fall away”
+  const extraStep = 7.5 * (0.95 - overlap); // smaller overlap => faster spread; larger => tighter
+
+  // Apply transform to each .miniCard in slotRow order
+  const cards = Array.from(slotRowEl.querySelectorAll(".miniCard"));
+  cards.forEach((el, i) => {
+    // Base index for curve
+    let thetaDeg;
+    if (i < niceN) {
+      thetaDeg = (i - centerNice) * niceStep; // centered fan
+    } else {
+      const extra = i - (niceN - 1);
+      thetaDeg = (niceN - 1 - centerNice) * niceStep + extra * extraStep; // keep going right
+    }
+
+    const theta = (thetaDeg * Math.PI) / 180;
+
+    // Parametric ellipse: x = rx*sin(theta), y = ry*(1 - cos(theta))
+    // y grows downward as theta increases; perfect for “disappear down-right”
+    const x = rx * Math.sin(theta);
+    const y = ry * (1 - Math.cos(theta)) + arcY;
+
+    // Rotate slightly to match curve
+    const rot = thetaDeg * 0.9;
+
+    // Z-order: later cards should sit on top (typical hand feel)
+    el.style.zIndex = String(1000 + i);
+
+    // Anchor at center then move to arc point, then rotate.
+    // translate(-50%,0) pulls element center to the 50% left anchor.
+    el.style.transform = `translate(-50%, 0) translate(${x}px, ${y}px) rotate(${rot}deg)`;
+
+    // Optional: tiny scale taper for depth, feels "globe eye"
+    // const scale = 1 - Math.min(Math.abs(thetaDeg) / 140, 0.06);
+    // el.style.transform += ` scale(${scale})`;
+  });
+}
+
+  
 function renderBoardOverlay() {
   removeBoardOverlay();
 
@@ -298,6 +363,7 @@ attachInspectorLongPress(card, id, zoneKey);
   overlay.appendChild(track);
   document.body.appendChild(overlay);
 }
+  
 function renderDropArea(zoneKey, opts = {}) {
   const { overlay = false } = opts;
 
@@ -318,7 +384,38 @@ function renderDropArea(zoneKey, opts = {}) {
   row.className = "slotRow";
 
   const ids = state.zones[zoneKey];
-  const minSlots = (zoneKey === "hand") ? 7 : 6;
+
+  // ===== HAND: render cards directly + fan layout =====
+  if (zoneKey === "hand") {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+
+      const c = document.createElement("div");
+      c.className = "miniCard";
+      c.textContent = id;
+      c.dataset.cardId = String(id);
+      c.dataset.fromZoneKey = zoneKey;
+
+      if (!overlay) {
+        c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+        c.addEventListener("click", (e) => e.stopPropagation());
+      }
+
+      // Vis tapped-tilstand både på board og overlay (ren visual)
+      if (state.tapped?.[String(id)]) c.classList.add("tapped");
+
+      row.appendChild(c);
+    }
+
+    // ✅ ADD THIS HERE (after cards exist)
+    layoutHandFan(row, ids);
+
+    area.appendChild(row);
+    return area;
+  }
+
+  // ===== NON-HAND: keep your slot logic =====
+  const minSlots = 6;
   const slotCount = Math.max(minSlots, ids.length + 1);
 
   for (let i = 0; i < slotCount; i++) {
@@ -340,7 +437,7 @@ function renderDropArea(zoneKey, opts = {}) {
       }
 
       // Tapped kun udenfor hand og kun på "rigtige" board
-      if (!overlay && zoneKey !== "hand") {
+      if (!overlay) {
         attachDoubleTapToToggleTapped(c, id);
       }
 
@@ -356,6 +453,7 @@ function renderDropArea(zoneKey, opts = {}) {
   area.appendChild(row);
   return area;
 }
+
 
 
   function renderZoneTile(zoneKey, label, clickable) {
@@ -617,6 +715,7 @@ function attachDoubleTapToToggleTapped(el, cardId) {
     }
   });
 }
+
 
 
   
