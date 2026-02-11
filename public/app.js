@@ -25,6 +25,47 @@ const state = structuredClone(window.DEMO_STATE || {
   { key: "hand", label: "Hand" }
 ];
 
+
+function getCardImgSrc(cardId) {
+  return `/cards/image${cardId}.png`; // matches /public/cards/imageXYZ.png
+}
+
+function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
+  const c = document.createElement("div");
+  c.className = "miniCard";
+  c.dataset.cardId = String(cardId);
+  c.dataset.fromZoneKey = fromZoneKey;
+
+  const pic = document.createElement("div");
+  pic.className = "miniPic";
+
+  const img = document.createElement("img");
+  img.className = "miniImg";
+  img.alt = "";
+  img.draggable = false;
+  img.onload = () => img.classList.add("isLoaded");
+  img.onerror = () => img.remove(); // if missing, you just see silhouette
+  img.src = getCardImgSrc(cardId);
+
+  pic.appendChild(img);
+  c.appendChild(pic);
+
+  const tag = document.createElement("div");
+  tag.className = "miniId";
+  tag.textContent = String(cardId);
+  c.appendChild(tag);
+
+  if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
+  if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
+
+  if (!overlay) {
+    c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+    c.addEventListener("click", (e) => e.stopPropagation());
+  }
+
+  return c;
+}
+  
 function removeInspectorOverlay() {
   const existing = document.getElementById("inspectorOverlay");
   if (existing) existing.remove();
@@ -481,7 +522,6 @@ function renderDropArea(zoneKey, opts = {}) {
   area.dataset.zoneKey = zoneKey;
   area.classList.add(`zone-${zoneKey}`);
 
-  // Kun klik-to-inspect på "rigtige" board (ikke overlay)
   if (!overlay) {
     area.addEventListener("click", () => {
       inspector = { zoneKey };
@@ -501,30 +541,31 @@ function renderDropArea(zoneKey, opts = {}) {
 
       const c = document.createElement("div");
       c.className = "miniCard";
-      c.textContent = id;
+      // c.textContent = id;              // ❌ remove
       c.dataset.cardId = String(id);
       c.dataset.fromZoneKey = zoneKey;
+
+      // ✅ inject image into silhouette frame
+      decorateMiniCardEl(c, id);
 
       if (!overlay) {
         c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
         c.addEventListener("click", (e) => e.stopPropagation());
       }
 
-      // Vis tapped-tilstand både på board og overlay (ren visual)
       if (state.tapped?.[String(id)]) c.classList.add("tapped");
       if (state.tarped?.[String(id)]) c.classList.add("tarped");
 
       row.appendChild(c);
     }
 
-    // ✅ ADD THIS HERE (after cards exist)
     layoutHandFan(row, ids);
 
     area.appendChild(row);
     return area;
   }
 
-  // ===== NON-HAND: keep your slot logic =====
+  // ===== NON-HAND =====
   const minSlots = 6;
   const slotCount = Math.max(minSlots, ids.length + 1);
 
@@ -536,24 +577,24 @@ function renderDropArea(zoneKey, opts = {}) {
     if (id !== undefined) {
       const c = document.createElement("div");
       c.className = "miniCard";
-      c.textContent = id;
+      // c.textContent = id;              // ❌ remove
       c.dataset.cardId = String(id);
       c.dataset.fromZoneKey = zoneKey;
 
-      // Drag kun på "rigtige" board (ikke overlay)
+      // ✅ inject image
+      decorateMiniCardEl(c, id);
+
       if (!overlay) {
         c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
         c.addEventListener("click", (e) => e.stopPropagation());
       }
 
-      // Tapped kun udenfor hand og kun på "rigtige" board
       if (!overlay) {
         attachTapStates(c, id);
       }
 
-      // Vis tapped-tilstand både på board og overlay (ren visual)
-    if (state.tapped?.[String(id)]) c.classList.add("tapped");
-    if (state.tarped?.[String(id)]) c.classList.add("tarped");
+      if (state.tapped?.[String(id)]) c.classList.add("tapped");
+      if (state.tarped?.[String(id)]) c.classList.add("tarped");
 
       slot.appendChild(c);
     }
