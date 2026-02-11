@@ -6,7 +6,8 @@
 const state = structuredClone(window.DEMO_STATE || {
   playerName: "Player 1",
   zones: { hand: [1,2,3], lands: [], permanents: [] },
-  tapped: {}
+  tapped: {},
+  tarped: {}
 });
 
 
@@ -356,7 +357,7 @@ attachInspectorLongPress(card, id, zoneKey);
 
 /* ✅ allow tap/untap from inspector too (not in hand) */
 if (zoneKey !== "hand") {
-  attachDoubleTapToToggleTapped(card, id);
+  attachTapStates(card, id);
 }
 
 track.appendChild(card);
@@ -409,6 +410,7 @@ function renderDropArea(zoneKey, opts = {}) {
 
       // Vis tapped-tilstand både på board og overlay (ren visual)
       if (state.tapped?.[String(id)]) c.classList.add("tapped");
+      if (state.tarped?.[String(id)]) c.classList.add("tarped");
 
       row.appendChild(c);
     }
@@ -444,7 +446,7 @@ function renderDropArea(zoneKey, opts = {}) {
 
       // Tapped kun udenfor hand og kun på "rigtige" board
       if (!overlay) {
-        attachDoubleTapToToggleTapped(c, id);
+        attachTapStates(c, id);
       }
 
       // Vis tapped-tilstand både på board og overlay (ren visual)
@@ -700,27 +702,50 @@ preview.appendChild(p);
 }
 
 
-function attachDoubleTapToToggleTapped(el, cardId) {
-  let lastTapAt = 0;
-  const dblMs = 380;
+function attachTapStates(el, cardId) {
+  let tapCount = 0;
+  let timer = null;
+
+  const windowMs = 420; // time window to detect 2 vs 3 taps
 
   el.addEventListener("click", () => {
     if (dragging || inspectorDragging) return;
 
-    const now = performance.now();
-    if (now - lastTapAt <= dblMs) {
+    tapCount++;
+
+    // restart the decision timer on every tap
+    if (timer) clearTimeout(timer);
+
+    timer = setTimeout(() => {
       const key = String(cardId);
-      state.tapped[key] = !state.tapped[key];
+      state.tapped ||= {};
+      state.tarped ||= {};
 
-      // quick visual toggle without full render
-      el.classList.toggle("tapped", !!state.tapped[key]);
+      // Resolve tapCount into action
+      if (tapCount >= 3) {
+        // TRIPLE TAP: toggle tarped, clear tapped
+        const next = !state.tarped[key];
+        state.tarped[key] = next;
+        state.tapped[key] = false;
 
-      lastTapAt = 0;
-    } else {
-      lastTapAt = now;
-    }
+        el.classList.toggle("tarped", next);
+        el.classList.remove("tapped");
+      } else if (tapCount === 2) {
+        // DOUBLE TAP: toggle tapped, clear tarped
+        const next = !state.tapped[key];
+        state.tapped[key] = next;
+        state.tarped[key] = false;
+
+        el.classList.toggle("tapped", next);
+        el.classList.remove("tarped");
+      }
+
+      tapCount = 0;
+      timer = null;
+    }, windowMs);
   });
 }
+
 
 
 
