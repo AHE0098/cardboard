@@ -619,4 +619,16 @@ body{
   justify-content: flex-end;  /* ✅ board goes to bottom */
 }
 
+/* === Hard-pin the board to the bottom of the view === */
+.view{
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
 
+#root{
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
