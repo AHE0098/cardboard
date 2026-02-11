@@ -14,7 +14,7 @@ const state = structuredClone(window.DEMO_STATE || {
 
   subtitle.textContent = state.playerName;
 
-  let view = { type: "overview" }; // or {type:"focus", zoneKey:"lands"}
+  let view = { type: "focus", zoneKey: "hand" }; // or {type:"focus", zoneKey:"lands"}
   let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
   let inspector = null;
   let inspectorDragging = null;
