@@ -582,23 +582,30 @@ body{
   transition: transform 140ms cubic-bezier(.2,.9,.2,1);
 }
 
-/* === Force app layout to fill the viewport and bottom-align the view === */
+/* === Bottom-lock the board by making .app fill the viewport === */
+html, body{
+  height: 100%;
+}
+
 body{
-  min-height: 100vh;
-  display: flex;
+  min-height: 100dvh;
+  display: block; /* ensure no flex row weirdness */
 }
 
+/* Keep your centering, but make it a full-height flex column */
 .app{
-  width: 100%;
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 
+/* .view becomes the flexible "spacer" under the topbar */
 .view{
-  flex: 1;                    /* take remaining space under topbar */
+  flex: 1;
+  min-height: 0;              /* important in flex layouts */
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;  /* ✅ put board at bottom */
-  gap: 12px;                  /* keep your spacing */
+  justify-content: flex-end;  /* ✅ board goes to bottom */
 }
+
+
