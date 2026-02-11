@@ -582,3 +582,23 @@ body{
   transition: transform 140ms cubic-bezier(.2,.9,.2,1);
 }
 
+/* === Force app layout to fill the viewport and bottom-align the view === */
+body{
+  min-height: 100vh;
+  display: flex;
+}
+
+.app{
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.view{
+  flex: 1;                    /* take remaining space under topbar */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;  /* ✅ put board at bottom */
+  gap: 12px;                  /* keep your spacing */
+}
