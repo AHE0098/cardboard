@@ -498,6 +498,8 @@ p.className = "miniCard";
 p.textContent = id;
 p.dataset.cardId = String(id);
 p.dataset.fromZoneKey = zoneKey;
+if (state.tapped?.[String(id)]) p.classList.add("tapped");
+if (state.tarped?.[String(id)]) p.classList.add("tarped");
 p.addEventListener("pointerdown", onCardPointerDown, { passive: false });
 p.addEventListener("click", (e) => e.stopPropagation());
 preview.appendChild(p);
