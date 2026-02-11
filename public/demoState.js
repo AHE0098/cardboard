@@ -1,9 +1,9 @@
 window.DEMO_STATE = {
   playerName: "Player 1",
   zones: {
-    hand: [1, 2, 3, 4, 5, 6, 7],
-    lands: [21, 22, 23],
-    permanents: [31, 32]
+    hand: [37, 40, 41, 42, 43, 44, 45],
+    lands: [55, 56, 57],
+    permanents: [40, 41]
   },
-  tapped: {} // e.g. { "21": true }
+  tapped: {} // e.g. { "55": true }
 };
