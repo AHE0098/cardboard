@@ -55,6 +55,19 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   tag.textContent = String(cardId);
   c.appendChild(tag);
 
+  const tag = document.createElement("div");
+tag.className = "miniId";
+tag.textContent = String(cardId);
+c.appendChild(tag);
+
+const data = window.CARD_REPO?.[cardId];
+if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+  const pt = document.createElement("div");
+  pt.className = "miniPT";
+  pt.textContent = `${data.power}|${data.toughness}`;
+  c.appendChild(pt);
+}
+
   if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
   if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
 
@@ -505,12 +518,12 @@ closeBtn.addEventListener("click", (e) => {
       name.textContent = data.name || `Card ${id}`;
       card.appendChild(name);
 
-      if (data.power !== undefined) {
-        const stats = document.createElement("div");
-        stats.className = "inspectorStats";
-        stats.textContent = `${data.power}/${data.toughness}`;
-        card.appendChild(stats);
-      }
+     if (data.power !== undefined) {
+  const pt = document.createElement("div");
+  pt.className = "inspectorPT";
+  pt.textContent = `${data.power}|${data.toughness}`;
+  card.appendChild(pt);
+}
 
       const idTag = document.createElement("div");
       idTag.className = "inspectorId";
