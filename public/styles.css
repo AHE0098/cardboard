@@ -8,7 +8,6 @@
   --glow:rgba(130,180,255,0.35);
   --cardW:56px;
   --handGap:12px;
-  --hand-overlap: 0.55;
 }
 
 *{box-sizing:border-box}
@@ -446,18 +445,18 @@ body{
   --hand-overlap: 0.55; /* 0.25 wide spread -> 0.85 tight overlap */
   --hand-card-w: 54px;  /* match your miniCard width */
   --hand-card-h: 76px;  /* match your miniCard height */
-  --hand-arc-rx: 340px; /* horizontal radius */
-  --hand-arc-ry: 130px; /* vertical radius (curve depth) */
-  --hand-arc-y: 18px;   /* baseline lift of the arc inside hand zone */
-  --hand-line-gap: 18px;/* distance from arc line to top of cards */
+  --hand-arc-rx: 280px; /* horizontal radius */
+  --hand-arc-ry: 190px; /* vertical radius (curve depth) */
+  --hand-arc-y: 22px;   /* baseline lift of the arc inside hand zone */
+  --hand-line-gap: 34px;/* distance from arc line to top of cards */
 }
 
 /* Make the hand zone a clipping stage */
 .dropArea.zone-hand{
   position: relative;
   overflow: hidden;  /* key: lets >7 cards “disappear” off the curve */
-  padding-top: 22px; /* room for the curved demarkation line */
-  min-height: 140px; /* ensure enough vertical room for curve */
+  padding-top: 28px; /* room for the curved demarkation line */
+  min-height: 150px; /* ensure enough vertical room for curve */
 }
 
 /* Replace the old straight slotRow visuals for hand */
@@ -471,7 +470,7 @@ body{
 .dropArea.zone-hand .miniCard{
   position: absolute;
   left: 50%;
-  bottom: 8px; /* base; actual vertical comes from transform translateY */
+  bottom: 16px; /* base; actual vertical comes from transform translateY */
   transform-origin: 50% 110%;
   will-change: transform;
   /* Optional: a little depth */
@@ -483,14 +482,31 @@ body{
   content:"";
   position:absolute;
   left: 50%;
-  bottom: calc(8px + var(--hand-card-h) + var(--hand-line-gap));
-  width: calc(var(--hand-arc-rx) * 2);
-  height: calc(var(--hand-arc-ry) * 2);
+  bottom: calc(16px + var(--hand-card-h) + var(--hand-line-gap)); /* note bottom=16px */
+  width: calc(var(--hand-arc-rx) * 2.2);  /* a bit wider than the card arc */
+  height: calc(var(--hand-arc-ry) * 2.2); /* a bit larger radius => further out */
   transform: translateX(-50%);
-  border-top: 1px solid rgba(255,255,255,0.16);
+  border-top: 1px solid rgba(255,255,255,0.18);
   border-radius: 999px;
   opacity: 0.9;
   pointer-events: none;
+}
+
+/* Curved "cap" that hides the square top edge and sells the zone */
+.dropArea.zone-hand::after{
+  content:"";
+  position:absolute;
+  left:50%;
+  bottom: calc(16px + var(--hand-card-h) + 6px); /* sits just above cards */
+  width: calc(var(--hand-arc-rx) * 2.4);
+  height: calc(var(--hand-arc-ry) * 2.4);
+  transform: translateX(-50%);
+  border-radius: 999px;
+
+  /* This draws a soft curved panel edge */
+ box-shadow:
+  0 0 0 999px var(--panel); /* match your panel/bg; tweak if needed */
+  pointer-events:none;
 }
 
 /* Keep your “tapped” rotation rule, but you probably won’t tap in hand anyway */
