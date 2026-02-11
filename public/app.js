@@ -70,7 +70,8 @@ function render() {
   if (inspector) {
     renderInspector(inspector.zoneKey);
   } else {
-    removeInspectorOverlay();          // <-- add this line
+    removeInspectorOverlay();         
+    removeBoardOverlay();   
     syncDropTargetHighlights(null);
   }
 }
@@ -297,63 +298,62 @@ attachInspectorLongPress(card, id, zoneKey);
   overlay.appendChild(track);
   document.body.appendChild(overlay);
 }
-
-
-
-  function renderDropArea(zoneKey, opts = {}) {
+function renderDropArea(zoneKey, opts = {}) {
   const { overlay = false } = opts;
-const area = document.createElement("section");
-area.className = "dropArea";
-area.dataset.zoneKey = zoneKey;
-area.classList.add(`zone-${zoneKey}`);
-if (!opts.overlay) {
-  area.addEventListener("click", () => {
-    inspector = { zoneKey };
-    render();
-  });
-});
 
+  const area = document.createElement("section");
+  area.className = "dropArea";
+  area.dataset.zoneKey = zoneKey;
+  area.classList.add(`zone-${zoneKey}`);
 
-const row = document.createElement("div");
-row.className = "slotRow";
-
-const ids = state.zones[zoneKey];
-const minSlots = (zoneKey === "hand") ? 7 : 6;
-const slotCount = Math.max(minSlots, ids.length + 1);
-    
-for (let i = 0; i < slotCount; i++) {
-  const slot = document.createElement("div");
-  slot.className = "slot";
-
-  const id = ids[i];
-  if (id !== undefined) {
-    const c = document.createElement("div");
-    c.className = "miniCard";
-    c.textContent = id;
-    c.dataset.cardId = String(id);
-    c.dataset.fromZoneKey = zoneKey;
-
-    // drag
-if (!opts.overlay) {
-  c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-  c.addEventListener("click", (e) => e.stopPropagation());
-}
-    // double-tap to toggle tapped (non-hand)
-if (!opts.overlay && zoneKey !== "hand") {
-  attachDoubleTapToToggleTapped(c, id);
-  if (state.tapped?.[String(id)]) c.classList.add("tapped");
-} else {
-  if (state.tapped?.[String(id)]) c.classList.add("tapped");
-}
-
-    slot.appendChild(c);
+  // Kun klik-to-inspect på "rigtige" board (ikke overlay)
+  if (!overlay) {
+    area.addEventListener("click", () => {
+      inspector = { zoneKey };
+      render();
+    });
   }
 
-  row.appendChild(slot);
-}
+  const row = document.createElement("div");
+  row.className = "slotRow";
 
-area.appendChild(row);
+  const ids = state.zones[zoneKey];
+  const minSlots = (zoneKey === "hand") ? 7 : 6;
+  const slotCount = Math.max(minSlots, ids.length + 1);
 
+  for (let i = 0; i < slotCount; i++) {
+    const slot = document.createElement("div");
+    slot.className = "slot";
+
+    const id = ids[i];
+    if (id !== undefined) {
+      const c = document.createElement("div");
+      c.className = "miniCard";
+      c.textContent = id;
+      c.dataset.cardId = String(id);
+      c.dataset.fromZoneKey = zoneKey;
+
+      // Drag kun på "rigtige" board (ikke overlay)
+      if (!overlay) {
+        c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+        c.addEventListener("click", (e) => e.stopPropagation());
+      }
+
+      // Tapped kun udenfor hand og kun på "rigtige" board
+      if (!overlay && zoneKey !== "hand") {
+        attachDoubleTapToToggleTapped(c, id);
+      }
+
+      // Vis tapped-tilstand både på board og overlay (ren visual)
+      if (state.tapped?.[String(id)]) c.classList.add("tapped");
+
+      slot.appendChild(c);
+    }
+
+    row.appendChild(slot);
+  }
+
+  area.appendChild(row);
   return area;
 }
 
