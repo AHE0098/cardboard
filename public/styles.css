@@ -626,7 +626,13 @@ body{
   min-height: 0;
 }
 
+/* default: let overview flow normally */
 #root{
+  position: static;
+}
+
+/* only pin in focus mode */
+body.isFocus #root{
   position: absolute;
   left: 0;
   right: 0;
@@ -764,4 +770,9 @@ body{
 }
 .isFocusZone.active{
   outline: 2px solid var(--glow);
+}
+
+.zoneTile .miniId{
+  transform: scale(0.92);
+  transform-origin: left bottom;
 }
