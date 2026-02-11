@@ -127,7 +127,13 @@ body{
   padding-bottom: 6px;        /* optional: breathing from screen edge */
 }
 
-
+/* Make the main view fill the screen and push content to the bottom */
+.view{
+  min-height: calc(100vh - 80px); /* 80px ≈ topbar + app padding; adjust if needed */
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;       /* ✅ board goes to bottom */
+}
 
 /* Zones fill from bottom */
 .dropArea{
