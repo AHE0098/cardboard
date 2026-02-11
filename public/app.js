@@ -169,14 +169,60 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
   let holdTimer = null;
   let lifted = false;
 
+  // NEW: reorder state
+  let reordering = false;
+  let start = null;
+  let trackEl = null;
+  let overlayEl = null;
+
+  // helper for reorder hit-testing
+  const reorderAtPointer = (clientX) => {
+    if (!trackEl) return;
+
+    const cards = Array.from(trackEl.querySelectorAll(".inspectorCard"));
+    const self = cardEl;
+
+    // find nearest card by x midpoints
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const c of cards) {
+      if (c === self) continue;
+      const r = c.getBoundingClientRect();
+      const mid = r.left + r.width / 2;
+      const d = Math.abs(clientX - mid);
+      if (d < bestDist) {
+        bestDist = d;
+        best = c;
+      }
+    }
+
+    if (!best) return;
+
+    const br = best.getBoundingClientRect();
+    const insertBefore = clientX < (br.left + br.width / 2);
+
+    // move DOM node (instant visual reorder)
+    if (insertBefore) {
+      trackEl.insertBefore(self, best);
+    } else {
+      trackEl.insertBefore(self, best.nextSibling);
+    }
+  };
+
   cardEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
 
     const pointerId = e.pointerId;
     cardEl.setPointerCapture(pointerId);
 
-    const start = { x: e.clientX, y: e.clientY };
+    start = { x: e.clientX, y: e.clientY };
+
     lifted = false;
+    reordering = false;
+
+    overlayEl = document.getElementById("inspectorOverlay");
+    trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
 
     const cancel = () => {
       clearTimeout(holdTimer);
@@ -184,11 +230,15 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       cardEl.removeEventListener("pointermove", onMove);
       cardEl.removeEventListener("pointerup", onUp);
       cardEl.removeEventListener("pointercancel", onCancel);
+      cardEl.style.transform = "";
+      cardEl.style.zIndex = "";
+      cardEl.style.opacity = "";
     };
 
     const lift = () => {
+      if (reordering) return;     // ✅ don’t lift if we’re reordering
       lifted = true;
-      
+
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
       ghost.textContent = cardId;
@@ -196,14 +246,13 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       positionGhost(ghost, e.clientX, e.clientY);
 
       inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-showDock(true);           // you can remove dock entirely later
-renderBoardOverlay();     // <-- NEW
-syncDropTargetHighlights(null);
+      showDock(true);
+      renderBoardOverlay();
+      syncDropTargetHighlights(null);
 
       if (navigator.vibrate) navigator.vibrate(10);
     };
 
-    // user asked 2–3 seconds: pick 2200ms
     holdTimer = setTimeout(lift, 2200);
 
     const onMove = (ev) => {
@@ -212,15 +261,38 @@ syncDropTargetHighlights(null);
       const dx = ev.clientX - start.x;
       const dy = ev.clientY - start.y;
 
-      // if they move a lot before lift, cancel the long-press
-      if (!lifted && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-        clearTimeout(holdTimer);
+      // If we haven't lifted yet, decide whether to reorder
+      if (!lifted && !reordering) {
+        // horizontal intent => reorder
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+          reordering = true;
+          clearTimeout(holdTimer);             // ✅ cancel long-press lift
+          if (overlayEl) {
+            overlayEl.style.overflowX = "hidden"; // ✅ stop scroll fighting
+            overlayEl.classList.add("dragging");
+          }
+          cardEl.style.zIndex = "10010";
+          cardEl.style.opacity = "0.85";
+        }
+
+        // If they move a lot vertically, cancel lift like before
+        if (!reordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+          clearTimeout(holdTimer);
+        }
       }
 
+      // Reorder mode: drag + swap positions
+      if (reordering) {
+        cardEl.style.transform = `translateX(${dx}px)`;
+        reorderAtPointer(ev.clientX);
+        return;
+      }
+
+      // Existing inspector "lifted ghost" drag-to-zone
       if (inspectorDragging?.ghostEl) {
         positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
-const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-syncDropTargetHighlights(overZoneKey);
+        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+        syncDropTargetHighlights(overZoneKey);
       }
     };
 
@@ -228,26 +300,46 @@ syncDropTargetHighlights(overZoneKey);
       ev.preventDefault();
       clearTimeout(holdTimer);
 
-      
-      if (inspectorDragging) {
-       const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+      // ✅ If reordering: commit DOM order to state and re-render board+inspector
+      if (reordering) {
+        if (overlayEl) {
+          overlayEl.style.overflowX = "auto";
+          overlayEl.classList.remove("dragging");
+        }
 
-        // cleanup ghost
+        // commit new order from DOM
+        const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
+          .map(el => Number(el.dataset.cardId))
+          .filter(n => Number.isFinite(n));
+
+        state.zones[fromZoneKey] = ids;
+
+        // reset styles
+        cardEl.style.transform = "";
+        cardEl.style.zIndex = "";
+        cardEl.style.opacity = "";
+
+        // keep inspector open, refresh everything
+        render();
+        cancel();
+        return;
+      }
+
+      // Existing drag-to-zone drop
+      if (inspectorDragging) {
+        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+
         const g = inspectorDragging.ghostEl;
         if (g && g.parentNode) g.parentNode.removeChild(g);
 
+        removeBoardOverlay();
+        syncDropTargetHighlights(null);
 
-  removeBoardOverlay();                 // <-- HER
-  syncDropTargetHighlights(null);        // <-- HER
-        
-        // move if dropped on a dock zone
-       if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
-
+        if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
 
         inspectorDragging = null;
         showDock(false);
 
-        // keep inspector open, but re-render everything
         render();
       }
 
@@ -258,13 +350,18 @@ syncDropTargetHighlights(overZoneKey);
       ev.preventDefault();
       clearTimeout(holdTimer);
 
+      if (overlayEl) {
+        overlayEl.style.overflowX = "auto";
+        overlayEl.classList.remove("dragging");
+      }
+
       if (inspectorDragging) {
         const g = inspectorDragging.ghostEl;
         if (g && g.parentNode) g.parentNode.removeChild(g);
 
-  removeBoardOverlay();                 // <-- HER
-  syncDropTargetHighlights(null);        // <-- HER
-        
+        removeBoardOverlay();
+        syncDropTargetHighlights(null);
+
         inspectorDragging = null;
         showDock(false);
         render();
@@ -278,6 +375,7 @@ syncDropTargetHighlights(overZoneKey);
     cardEl.addEventListener("pointercancel", onCancel, { passive: false });
   }, { passive: false });
 }
+
 
   
 
@@ -331,7 +429,8 @@ closeBtn.addEventListener("click", (e) => {
       const data = window.CARD_REPO?.[id] || {};
       const card = document.createElement("div");
       card.className = "inspectorCard";
-
+      card.dataset.cardId = String(id);
+      
       const img = document.createElement("img");
       img.src = data.image || "https://via.placeholder.com/200x280?text=Card";
       card.appendChild(img);
