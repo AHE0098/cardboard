@@ -570,4 +570,9 @@ body{
   margin-left: 0;
 }
 
+.inspectorCard.tapped{
+  transform: rotate(90deg);
+  transform-origin: 50% 60%;
+  transition: transform 140ms cubic-bezier(.2,.9,.2,1);
+}
 
