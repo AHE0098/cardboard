@@ -835,10 +835,13 @@ body.isFocus #root{
 .inspectorOverlay.reordering{
   cursor: grabbing;
   overflow-x: hidden;
+   scroll-snap-type: none;
 }
 
 /* IMPORTANT: only dim/disable the track during lift-mode, not reordering */
-.inspectorOverlay.dragging .inspectorTrack{
+.inspectorOverlay.liftDragging .inspectorTrack{
   pointer-events: none;
   opacity: 0.35;
 }
+
+
