@@ -99,7 +99,93 @@ if (topbar && titleEl) {
   topbar.insertBefore(topBackBtn, subtitle);
 }
 
+function getCardCostString(cardId) {
+  const data = window.CARD_REPO?.[String(cardId)] || {};
+  // support both "cost" and "costs"
+  const c = (data.costs ?? data.cost ?? "").toString().trim();
+  return c;
+}
 
+function parseManaCost(costStr) {
+  // Accepts: "1W", "2UU", "10G", "XRR", "" etc.
+  // Returns array like: ["1","W","U","U"]
+  if (!costStr) return [];
+  const s = String(costStr).trim();
+  if (!s) return [];
+  const tokens = s.match(/(\d+|[WUBRGX])/g);
+  return tokens ? tokens : [];
+}
+
+function getManaTokenKey(tok) {
+  // normalize token to a display key
+  if (!tok) return "";
+  if (/^\d+$/.test(tok)) return "C"; // generic for numerals (we'll print the number)
+  const t = tok.toUpperCase();
+  if (["W","U","B","R","G","X"].includes(t)) return t;
+  return "";
+}
+
+function buildManaSymbolEl(tok) {
+  // Fallback symbol: a styled circle with text
+  const key = getManaTokenKey(tok);
+  if (!key) return null;
+
+  const el = document.createElement("div");
+  el.className = "manaSymbol";
+
+  // data-mana for CSS coloring
+  const manaKey =
+    key === "W" ? "w" :
+    key === "U" ? "u" :
+    key === "B" ? "b" :
+    key === "R" ? "r" :
+    key === "G" ? "g" :
+    key === "X" ? "x" : "c";
+
+  el.dataset.mana = manaKey;
+
+  // Text (later you swap to images)
+  el.textContent = /^\d+$/.test(tok) ? tok : key;
+
+  return el;
+}
+
+function renderManaCostOverlay(costStr, opts = {}) {
+  // opts: { mode: "mini" | "inspector" }
+  const mode = opts.mode || "mini";
+
+  const tokens = parseManaCost(costStr);
+  if (!tokens.length) return null;
+
+  // icon sizing assumptions (must match CSS presets)
+  const icon = mode === "inspector" ? 22 : 12;
+  const gap = mode === "inspector" ? 6 : 3;
+
+  // card widths in your UI:
+  // miniCard = 56px; inspectorCard varies but we can estimate 260 max (you set max-width 260)
+  const cardW = mode === "inspector" ? 260 : 56;
+
+  const pad = 10; // matches CSS max-width calc
+  const usable = Math.max(10, cardW - pad);
+  const cols = Math.max(1, Math.floor((usable + gap) / (icon + gap)));
+
+  const wrap = document.createElement("div");
+  wrap.className = "manaCost " + (mode === "inspector" ? "isInspector" : "isMini");
+
+  for (let i = 0; i < tokens.length; i += cols) {
+    const row = document.createElement("div");
+    row.className = "manaRow";
+
+    tokens.slice(i, i + cols).forEach((tok) => {
+      const sym = buildManaSymbolEl(tok);
+      if (sym) row.appendChild(sym);
+    });
+
+    wrap.appendChild(row);
+  }
+
+  return wrap;
+}
 
 
   
@@ -122,6 +208,7 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   c.dataset.cardId = String(cardId);
   c.dataset.fromZoneKey = fromZoneKey;
 
+  // ===== Art layer =====
   const pic = document.createElement("div");
   pic.className = "miniPic";
 
@@ -133,15 +220,19 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   const src = getCardImgSrc(cardId, { playerKey: "p1" });
   if (src) {
     img.onload = () => img.classList.add("isLoaded");
-    img.onerror = () => img.remove(); // ✅ silhouette fallback
+    img.onerror = () => img.remove(); // silhouette fallback
     img.src = src;
     pic.appendChild(img);
   }
 
-  // ✅ IMPORTANT: mount the picture layer
   c.appendChild(pic);
 
-  // PT badge (bottom-center) if available
+  // ===== Mana cost (top-center, wraps, never spills) =====
+  const costStr = getCardCostString(cardId);
+  const costEl = renderManaCostOverlay(costStr, { mode: "mini" });
+  if (costEl) c.appendChild(costEl);
+
+  // ===== PT badge (bottom-center) =====
   const data = window.CARD_REPO?.[String(cardId)];
   if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
     const pt = document.createElement("div");
@@ -754,42 +845,39 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
   
 
 function renderInspector(zoneKey) {
-  removeInspectorOverlay(); // <-- prevents stacking multiple overlays
+  removeInspectorOverlay(); // prevents stacking
   const zoneCards = state.zones[zoneKey];
 
-  // Create overlay
   const overlay = document.createElement("div");
-  overlay.id = "inspectorOverlay";     // <-- give it a stable id
+  overlay.id = "inspectorOverlay";
   overlay.className = "inspectorOverlay";
 
- overlay.addEventListener("click", (e) => {
-  if (inspectorDragging) return;     // <-- vigtig
-  if (e.target === overlay) {
-    inspector = null;
-    removeInspectorOverlay();
-    render();
-  }
-});
+  overlay.addEventListener("click", (e) => {
+    if (inspectorDragging) return;
+    if (e.target === overlay) {
+      inspector = null;
+      removeInspectorOverlay();
+      render();
+    }
+  });
 
-  // Create close button
   const closeBtn = document.createElement("button");
   closeBtn.className = "inspectorCloseBtn";
   closeBtn.textContent = "✕";
-closeBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  inspector = null;
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    inspector = null;
 
-  removeInspectorOverlay();
-  removeBoardOverlay();
-  syncDropTargetHighlights(null);
+    removeInspectorOverlay();
+    removeBoardOverlay();
+    syncDropTargetHighlights(null);
 
-  inspectorDragging = null;
-  showDock(false);
+    inspectorDragging = null;
+    showDock(false);
 
-  render();
-});
+    render();
+  });
 
-  // Create inspector content track
   const track = document.createElement("div");
   track.className = "inspectorTrack";
 
@@ -800,49 +888,49 @@ closeBtn.addEventListener("click", (e) => {
     track.appendChild(empty);
   } else {
     zoneCards.forEach((id) => {
-      const data = window.CARD_REPO?.[id] || {};
+      const data = window.CARD_REPO?.[String(id)] || {};
       const card = document.createElement("div");
       card.className = "inspectorCard";
       card.dataset.cardId = String(id);
-      
-     const img = document.createElement("img");
-const src = getCardImgSrc(id, { playerKey: "p1" });
 
-if (src) {
-  img.src = src;
-  img.onerror = () => img.remove(); // ✅ final fallback = silhouette
-  card.appendChild(img);
-}
-// else: don't append img at all => silhouette
+      // Art
+      const img = document.createElement("img");
+      const src = getCardImgSrc(id, { playerKey: "p1" });
+      if (src) {
+        img.src = src;
+        img.onerror = () => img.remove(); // silhouette fallback
+        card.appendChild(img);
+      }
+
+      // Mana cost (top-center)
+      const costStr = getCardCostString(id);
+      const costEl = renderManaCostOverlay(costStr, { mode: "inspector" });
+      if (costEl) card.appendChild(costEl);
 
       const name = document.createElement("div");
       name.className = "inspectorName";
       name.textContent = data.name || `Card ${id}`;
       card.appendChild(name);
 
-    if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
-  const pt = document.createElement("div");
-  pt.className = "inspectorPT";
-  pt.textContent = `${data.power}|${data.toughness}`;
-  card.appendChild(pt);
-}
+      if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+        const pt = document.createElement("div");
+        pt.className = "inspectorPT";
+        pt.textContent = `${data.power}|${data.toughness}`;
+        card.appendChild(pt);
+      }
 
-attachInspectorLongPress(card, id, zoneKey);
+      attachInspectorLongPress(card, id, zoneKey);
 
-/* allow tap/tarp from inspector too (not in hand) */
-if (zoneKey !== "hand") {
-  attachTapStates(card, id);
-}
+      // allow tap/tarp from inspector too (not in hand)
+      if (zoneKey !== "hand") attachTapStates(card, id);
 
-// ✅ add these:
-if (state.tapped?.[String(id)]) card.classList.add("tapped");
-if (state.tarped?.[String(id)]) card.classList.add("tarped");
+      if (state.tapped?.[String(id)]) card.classList.add("tapped");
+      if (state.tarped?.[String(id)]) card.classList.add("tarped");
 
-track.appendChild(card);
+      track.appendChild(card);
     });
   }
 
-  // Build hierarchy: closeBtn and track INSIDE overlay
   overlay.appendChild(closeBtn);
   overlay.appendChild(track);
   document.body.appendChild(overlay);
