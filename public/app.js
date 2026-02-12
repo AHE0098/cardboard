@@ -214,18 +214,22 @@ function renderBoardOverlay() {
 
 function render() {
   root.innerHTML = "";
- document.body.classList.toggle("isFocus", view?.type === "focus");
+
+  document.body.classList.toggle("isFocus", view?.type === "focus");
   document.body.classList.toggle("isOverview", view?.type !== "focus");
-    // show Back only when we're in focus
+
+  // show Back only when we're in focus
   const b = document.querySelector(".topBackBtn");
   if (b) b.style.display = (view?.type === "focus") ? "inline-flex" : "none";
-  
+
   if (view?.type === "focus" && view.zoneKey) {
     root.appendChild(renderFocus(view.zoneKey));
   } else {
-    // default
     root.appendChild(renderOverview());
   }
+
+  // Mount top piles OUTSIDE root (so they stay at real top)
+  renderTopPilesBar();
 
   // Inspector overlay handling stays global
   if (inspector) {
@@ -963,23 +967,8 @@ function renderFocus(zoneKey) {
 
   const top = document.createElement("div");
   top.className = "focusTop";
-
-  // Piles bar uses the “top space” above the board
-  const pilesBar = document.createElement("div");
-  pilesBar.className = "pilesBar";
-
-  const deckArea = renderDropArea("deck");
-  deckArea.classList.add("pileCompact");
-  const gyArea = renderDropArea("graveyard");
-  gyArea.classList.add("pileCompact");
-
-  pilesBar.appendChild(deckArea);
-  pilesBar.appendChild(gyArea);
-
-  top.appendChild(pilesBar);
   container.appendChild(top);
 
-  // Board in focus: show all three battlefield zones as drop targets
   const board = document.createElement("div");
   board.className = "board focusBoard";
 
@@ -1148,41 +1137,32 @@ function attachTapStates(el, cardId) {
 
 
   
-  function finalizeDrop(toZoneKey) {
-    const d = dragging;
-    if (!d) return;
+function finalizeDrop(toZoneKey) {
+  const d = dragging;
+  if (!d) return;
 
-    // remove ghost
-    if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
+  // remove ghost
+  if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
 
-    const from = d.fromZoneKey;
-    const cardId = d.cardId;
+  const from = d.fromZoneKey;
+  const cardId = d.cardId;
 
-    // snap-back if invalid drop or same zone
-    if (!toZoneKey || toZoneKey === from) {
-      dragging = null;
-      syncDropTargetHighlights(null);
-      return;
-    }
-
-    // move card between arrays (first occurrence)
-    const fromArr = state.zones[from];
-    const toArr = state.zones[toZoneKey];
-    const idx = fromArr.indexOf(cardId);
-    if (idx >= 0) {
-      fromArr.splice(idx, 1);
-      toArr.push(cardId);
-    }
-
+  // snap-back if invalid drop or same zone
+  if (!toZoneKey || toZoneKey === from) {
     dragging = null;
     syncDropTargetHighlights(null);
-
-    // re-render keeps it simple for v0
-    render();
+    return;
   }
 
+  dragging = null;
+  syncDropTargetHighlights(null);
+
+  // ✅ IMPORTANT: route through moveCard so deck logic works
+  moveCard(cardId, from, toZoneKey);
+
+  // render (moveCard may open chooser which also calls render)
   render();
-})();
+}
 
 function attachDeckDrawDoubleTap(pileCardEl) {
   let lastTapAt = 0;
@@ -1413,3 +1393,31 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   });
 }
 
+function renderTopPilesBar() {
+  // create or reuse a stable container
+  let host = document.getElementById("topPiles");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "topPiles";
+    document.body.appendChild(host);
+  }
+
+  // only show in focus mode
+  if (view?.type !== "focus") {
+    host.innerHTML = "";
+    host.style.display = "none";
+    return;
+  }
+
+  host.style.display = "flex";
+  host.innerHTML = "";
+
+  const deckArea = renderDropArea("deck");
+  deckArea.classList.add("pileCompactTop");
+
+  const gyArea = renderDropArea("graveyard");
+  gyArea.classList.add("pileCompactTop");
+
+  host.appendChild(deckArea);
+  host.appendChild(gyArea);
+}
