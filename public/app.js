@@ -1278,28 +1278,102 @@ function drawOneFromDeckWithAnimation() {
   const deck = state.zones.deck;
   if (!deck || deck.length === 0) return;
 
-  // capture start rect from deck pile
-  const pile = document.querySelector(".zone-deck .pileCard");
-  const fromRect = pile?.getBoundingClientRect?.();
-  const cardId = deck[0]; // TOP of deck
+  // --- snapshot old hand ids + their DOM rects (for shift animation) ---
+  const oldHandIds = [...(state.zones.hand || [])];
+  const oldRects = new Map();
 
-  // Update state FIRST (so hand will contain it)
+  oldHandIds.forEach((id) => {
+    const el = document.querySelector(`.zone-hand .miniCard[data-card-id="${id}"]`);
+    if (el) oldRects.set(id, el.getBoundingClientRect());
+  });
+
+  // Deck pile rect for the fly-in
+  const pileEl = document.querySelector(".zone-deck .pileCard");
+  const fromRect = pileEl?.getBoundingClientRect?.();
+
+  // --- update state: draw TOP card and insert LEFTMOST in hand ---
+  const cardId = deck[0];
   deck.shift();
-  state.zones.hand.push(cardId);
+  state.zones.hand.unshift(cardId); // ✅ leftmost, pushes others right
 
-  // Render so the card exists in hand DOM
+  // Render new state so new hand layout exists in DOM
   render();
 
-  // Animate on next frame once layout is updated
+  // Hide real hand cards during animation to avoid “double”
+  const handZone = document.querySelector(".zone-hand");
+  const realHandCards = handZone ? Array.from(handZone.querySelectorAll(".miniCard")) : [];
+  realHandCards.forEach(el => (el.style.visibility = "hidden"));
+
+  // --- build + animate shift ghosts for old cards (they move right) ---
+  const ghosts = [];
+
+  oldHandIds.forEach((id) => {
+    const start = oldRects.get(id);
+    const endEl = document.querySelector(`.zone-hand .miniCard[data-card-id="${id}"]`);
+    const end = endEl?.getBoundingClientRect?.();
+
+    if (!start || !end) return;
+
+    const g = document.createElement("div");
+    g.className = "handShiftGhost";
+
+    const src = getCardImgSrc(id, { playerKey: "p1" });
+    if (src) g.style.backgroundImage = `url("${src}")`;
+
+    g.style.left = `${start.left}px`;
+    g.style.top = `${start.top}px`;
+    g.style.width = `${start.width}px`;
+    g.style.height = `${start.height}px`;
+
+    document.body.appendChild(g);
+
+    // Force layout
+    g.getBoundingClientRect();
+
+    const dx = end.left - start.left;
+    const dy = end.top - start.top;
+
+    // Fun little wobble/tilt based on distance
+    const tilt = Math.max(-7, Math.min(7, dx * 0.02));
+
+    g.style.transform = `translate(${dx}px, ${dy}px) rotate(${tilt}deg)`;
+    ghosts.push(g);
+  });
+
+  // --- fly the NEW drawn card from deck -> its new leftmost spot ---
   requestAnimationFrame(() => {
     const toEl = document.querySelector(`.zone-hand .miniCard[data-card-id="${cardId}"]`);
-    if (!fromRect || !toEl) return;
+    if (!toEl) {
+      // cleanup + show cards anyway
+      ghosts.forEach(g => g.remove());
+      realHandCards.forEach(el => (el.style.visibility = ""));
+      return;
+    }
 
-    // Hide the destination briefly so the “fly-in” feels real
-    toEl.style.visibility = "hidden";
-    animateCardFlight(cardId, fromRect, toEl, () => {
-      toEl.style.visibility = "";
-    });
+    const toRect = toEl.getBoundingClientRect();
+
+    if (fromRect) {
+      animateCardFlight(cardId, fromRect, toEl, () => {});
+    }
+
+    // After everything finishes, reveal real hand and remove ghosts
+    const TOTAL_MS = 620; // should match CSS durations below (shift + fly)
+    setTimeout(() => {
+      ghosts.forEach(g => g.remove());
+      realHandCards.forEach(el => (el.style.visibility = ""));
+
+      // tiny glow pulse so it's satisfying
+      try {
+        toEl.animate(
+          [
+            { filter: "drop-shadow(0 0 0 rgba(130,180,255,0.0))" },
+            { filter: "drop-shadow(0 0 18px rgba(130,180,255,0.65))" },
+            { filter: "drop-shadow(0 0 0 rgba(130,180,255,0.0))" },
+          ],
+          { duration: 520, easing: "cubic-bezier(.2,.9,.2,1)" }
+        );
+      } catch {}
+    }, TOTAL_MS);
   });
 }
 
@@ -1332,8 +1406,8 @@ function animateCardFlight(cardId, fromRect, toEl, done) {
   const dx = endX - startX;
   const dy = endY - startY;
 
-  // Fly + slight scale for juice
-  ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.04) rotate(2deg)`;
+  // Fly + scale + a bit of extra lift for readability
+  ghost.style.transform = `translate(${dx}px, ${dy - 18}px) scale(1.08) rotate(6deg)`;
 
   const cleanup = () => {
     ghost.removeEventListener("transitionend", cleanup);
