@@ -971,3 +971,33 @@ body.isFocus #root{
 }
 
 .deckChoiceBtn:active{ transform: translateY(1px); }
+
+
+/* ===== Top piles (Deck / Graveyard) mounted outside #root ===== */
+#topPiles{
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 64px;                 /* sits below your topbar; tweak 54–74px */
+  z-index: 9500;
+  display: none;
+  gap: 12px;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 6px 10px;
+  border-radius: 16px;
+  background: rgba(10,14,24,0.45);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(10px);
+}
+
+.pileCompactTop.dropArea.isPile{
+  width: 108px;
+  padding: 8px 10px;
+  min-height: auto;
+}
+
+/* give the focus board a little headroom so piles don’t visually collide */
+body.isFocus .app{
+  padding-top: 82px;
+}
