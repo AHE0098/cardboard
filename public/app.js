@@ -902,13 +902,7 @@ if (zMeta.kind === "pile") {
     }
 
     pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
-
-    // ✅ Remove the "stopPropagation" blocker for deck double-tap.
-    // (We already stopPropagation inside attachDeckDrawDoubleTap anyway.)
-    // pileCard.addEventListener("click", (e) => e.stopPropagation());
-  }
-  }
-
+ }
   return area;
 }
 
