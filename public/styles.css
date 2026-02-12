@@ -1032,3 +1032,64 @@ body.isFocus #root{
   padding: 0 !important;
   border-radius: 0 !important;
 }
+
+/* =========================
+   FINAL OVERRIDES (authoritative)
+   paste LAST in styles.css
+   ========================= */
+
+/* 1) Keep topbar + piles truly at the top */
+.app{
+  padding-top: 14px !important;
+}
+
+/* If you previously pushed focus down for piles, disable that */
+body.isFocus .app{
+  padding-top: 14px !important;
+}
+
+/* 2) Make top piles container a clean "floating row" (no box) */
+#topPiles{
+  top: 52px !important;          /* tweak 44–60 */
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* 3) Remove pile dropArea boxes completely */
+.dropArea.isPile,
+.pileCompactTop.dropArea.isPile{
+  width: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: auto !important;
+}
+
+/* 4) Keep the card silhouette visible/clickable */
+.pileSilhouette{
+  display:flex !important;
+  justify-content:center !important;
+}
+
+.miniCard.pileCard{
+  width: 56px !important;
+  height: 76px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+}
+
+/* 5) Labels: no container styling */
+.pileLabel{
+  margin-top: 6px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  opacity: 0.9 !important;
+}
+
+
