@@ -894,13 +894,6 @@ function renderFocus(zoneKey) {
   title.style.flexDirection = "column";
   title.style.gap = "2px";
 
-  const t1 = document.createElement("div");
-  t1.style.fontWeight = "900";
-  t1.style.fontSize = "18px";
-  t1.textContent = ZONES.find(z => z.key === zoneKey)?.label || zoneKey;
-
-  title.appendChild(t1);
-
   top.appendChild(title);
   container.appendChild(top);
 
