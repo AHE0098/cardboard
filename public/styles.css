@@ -1110,4 +1110,64 @@ body.isFocus .app{
   opacity: 0.9 !important;
 }
 
+/* ===== Mana cost overlay (fallback symbols; later swap to images) ===== */
 
+.manaCost {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 10px);
+  max-height: calc(100% - 12px); /* hard safety */
+  display: grid;
+  grid-auto-flow: row;
+  gap: 3px;
+  pointer-events: none;
+  z-index: 3; /* above art; below nothing interactive */
+  overflow: hidden; /* NEVER spill outside */
+}
+
+.manaRow {
+  display: flex;
+  justify-content: center; /* centered row */
+  gap: 3px;
+  max-width: 100%;
+}
+
+.manaSymbol {
+  width: var(--manaSize, 12px);
+  height: var(--manaSize, 12px);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.18);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  font-size: calc(var(--manaSize, 12px) * 0.62);
+  line-height: 1;
+  color: rgba(255,255,255,0.95);
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+/* Color-ish fallback styling */
+.manaSymbol[data-mana="w"]{ background: rgba(245,245,245,0.22); color: rgba(255,255,255,0.95); }
+.manaSymbol[data-mana="u"]{ background: rgba(90,150,255,0.22); }
+.manaSymbol[data-mana="b"]{ background: rgba(120,120,120,0.20); }
+.manaSymbol[data-mana="r"]{ background: rgba(255,90,90,0.22); }
+.manaSymbol[data-mana="g"]{ background: rgba(90,255,140,0.18); }
+.manaSymbol[data-mana="c"]{ background: rgba(255,255,255,0.10); }
+.manaSymbol[data-mana="x"]{ background: rgba(255,255,255,0.10); }
+
+/* Sizing presets */
+.manaCost.isMini { --manaSize: 12px; }
+.manaCost.isInspector { --manaSize: 22px; gap: 6px; }
+.manaCost.isInspector .manaRow { gap: 6px; }
+
+/* Keep inspector card top padding from fighting overlay */
+.inspectorCard {
+  position: relative; /* so manaCost can anchor to it */
+}
+
+/* Ensure miniCard already has relative positioning (you already do) */
