@@ -35,9 +35,9 @@ const state = typeof structuredClone === "function"
 
 
 function ensureZoneArrays() {
-state.zones ||= {};
-const keys = ["hand", "lands", "permanents", "deck", "graveyard"];
-for (const k of keys) state.zones[k] ||= [];
+  state.zones ||= {};
+  const keys = ["hand", "lands", "permanents", "deck", "graveyard", "stack"];
+  for (const k of keys) state.zones[k] ||= [];
 }
 
 
@@ -67,11 +67,14 @@ let inspectorDragging = null;
 
 
 const ZONES = [
-{ key: "permanents", label: "Permanents", kind: "row" },
-{ key: "lands", label: "Lands", kind: "row" },
-{ key: "hand", label: "Hand", kind: "hand" },
-{ key: "deck", label: "Deck", kind: "pile" },
-{ key: "graveyard", label: "Graveyard", kind: "pile" },
+  { key: "permanents", label: "Permanents", kind: "row" },
+  { key: "lands", label: "Lands", kind: "row" },
+  { key: "hand", label: "Hand", kind: "hand" },
+
+  // piles
+  { key: "stack", label: "THE STACK", kind: "pile" },
+  { key: "deck", label: "Deck", kind: "pile" },
+  { key: "graveyard", label: "Graveyard", kind: "pile" },
 ];
 
 
@@ -406,14 +409,14 @@ function renderOverview() {
   const tiles = document.createElement("div");
   tiles.className = "zoneTiles";
 
-  // Show “main” zones first
+  // main zones
   ["permanents", "lands", "hand"].forEach((k) => {
     const z = ZONES.find(x => x.key === k);
     tiles.appendChild(renderZoneTile(z.key, z.label, true));
   });
 
-  // Then show the piles
-  ["deck", "graveyard"].forEach((k) => {
+  // piles
+  ["stack", "deck", "graveyard"].forEach((k) => {
     const z = ZONES.find(x => x.key === k);
     tiles.appendChild(renderZoneTile(z.key, z.label, true));
   });
@@ -442,29 +445,35 @@ function showDock(active) {
 function moveCard(cardId, fromZoneKey, toZoneKey) {
   if (!toZoneKey) return;
   if (!fromZoneKey) return;
-
   if (toZoneKey === fromZoneKey) return;
 
   ensureZoneArrays();
 
-  // Normal arrays
   const fromArr = state.zones[fromZoneKey] || [];
   const toArr = state.zones[toZoneKey] || [];
 
-  // Find and remove
   const idx = fromArr.indexOf(cardId);
   if (idx < 0) return;
 
   // Special: moving INTO deck triggers placement chooser
   if (toZoneKey === "deck" && fromZoneKey !== "deck") {
-    fromArr.splice(idx, 1); // remove immediately
+    fromArr.splice(idx, 1);
     openDeckPlacementChooser(cardId, fromZoneKey);
     return;
   }
 
   fromArr.splice(idx, 1);
+
+  // Special: stack always receives cards "on top"
+  if (toZoneKey === "stack") {
+    toArr.push(cardId); // top = end of array
+    return;
+  }
+
+  // default placement
   toArr.push(cardId);
 }
+  
 
 function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
   let holdTimer = null;
@@ -970,50 +979,59 @@ function renderDropArea(zoneKey, opts = {}) {
   const zoneArr = state.zones[zoneKey] || [];
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
-// ===== PILES (deck / graveyard) =====
-if (zMeta.kind === "pile") {
-  area.classList.add("isPile");
+  // ===== PILES (stack / deck / graveyard) =====
+  if (zMeta.kind === "pile") {
+    area.classList.add("isPile");
 
-  const pile = document.createElement("div");
-  pile.className = "pileSilhouette";
+    const pile = document.createElement("div");
+    pile.className = "pileSilhouette";
 
-  const pileCard = document.createElement("div");
-  pileCard.className = "miniCard pileCard";
-  pileCard.dataset.cardId = "__PILE__";
-  pileCard.dataset.fromZoneKey = zoneKey;
+    const pileCard = document.createElement("div");
+    pileCard.className = "miniCard pileCard";
+    pileCard.dataset.cardId = "__PILE__";
+    pileCard.dataset.fromZoneKey = zoneKey;
 
-  const count = document.createElement("div");
-  count.className = "pileCount";
-  count.textContent = String(zoneArr.length);
-  pileCard.appendChild(count);
+    // Count badge
+    const count = document.createElement("div");
+    count.className = "pileCount";
+    count.textContent = String(zoneArr.length);
+    pileCard.appendChild(count);
 
-  pile.appendChild(pileCard);
-
-  const label = document.createElement("div");
-  label.className = "pileLabel";
-  label.textContent = zMeta.label;
-
-  area.appendChild(pile);
-  area.appendChild(label);
-
-   if (!overlay) {
-    if (zoneKey === "deck") {
-      // ✅ IMPORTANT: bind to the pileCard itself (because pileCard was stopping bubbling)
-      attachDeckDrawDoubleTap(pileCard);
-    } else {
-      // Graveyard: single tap => inspector (also bind to pileCard for consistency)
-      pileCard.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (dragging || inspectorDragging) return;
-        inspector = { zoneKey };
-        render();
-      });
+    // Special: magical stack intensity (1..10)
+    if (zoneKey === "stack") {
+      const intensity = Math.max(0, Math.min(10, zoneArr.length)); // 0..10
+      pileCard.classList.add("stackPileCard");
+      pileCard.style.setProperty("--stackI", String(intensity));
+      pileCard.style.setProperty("--stackOn", zoneArr.length > 0 ? "1" : "0");
     }
 
-    pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
- }
-  return area;
-}
+    pile.appendChild(pileCard);
+
+    const label = document.createElement("div");
+    label.className = "pileLabel";
+    label.textContent = (zoneKey === "stack") ? "THE STACK" : zMeta.label;
+
+    area.appendChild(pile);
+    area.appendChild(label);
+
+    if (!overlay) {
+      if (zoneKey === "deck") {
+        attachDeckDrawDoubleTap(pileCard);
+      } else {
+        // stack + graveyard: single tap => inspector
+        pileCard.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (dragging || inspectorDragging) return;
+          inspector = { zoneKey };
+          render();
+        });
+      }
+
+      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+    }
+
+    return area;
+  }
 
   // ===== NON-PILE zones: click -> inspector (unless overlay) =====
   if (!overlay) {
@@ -1664,11 +1682,23 @@ function renderTopPilesBar() {
   if (view?.type !== "focus") {
     host.innerHTML = "";
     host.style.display = "none";
+
+    // keep it out of the topbar in overview
+    if (host.parentNode && host.parentNode !== document.body) {
+      document.body.appendChild(host);
+    }
     return;
   }
 
+  // ensure it sits inside the topbar (where subtitle used to be)
+  const topbar = document.querySelector(".topbar");
+  if (topbar && host.parentNode !== topbar) topbar.appendChild(host);
+
   host.style.display = "flex";
   host.innerHTML = "";
+
+  const stackArea = renderDropArea("stack");
+  stackArea.classList.add("pileCompactTop");
 
   const deckArea = renderDropArea("deck");
   deckArea.classList.add("pileCompactTop");
@@ -1676,6 +1706,7 @@ function renderTopPilesBar() {
   const gyArea = renderDropArea("graveyard");
   gyArea.classList.add("pileCompactTop");
 
+  host.appendChild(stackArea);
   host.appendChild(deckArea);
   host.appendChild(gyArea);
 }
