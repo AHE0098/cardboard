@@ -51,17 +51,13 @@ const state = structuredClone(window.DEMO_STATE || {
 
   
 function getCardImgSrc(cardId, opts = {}) {
-  // opts.playerKey lets you resolve per-player templates
-  // default: p1 until you add multi-player state
   const playerKey = opts.playerKey || "p1";
 
-  // Use resolver if present
   if (window.resolveCardImage) {
-    const src = window.resolveCardImage(cardId, { playerKey });
-    if (src) return src;
+    return window.resolveCardImage(cardId, { playerKey }); // may return null
   }
 
-  // Last resort fallback to old local convention
+  // old local convention as a last resort:
   return `/cards/image${cardId}.png`;
 }
 
@@ -78,15 +74,20 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   img.className = "miniImg";
   img.alt = "";
   img.draggable = false;
-  img.onload = () => img.classList.add("isLoaded");
-  img.onerror = () => img.remove(); // if missing, you just see silhouette
-  img.src = getCardImgSrc(cardId, { playerKey: "p1" });
-  
-  pic.appendChild(img);
+
+  const src = getCardImgSrc(cardId, { playerKey: "p1" });
+  if (src) {
+    img.onload = () => img.classList.add("isLoaded");
+    img.onerror = () => img.remove(); // ✅ silhouette fallback
+    img.src = src;
+    pic.appendChild(img);
+  }
+
+  // ✅ IMPORTANT: mount the picture layer
   c.appendChild(pic);
 
-   // PT badge (bottom-center) if available
-  const data = window.CARD_REPO?.[cardId];
+  // PT badge (bottom-center) if available
+  const data = window.CARD_REPO?.[String(cardId)];
   if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
     const pt = document.createElement("div");
     pt.className = "miniPT";
@@ -723,10 +724,15 @@ closeBtn.addEventListener("click", (e) => {
       card.className = "inspectorCard";
       card.dataset.cardId = String(id);
       
-      const img = document.createElement("img");
-   img.src = getCardImgSrc(id, { playerKey: "p1" });
-     img.onerror = () => { img.src = "https://via.placeholder.com/200x280?text=Card"; };
-      card.appendChild(img);
+     const img = document.createElement("img");
+const src = getCardImgSrc(id, { playerKey: "p1" });
+
+if (src) {
+  img.src = src;
+  img.onerror = () => img.remove(); // ✅ final fallback = silhouette
+  card.appendChild(img);
+}
+// else: don't append img at all => silhouette
 
       const name = document.createElement("div");
       name.className = "inspectorName";
