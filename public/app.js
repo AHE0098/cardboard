@@ -887,13 +887,14 @@ if (zMeta.kind === "pile") {
   area.appendChild(pile);
   area.appendChild(label);
 
-  if (!overlay) {
+   if (!overlay) {
     if (zoneKey === "deck") {
-      // Deck handler already does single(inspect)+double(draw)
-      attachDeckDrawDoubleTap(area);
+      // ✅ IMPORTANT: bind to the pileCard itself (because pileCard was stopping bubbling)
+      attachDeckDrawDoubleTap(pileCard);
     } else {
-      // Graveyard: single tap => inspector
-      area.addEventListener("click", (e) => {
+      // Graveyard: single tap => inspector (also bind to pileCard for consistency)
+      pileCard.addEventListener("click", (e) => {
+        e.stopPropagation();
         if (dragging || inspectorDragging) return;
         inspector = { zoneKey };
         render();
@@ -901,7 +902,11 @@ if (zMeta.kind === "pile") {
     }
 
     pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
-    pileCard.addEventListener("click", (e) => e.stopPropagation());
+
+    // ✅ Remove the "stopPropagation" blocker for deck double-tap.
+    // (We already stopPropagation inside attachDeckDrawDoubleTap anyway.)
+    // pileCard.addEventListener("click", (e) => e.stopPropagation());
+  }
   }
 
   return area;
