@@ -1231,3 +1231,68 @@ body.isFocus #topPiles{
   align-items: flex-start;
   padding: 0 !important;
 }
+
+/* ===== THE STACK: magical visuals with intensity (0..10) ===== */
+
+.stackPileCard{
+  position: relative;
+  overflow: visible;
+}
+
+@keyframes stackPulse {
+  0%   { transform: translate(0,0) scale(1) rotate(-2deg); filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
+  50%  { transform: translate(0,-1px) scale(1.02) rotate(-1deg); }
+  100% { transform: translate(0,0) scale(1) rotate(-2deg); }
+}
+
+/* Use CSS vars set by JS: --stackI (0..10) and --stackOn (0/1) */
+.stackPileCard{
+  --i: var(--stackI, 0);
+  --on: var(--stackOn, 0);
+
+  /* intensity scales: 0..10 */
+  --a: calc(0.10 + (0.06 * var(--i)));         /* alpha */
+  --b: calc(10px + (3px * var(--i)));          /* blur */
+  --s: calc(0px + (2px * var(--i)));           /* spread-ish feel via multiple shadows */
+}
+
+/* base magical aura (only really “on” when stack has cards) */
+.stackPileCard{
+  border-color: rgba(180, 140, 255, calc(0.18 + 0.05 * var(--i))) !important;
+  background:
+    radial-gradient(120px 120px at 30% 20%,
+      rgba(190,160,255, calc(0.20 + 0.06 * var(--i))),
+      transparent 65%),
+    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03)) !important;
+
+  box-shadow:
+    0 0 var(--b) rgba(170,120,255, calc(var(--a) * var(--on))),
+    0 0 calc(var(--b) * 1.6) rgba(110,200,255, calc((var(--a) * 0.7) * var(--on))),
+    0 0 calc(var(--b) * 2.2) rgba(255,120,220, calc((var(--a) * 0.55) * var(--on))),
+    0 18px 40px rgba(0,0,0,0.45);
+}
+
+/* pulse only when stack has cards */
+.stackPileCard{
+  animation: stackPulse calc(1400ms - (60ms * var(--i))) ease-in-out infinite;
+  animation-play-state: calc(var(--on) * 1) == 1 ? running : paused; /* harmless fallback */
+}
+
+/* Reliable “only pulse when on”: override via attribute-like approach */
+.stackPileCard{ animation-play-state: paused; }
+.stackPileCard[style*="--stackOn: 1"]{ animation-play-state: running; }
+
+/* extra “sparkle ring” */
+.stackPileCard::after{
+  content:"";
+  position:absolute;
+  inset:-10px;
+  border-radius: 18px;
+  pointer-events:none;
+  opacity: calc(0.05 * var(--i) * var(--on));
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255,255,255,0.35), transparent 40%),
+    radial-gradient(circle at 70% 60%, rgba(170,220,255,0.28), transparent 45%),
+    radial-gradient(circle at 55% 80%, rgba(255,150,235,0.22), transparent 45%);
+  filter: blur(2px);
+}
