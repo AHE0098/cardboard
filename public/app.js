@@ -50,23 +50,20 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   pic.appendChild(img);
   c.appendChild(pic);
 
+  // id badge
   const tag = document.createElement("div");
   tag.className = "miniId";
   tag.textContent = String(cardId);
   c.appendChild(tag);
 
-  const tag = document.createElement("div");
-tag.className = "miniId";
-tag.textContent = String(cardId);
-c.appendChild(tag);
-
-const data = window.CARD_REPO?.[cardId];
-if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
-  const pt = document.createElement("div");
-  pt.className = "miniPT";
-  pt.textContent = `${data.power}|${data.toughness}`;
-  c.appendChild(pt);
-}
+  // PT badge (bottom-center) if available
+  const data = window.CARD_REPO?.[cardId];
+  if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+    const pt = document.createElement("div");
+    pt.className = "miniPT";
+    pt.textContent = `${data.power}|${data.toughness}`;
+    c.appendChild(pt);
+  }
 
   if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
   if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
