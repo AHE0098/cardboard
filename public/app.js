@@ -265,13 +265,72 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
   let holdTimer = null;
   let lifted = false;
 
-  // Reorder state
+  // reorder state
   let reordering = false;
   let start = null;
   let trackEl = null;
   let overlayEl = null;
 
-  // helper for reorder hit-testing
+  // auto-scroll state (reorder mode)
+  let autoScrollRaf = null;
+  let autoScrollDir = 0; // -1 left, +1 right, 0 none
+  let lastClientX = 0;
+
+  const EDGE_PX = 72;         // edge zone size for auto-scroll
+  const MAX_SPEED = 16;       // px per frame at the extreme edge (tweak 10–22)
+  const SWAP_GUARD_PX = 120;  // only swap when reasonably near another card
+
+  const stopAutoScroll = () => {
+    autoScrollDir = 0;
+    if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
+    autoScrollRaf = null;
+  };
+
+  const tickAutoScroll = () => {
+    if (!reordering || !overlayEl || autoScrollDir === 0) {
+      stopAutoScroll();
+      return;
+    }
+
+    const rect = overlayEl.getBoundingClientRect();
+
+    // how deep into the edge zone are we? -> maps to speed
+    let intensity = 0;
+    if (autoScrollDir < 0) {
+      intensity = Math.max(0, (rect.left + EDGE_PX) - lastClientX) / EDGE_PX;
+    } else {
+      intensity = Math.max(0, lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
+    }
+
+    const speed = Math.round(MAX_SPEED * Math.min(1, intensity));
+
+    if (speed > 0) {
+      overlayEl.scrollLeft += autoScrollDir * speed;
+
+      // keep reordering “alive” while scrolling
+      reorderAtPointer(lastClientX);
+    }
+
+    autoScrollRaf = requestAnimationFrame(tickAutoScroll);
+  };
+
+  const updateAutoScrollDir = (clientX) => {
+    if (!overlayEl) return;
+
+    const rect = overlayEl.getBoundingClientRect();
+
+    let dir = 0;
+    if (clientX < rect.left + EDGE_PX) dir = -1;
+    else if (clientX > rect.right - EDGE_PX) dir = +1;
+
+    if (dir !== autoScrollDir) {
+      autoScrollDir = dir;
+      if (autoScrollDir === 0) stopAutoScroll();
+      else if (!autoScrollRaf) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
+    }
+  };
+
+  // reorder hit-testing (DOM reorder)
   const reorderAtPointer = (clientX) => {
     if (!trackEl) return;
 
@@ -293,199 +352,212 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       }
     }
 
-    if (!best) return;
+    // ✅ guard: if we're not close to any card, don't jitter-swap
+    if (!best || bestDist > SWAP_GUARD_PX) return;
 
     const br = best.getBoundingClientRect();
     const insertBefore = clientX < (br.left + br.width / 2);
 
-    // move DOM node (instant visual reorder)
+    // ✅ avoid pointless DOM ops if already “in the right spot”
     if (insertBefore) {
+      if (self.previousElementSibling === best) return;
       trackEl.insertBefore(self, best);
     } else {
+      if (self.nextElementSibling === best) return;
       trackEl.insertBefore(self, best.nextSibling);
     }
   };
 
-  cardEl.addEventListener(
-    "pointerdown",
-    (e) => {
-      e.preventDefault();
+  cardEl.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
 
-      const pointerId = e.pointerId;
-      try { cardEl.setPointerCapture(pointerId); } catch {}
+    const pointerId = e.pointerId;
+    try { cardEl.setPointerCapture(pointerId); } catch {}
 
-      start = { x: e.clientX, y: e.clientY };
+    start = { x: e.clientX, y: e.clientY };
+    lastClientX = e.clientX;
 
-      lifted = false;
-      reordering = false;
+    lifted = false;
+    reordering = false;
 
-      overlayEl = document.getElementById("inspectorOverlay");
-      trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
+    overlayEl = document.getElementById("inspectorOverlay");
+    trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
 
-      const cleanupOverlay = () => {
-        if (!overlayEl) return;
-        overlayEl.classList.remove("reordering");
-        overlayEl.classList.remove("liftDragging");
-        overlayEl.style.overflowX = "auto";
-      };
+    const cleanupOverlay = () => {
+      if (!overlayEl) return;
+      overlayEl.classList.remove("reordering");
+      overlayEl.classList.remove("liftDragging");
+      overlayEl.style.overflowX = "auto";
+    };
 
-      // Hard reset any stale overlay states
+    cleanupOverlay();
+    stopAutoScroll();
+
+    const cancel = () => {
+      clearTimeout(holdTimer);
+      stopAutoScroll();
       cleanupOverlay();
 
-      const cancel = () => {
-        clearTimeout(holdTimer);
-        cleanupOverlay();
-        try { cardEl.releasePointerCapture(pointerId); } catch {}
-        cardEl.removeEventListener("pointermove", onMove);
-        cardEl.removeEventListener("pointerup", onUp);
-        cardEl.removeEventListener("pointercancel", onCancel);
+      try { cardEl.releasePointerCapture(pointerId); } catch {}
+      cardEl.removeEventListener("pointermove", onMove);
+      cardEl.removeEventListener("pointerup", onUp);
+      cardEl.removeEventListener("pointercancel", onCancel);
+
+      cardEl.style.transform = "";
+      cardEl.style.zIndex = "";
+      cardEl.style.opacity = "";
+    };
+
+    const lift = () => {
+      if (reordering) return;
+      lifted = true;
+
+      if (overlayEl) {
+        overlayEl.classList.add("liftDragging");
+        overlayEl.classList.remove("reordering");
+        overlayEl.style.overflowX = "hidden"; // lift-mode should not scroll
+      }
+
+      const ghost = document.createElement("div");
+      ghost.className = "dragGhost";
+      ghost.textContent = cardId;
+      dragLayer.appendChild(ghost);
+      positionGhost(ghost, e.clientX, e.clientY);
+
+      inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
+      showDock(true);
+      renderBoardOverlay();
+      syncDropTargetHighlights(null);
+
+      if (navigator.vibrate) navigator.vibrate(10);
+    };
+
+    holdTimer = setTimeout(lift, 2200);
+
+    const onMove = (ev) => {
+      ev.preventDefault();
+
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+      lastClientX = ev.clientX;
+
+      // Decide reorder vs lift
+      if (!lifted && !reordering) {
+        // horizontal intent => reorder
+        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+          reordering = true;
+          clearTimeout(holdTimer);
+
+          if (overlayEl) {
+            overlayEl.classList.add("reordering");
+            overlayEl.classList.remove("liftDragging");
+            overlayEl.style.overflowX = "auto"; // ✅ allow auto-scroll
+          }
+
+          cardEl.style.zIndex = "10010";
+          cardEl.style.opacity = "0.85";
+        }
+
+        // if they move a lot (esp vertical), cancel lift
+        if (!reordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+          clearTimeout(holdTimer);
+        }
+      }
+
+      // Reorder mode: drag + swap positions + edge auto-scroll
+      if (reordering) {
+        cardEl.style.transform = `translateX(${dx}px)`;
+        reorderAtPointer(ev.clientX);
+        updateAutoScrollDir(ev.clientX);
+        return;
+      }
+
+      // Lift-mode: drag ghost to zone
+      if (inspectorDragging?.ghostEl) {
+        positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
+        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+        syncDropTargetHighlights(overZoneKey);
+      }
+    };
+
+    const onUp = (ev) => {
+      ev.preventDefault();
+      clearTimeout(holdTimer);
+
+      // Reordering: commit DOM order
+      if (reordering) {
+        stopAutoScroll();
+
+        if (trackEl) {
+          const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
+            .map((el) => Number(el.dataset.cardId))
+            .filter((n) => Number.isFinite(n));
+
+          state.zones[fromZoneKey] = ids;
+        }
+
+        // reset styles
         cardEl.style.transform = "";
         cardEl.style.zIndex = "";
         cardEl.style.opacity = "";
-      };
 
-      const lift = () => {
-        if (reordering) return;
-        lifted = true;
+        // ✅ snap/center the dragged card after reorder
+        try {
+          cardEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+        } catch {}
 
-        if (overlayEl) {
-          overlayEl.classList.add("liftDragging");
-          overlayEl.classList.remove("reordering");
-          overlayEl.style.overflowX = "hidden";
-        }
+        render();
+        cancel();
+        return;
+      }
 
-        const ghost = document.createElement("div");
-        ghost.className = "dragGhost";
-        ghost.textContent = cardId;
-        dragLayer.appendChild(ghost);
-        positionGhost(ghost, e.clientX, e.clientY);
+      // Lift-mode drop
+      if (inspectorDragging) {
+        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
 
-        inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-        showDock(true);
-        renderBoardOverlay();
+        const g = inspectorDragging.ghostEl;
+        if (g && g.parentNode) g.parentNode.removeChild(g);
+
+        removeBoardOverlay();
         syncDropTargetHighlights(null);
 
-        if (navigator.vibrate) navigator.vibrate(10);
-      };
-
-      holdTimer = setTimeout(lift, 2200);
-
-      const onMove = (ev) => {
-        ev.preventDefault();
-
-        const dx = ev.clientX - start.x;
-        const dy = ev.clientY - start.y;
-
-        // Decide reorder vs lift
-        if (!lifted && !reordering) {
-          // horizontal intent => reorder
-          if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
-            reordering = true;
-            clearTimeout(holdTimer);
-
-            if (overlayEl) {
-              overlayEl.classList.add("reordering");
-              overlayEl.classList.remove("liftDragging");
-              overlayEl.style.overflowX = "hidden";
-            }
-
-            cardEl.style.zIndex = "10010";
-            cardEl.style.opacity = "0.85";
-          }
-
-          // If they move a lot (esp. vertical), cancel the long-press lift
-          if (!reordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-            clearTimeout(holdTimer);
-          }
+        if (overZoneKey) {
+          moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
         }
 
-        // Reorder mode: drag + swap positions
-        if (reordering) {
-          cardEl.style.transform = `translateX(${dx}px)`;
-          reorderAtPointer(ev.clientX);
-          return;
-        }
+        inspectorDragging = null;
+        showDock(false);
+        render();
+      }
 
-        // Lift-mode: drag ghost to zone
-        if (inspectorDragging?.ghostEl) {
-          positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
-          const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-          syncDropTargetHighlights(overZoneKey);
-        }
-      };
+      cancel();
+    };
 
-      const onUp = (ev) => {
-        ev.preventDefault();
-        clearTimeout(holdTimer);
+    const onCancel = (ev) => {
+      ev.preventDefault();
+      clearTimeout(holdTimer);
 
-        // Reordering: commit DOM order
-        if (reordering) {
-          if (trackEl) {
-            const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
-              .map((el) => Number(el.dataset.cardId))
-              .filter((n) => Number.isFinite(n));
+      stopAutoScroll();
 
-            state.zones[fromZoneKey] = ids;
-          }
+      if (inspectorDragging) {
+        const g = inspectorDragging.ghostEl;
+        if (g && g.parentNode) g.parentNode.removeChild(g);
 
-          // reset styles
-          cardEl.style.transform = "";
-          cardEl.style.zIndex = "";
-          cardEl.style.opacity = "";
+        removeBoardOverlay();
+        syncDropTargetHighlights(null);
 
-          // keep inspector open, refresh
-          render();
-          cancel();
-          return;
-        }
+        inspectorDragging = null;
+        showDock(false);
+        render();
+      }
 
-        // Lift-mode drop
-        if (inspectorDragging) {
-          const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+      cancel();
+    };
 
-          const g = inspectorDragging.ghostEl;
-          if (g && g.parentNode) g.parentNode.removeChild(g);
-
-          removeBoardOverlay();
-          syncDropTargetHighlights(null);
-
-          if (overZoneKey) {
-            moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
-          }
-
-          inspectorDragging = null;
-          showDock(false);
-          render();
-        }
-
-        cancel();
-      };
-
-      const onCancel = (ev) => {
-        ev.preventDefault();
-        clearTimeout(holdTimer);
-
-        if (inspectorDragging) {
-          const g = inspectorDragging.ghostEl;
-          if (g && g.parentNode) g.parentNode.removeChild(g);
-
-          removeBoardOverlay();
-          syncDropTargetHighlights(null);
-
-          inspectorDragging = null;
-          showDock(false);
-          render();
-        }
-
-        cancel();
-      };
-
-      cardEl.addEventListener("pointermove", onMove, { passive: false });
-      cardEl.addEventListener("pointerup", onUp, { passive: false });
-      cardEl.addEventListener("pointercancel", onCancel, { passive: false });
-    },
-    { passive: false }
-  );
+    cardEl.addEventListener("pointermove", onMove, { passive: false });
+    cardEl.addEventListener("pointerup", onUp, { passive: false });
+    cardEl.addEventListener("pointercancel", onCancel, { passive: false });
+  }, { passive: false });
 }
 
 
