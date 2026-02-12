@@ -978,7 +978,7 @@ body.isFocus #root{
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  top: 64px;                 /* sits below your topbar; tweak 54–74px */
+  top: 44px;                 /* sits below your topbar; tweak 54–74px */
   z-index: 9500;
   display: none;
   gap: 12px;
@@ -997,7 +997,38 @@ body.isFocus #root{
   min-height: auto;
 }
 
-/* give the focus board a little headroom so piles don’t visually collide */
-body.isFocus .app{
-  padding-top: 82px;
+
+
+/* =========================
+   PILES: remove extra boxes
+   ========================= */
+
+/* Kill the outer "box" styling on pile drop areas */
+.dropArea.isPile{
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  width: auto !important;
+  min-height: auto !important;
+  gap: 6px;
+}
+
+/* Keep the label, but make it feel "floating" */
+.pileLabel{
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin-top: 6px;
+  opacity: 0.9;
+}
+
+/* Also remove the container "box" behind the two piles */
+#topPiles{
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
 }
