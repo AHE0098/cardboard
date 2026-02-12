@@ -320,6 +320,12 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
     overlayEl = document.getElementById("inspectorOverlay");
     trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
 
+    // Hard reset any stale overlay states
+    if (overlayEl) {
+      overlayEl.classList.remove("reordering", "liftDragging");
+      overlayEl.style.overflowX = "auto";
+    }
+    
     const cancel = () => {
       clearTimeout(holdTimer);
       try { cardEl.releasePointerCapture(pointerId); } catch {}
@@ -336,7 +342,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       lifted = true;
 
       // ✅ NEW: lift-mode state class
-      if (overlayEl) overlayEl.classList.add("dragging");
+      if (overlayEl) overlayEl.classList.add("liftDragging");
 
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
@@ -443,39 +449,39 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
         inspectorDragging = null;
 
         // ✅ NEW: lift-mode cleanup lives here (not in showDock)
-        if (overlayEl) overlayEl.classList.remove("dragging");
+if (overlayEl) overlayEl.classList.remove("liftDragging");
 
         showDock(false);
         render();
       }
-      if (overlayEl) overlayEl.classList.remove("dragging");
+if (overlayEl) overlayEl.classList.remove("liftDragging");
       cancel();
     };
 
-    const onCancel = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
+const onCancel = (ev) => {
+  ev.preventDefault();
+  clearTimeout(holdTimer);
 
-      if (overlayEl) {
-        overlayEl.style.overflowX = "auto";
-        overlayEl.classList.remove("reordering");
-        overlayEl.classList.remove("dragging");
-      }
+  if (overlayEl) {
+    overlayEl.style.overflowX = "auto";
+    overlayEl.classList.remove("reordering");
+    overlayEl.classList.remove("liftDragging"); // ✅ fix
+  }
 
-      if (inspectorDragging) {
-        const g = inspectorDragging.ghostEl;
-        if (g && g.parentNode) g.parentNode.removeChild(g);
-if (overlayEl) overlayEl.classList.remove("dragging");
-        removeBoardOverlay();
-        syncDropTargetHighlights(null);
+  if (inspectorDragging) {
+    const g = inspectorDragging.ghostEl;
+    if (g && g.parentNode) g.parentNode.removeChild(g);
 
-        inspectorDragging = null;
-        showDock(false);
-        render();
-      }
+    removeBoardOverlay();
+    syncDropTargetHighlights(null);
 
-      cancel();
-    };
+    inspectorDragging = null;
+    showDock(false);
+    render();
+  }
+
+  cancel();
+};
 
     cardEl.addEventListener("pointermove", onMove, { passive: false });
     cardEl.addEventListener("pointerup", onUp, { passive: false });
