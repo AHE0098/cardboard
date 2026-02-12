@@ -816,44 +816,22 @@ function renderDropArea(zoneKey, opts = {}) {
   const zoneArr = state.zones[zoneKey] || [];
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
-  // Click -> open inspector (unless overlay)
-  if (!overlay) {
-    area.addEventListener("click", () => {
-      // IMPORTANT: piles have their own internal click handlers
-      // so only open inspector if click came from the AREA itself
-      if (zMeta.kind === "pile") return;
-      inspector = { zoneKey };
-      render();
-    });
-  }
-
-  // ===== PILES (deck / graveyard): compact silhouette + label + count =====
+  // ===== PILES (deck / graveyard) =====
   if (zMeta.kind === "pile") {
     area.classList.add("isPile");
 
     const pile = document.createElement("div");
     pile.className = "pileSilhouette";
 
-    // This is the *single placeholder card* (draggable target)
     const pileCard = document.createElement("div");
     pileCard.className = "miniCard pileCard";
-
-    // KEY: make it behave like a “card” for drag logic
-    pileCard.dataset.cardId = "__PILE__"; // sentinel
+    pileCard.dataset.cardId = "__PILE__";
     pileCard.dataset.fromZoneKey = zoneKey;
 
-    // Count badge
     const count = document.createElement("div");
     count.className = "pileCount";
     count.textContent = String(zoneArr.length);
     pileCard.appendChild(count);
-
-    // Enable drag-drop *onto* piles (and from pile placeholder if you want later)
-    // We use the same pointerdown handler but sentinel cardId is ignored by move logic.
-    if (!overlay) {
-      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
-      pileCard.addEventListener("click", (e) => e.stopPropagation());
-    }
 
     pile.appendChild(pileCard);
 
@@ -864,21 +842,31 @@ function renderDropArea(zoneKey, opts = {}) {
     area.appendChild(pile);
     area.appendChild(label);
 
-    // Single tap => inspector (deck / graveyard)
     if (!overlay) {
-      area.addEventListener("click", () => {
+      // Single tap => inspector
+      area.addEventListener("click", (e) => {
         if (dragging || inspectorDragging) return;
         inspector = { zoneKey };
         render();
       });
-    }
 
-    // Double tap deck => draw 1
-    if (!overlay && zoneKey === "deck") {
-      attachDeckDrawDoubleTap(area); // attach to area, not inner card
+      // Deck: double tap => draw
+      if (zoneKey === "deck") attachDeckDrawDoubleTap(area);
+
+      // Don’t let the inner card interfere
+      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+      pileCard.addEventListener("click", (e) => e.stopPropagation());
     }
 
     return area;
+  }
+
+  // ===== NON-PILE zones: click -> inspector (unless overlay) =====
+  if (!overlay) {
+    area.addEventListener("click", () => {
+      inspector = { zoneKey };
+      render();
+    });
   }
 
   // ===== HAND: render cards directly + fan layout =====
@@ -896,7 +884,7 @@ function renderDropArea(zoneKey, opts = {}) {
     return area;
   }
 
-  // ===== NON-HAND battlefield zones =====
+  // ===== battlefield rows =====
   const minSlots = 6;
   const slotCount = Math.max(minSlots, ids.length + 1);
 
@@ -1108,10 +1096,22 @@ function renderFocus(zoneKey) {
 function hitTestZone(x, y) {
   const els = document.elementsFromPoint(x, y);
 
-  // Prefer real board drop areas only
-  const area = els.find(n => n?.classList?.contains("dropArea") && n?.dataset?.zoneKey);
-  return area ? area.dataset.zoneKey : null;
+  for (const el of els) {
+    if (!el) continue;
+
+    // direct dropArea
+    if (el.classList?.contains("dropArea") && el.dataset?.zoneKey) {
+      return el.dataset.zoneKey;
+    }
+
+    // nested inside dropArea (common with fixed bars and inner wrappers)
+    const parent = el.closest?.(".dropArea");
+    if (parent?.dataset?.zoneKey) return parent.dataset.zoneKey;
+  }
+
+  return null;
 }
+  
  function syncDropTargetHighlights(activeZoneKey) {
   document.querySelectorAll(".dropArea").forEach(area => {
     const z = area.dataset.zoneKey;
