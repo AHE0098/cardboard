@@ -16,6 +16,7 @@ function ensureZoneArrays() {
   for (const k of keys) state.zones[k] ||= [];
 }
 ensureZoneArrays();
+  ensureDeckSeeded();
 
   subtitle.textContent = state.playerName;
 
@@ -282,23 +283,30 @@ function showDock(active) {
 
 
 function moveCard(cardId, fromZoneKey, toZoneKey) {
-  if (!toZoneKey || toZoneKey === fromZoneKey) return;
+  if (!toZoneKey) return;
+  if (!fromZoneKey) return;
+
+  if (toZoneKey === fromZoneKey) return;
 
   ensureZoneArrays();
 
-  // Special: moving INTO deck triggers a placement chooser
+  // Normal arrays
+  const fromArr = state.zones[fromZoneKey] || [];
+  const toArr = state.zones[toZoneKey] || [];
+
+  // Find and remove
+  const idx = fromArr.indexOf(cardId);
+  if (idx < 0) return;
+
+  // Special: moving INTO deck triggers placement chooser
   if (toZoneKey === "deck" && fromZoneKey !== "deck") {
+    fromArr.splice(idx, 1); // remove immediately
     openDeckPlacementChooser(cardId, fromZoneKey);
     return;
   }
 
-  const fromArr = state.zones[fromZoneKey] || [];
-  const toArr = state.zones[toZoneKey] || [];
-  const idx = fromArr.indexOf(cardId);
-  if (idx >= 0) {
-    fromArr.splice(idx, 1);
-    toArr.push(cardId);
-  }
+  fromArr.splice(idx, 1);
+  toArr.push(cardId);
 }
 
 function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
@@ -811,6 +819,9 @@ function renderDropArea(zoneKey, opts = {}) {
   // Click -> open inspector (unless overlay)
   if (!overlay) {
     area.addEventListener("click", () => {
+      // IMPORTANT: piles have their own internal click handlers
+      // so only open inspector if click came from the AREA itself
+      if (zMeta.kind === "pile") return;
       inspector = { zoneKey };
       render();
     });
@@ -823,15 +834,26 @@ function renderDropArea(zoneKey, opts = {}) {
     const pile = document.createElement("div");
     pile.className = "pileSilhouette";
 
+    // This is the *single placeholder card* (draggable target)
     const pileCard = document.createElement("div");
     pileCard.className = "miniCard pileCard";
+
+    // KEY: make it behave like a “card” for drag logic
+    pileCard.dataset.cardId = "__PILE__"; // sentinel
     pileCard.dataset.fromZoneKey = zoneKey;
 
-    // count badge
+    // Count badge
     const count = document.createElement("div");
     count.className = "pileCount";
     count.textContent = String(zoneArr.length);
     pileCard.appendChild(count);
+
+    // Enable drag-drop *onto* piles (and from pile placeholder if you want later)
+    // We use the same pointerdown handler but sentinel cardId is ignored by move logic.
+    if (!overlay) {
+      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+      pileCard.addEventListener("click", (e) => e.stopPropagation());
+    }
 
     pile.appendChild(pileCard);
 
@@ -842,9 +864,18 @@ function renderDropArea(zoneKey, opts = {}) {
     area.appendChild(pile);
     area.appendChild(label);
 
-    // Double-tap deck to draw 1 (ONLY in main board, not overlay)
+    // Single tap => inspector (deck / graveyard)
+    if (!overlay) {
+      area.addEventListener("click", () => {
+        if (dragging || inspectorDragging) return;
+        inspector = { zoneKey };
+        render();
+      });
+    }
+
+    // Double tap deck => draw 1
     if (!overlay && zoneKey === "deck") {
-      attachDeckDrawDoubleTap(pileCard);
+      attachDeckDrawDoubleTap(area); // attach to area, not inner card
     }
 
     return area;
@@ -1164,36 +1195,35 @@ function finalizeDrop(toZoneKey) {
   render();
 }
 
-function attachDeckDrawDoubleTap(pileCardEl) {
+function attachDeckDrawDoubleTap(deckAreaEl) {
   let lastTapAt = 0;
-  let singleTimer = null;
   const dblMs = 320;
 
-  pileCardEl.addEventListener("click", (e) => {
+  deckAreaEl.addEventListener("click", (e) => {
+    // We want deck area click to either inspect (single)
+    // or draw (double). Prevent bubbling to focus handlers.
     e.stopPropagation();
+
     if (dragging || inspectorDragging) return;
 
     const now = performance.now();
+    const isDouble = (now - lastTapAt) <= dblMs;
 
-    if (now - lastTapAt <= dblMs) {
-      if (singleTimer) clearTimeout(singleTimer);
-      singleTimer = null;
+    lastTapAt = now;
+
+    if (isDouble) {
       lastTapAt = 0;
-
       drawOneFromDeckWithAnimation();
       return;
     }
 
-    lastTapAt = now;
-    if (singleTimer) clearTimeout(singleTimer);
-    singleTimer = setTimeout(() => {
-      singleTimer = null;
-      // Single tap still opens inspector via parent dropArea click.
-      // We stopPropagation above, so to keep “tap opens inspector”:
-      // manually open inspector on single tap.
+    // single tap => inspector
+    setTimeout(() => {
+      // if a second tap happened, lastTapAt got reset to 0
+      if (lastTapAt === 0) return;
       inspector = { zoneKey: "deck" };
       render();
-    }, dblMs);
+    }, dblMs + 10);
   });
 }
 
@@ -1420,4 +1450,28 @@ function renderTopPilesBar() {
 
   host.appendChild(deckArea);
   host.appendChild(gyArea);
+}
+
+
+ function onPilePointerDown(e) {
+  e.preventDefault();
+
+  // If they press-hold a pile, we DON'T start dragging the pile.
+  // We just stop it from interfering with board gestures.
+  // (Later we could implement “drag pile” to mill etc.)
+  e.stopPropagation();
+}
+
+
+ function ensureDeckSeeded() {
+  // If deck empty, seed it with some IDs so draw works immediately.
+  if (Array.isArray(state.zones.deck) && state.zones.deck.length === 0) {
+    // quick demo seed: a mix of creatures + lands
+    state.zones.deck = [
+      200,201,202,203,204,205,
+      210,211,212,213,
+      101,102,103,104,105,
+      220,221,222,230,231,240,241
+    ];
+  }
 }
