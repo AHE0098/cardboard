@@ -834,8 +834,9 @@ body.isFocus #root{
 
 .inspectorOverlay.reordering{
   cursor: grabbing;
-  overflow-x: hidden;
-   scroll-snap-type: none;
+  scroll-snap-type: none;
+  overflow-x: auto;            /* ✅ allow scrolling */
+  -webkit-overflow-scrolling: auto; /* ✅ less iOS weirdness while dragging */
 }
 
 /* IMPORTANT: only dim/disable the track during lift-mode, not reordering */
