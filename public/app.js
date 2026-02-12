@@ -899,12 +899,7 @@ function renderFocus(zoneKey) {
   t1.style.fontSize = "18px";
   t1.textContent = ZONES.find(z => z.key === zoneKey)?.label || zoneKey;
 
-  const t2 = document.createElement("div");
-  t2.className = "zoneDropHint";
-  t2.textContent = "Press-hold a card to drag. Drop onto another zone.";
-
   title.appendChild(t1);
-  title.appendChild(t2);
 
   top.appendChild(title);
   container.appendChild(top);
