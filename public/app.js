@@ -126,14 +126,17 @@ function getManaTokenKey(tok) {
 }
 
 function buildManaSymbolEl(tok) {
-  // Fallback symbol: a styled circle with text
+  // Fallback symbol: a styled circle.
+  // NEW: colored pips show NO LETTERS — just a stronger color fill.
+  // Neutral costs (numbers) remain as text. Colorless stays neutral. X stays as text.
+
   const key = getManaTokenKey(tok);
   if (!key) return null;
 
   const el = document.createElement("div");
   el.className = "manaSymbol";
 
-  // data-mana for CSS coloring
+  const isNumber = /^\d+$/.test(tok);
   const manaKey =
     key === "W" ? "w" :
     key === "U" ? "u" :
@@ -144,9 +147,27 @@ function buildManaSymbolEl(tok) {
 
   el.dataset.mana = manaKey;
 
-  // Text (later you swap to images)
-  el.textContent = /^\d+$/.test(tok) ? tok : key;
+  // ✅ Keep neutral costs as-is (numbers)
+  if (isNumber) {
+    el.textContent = tok;
+    return el;
+  }
 
+  // ✅ For the 5 colored pips: no letters, just color fill
+  if (["W", "U", "B", "R", "G"].includes(key)) {
+    el.textContent = "";            // remove letter
+    el.setAttribute("aria-label", key);
+    return el;
+  }
+
+  // ✅ Keep X visible as text (still neutral-ish)
+  if (key === "X") {
+    el.textContent = "X";
+    return el;
+  }
+
+  // ✅ Colorless / generic fallback
+  el.textContent = key;
   return el;
 }
 
