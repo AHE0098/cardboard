@@ -1,65 +1,109 @@
-(() => {
-  const root = document.getElementById("root");
-  const subtitle = document.getElementById("subtitle");
-  const dragLayer = document.getElementById("dragLayer");
+// ✅ FIXED STRUCTURE
+// Everything that uses: root / subtitle / dragLayer / state / view / dragging / inspector
+// MUST live inside boot() (or be passed in). Your current file closes the IIFE too early.
 
-const state = structuredClone(window.DEMO_STATE || {
-  playerName: "Player 1",
- zones: { hand: [200,201,202], lands: [101,102], permanents: [210], deck: [], graveyard: [] },
-  tapped: {},
-  tarped: {}
-});
+
+(() => {
+const boot = () => {
+// Grab DOM refs *after* DOM exists
+const root = document.getElementById("root");
+const subtitle = document.getElementById("subtitle");
+const dragLayer = document.getElementById("dragLayer");
+
+
+// Fail loudly (prevents “blank page” mystery)
+if (!root) throw new Error("Missing #root");
+if (!subtitle) throw new Error("Missing #subtitle");
+if (!dragLayer) throw new Error("Missing #dragLayer");
+
+
+// State (safe clone + fallback)
+const fallbackState = {
+playerName: "Player 1",
+zones: { hand: [200, 201, 202], lands: [101, 102], permanents: [210], deck: [], graveyard: [] },
+tapped: {},
+tarped: {},
+};
+
+
+const state = typeof structuredClone === "function"
+? structuredClone(window.DEMO_STATE || fallbackState)
+: JSON.parse(JSON.stringify(window.DEMO_STATE || fallbackState));
+
+
+// ✅ EVERYTHING BELOW (your existing code) goes inside boot(), so it can see state/root/etc.
+
 
 function ensureZoneArrays() {
-  state.zones ||= {};
-  const keys = ["hand", "lands", "permanents", "deck", "graveyard"];
-  for (const k of keys) state.zones[k] ||= [];
+state.zones ||= {};
+const keys = ["hand", "lands", "permanents", "deck", "graveyard"];
+for (const k of keys) state.zones[k] ||= [];
 }
+
+
+function ensureDeckSeeded() {
+if (Array.isArray(state.zones.deck) && state.zones.deck.length === 0) {
+state.zones.deck = [
+200, 201, 202, 203, 204, 205,
+210, 211, 212, 213,
+101, 102, 103, 104, 105,
+220, 221, 222, 230, 231, 240, 241,
+];
+}
+}
+
+
 ensureZoneArrays();
-  ensureDeckSeeded();
+ensureDeckSeeded();
 
-  subtitle.textContent = state.playerName;
 
-  let view = { type: "focus", zoneKey: "hand" }; // or {type:"focus", zoneKey:"lands"}
-  let dragging = null; // {cardId, fromZoneKey, ghostEl, pointerId}
-  let inspector = null;
-  let inspectorDragging = null;
+subtitle.textContent = state.playerName;
+
+
+let view = { type: "focus", zoneKey: "hand" };
+let dragging = null;
+let inspector = null;
+let inspectorDragging = null;
+
 
 const ZONES = [
-  { key: "permanents", label: "Permanents", kind: "row" },
-  { key: "lands",      label: "Lands",      kind: "row" },
-  { key: "hand",       label: "Hand",       kind: "hand" },
-
-  // New piles (small zones)
-  { key: "deck",       label: "Deck",       kind: "pile" },
-  { key: "graveyard",  label: "Graveyard",  kind: "pile" },
+{ key: "permanents", label: "Permanents", kind: "row" },
+{ key: "lands", label: "Lands", kind: "row" },
+{ key: "hand", label: "Hand", kind: "hand" },
+{ key: "deck", label: "Deck", kind: "pile" },
+{ key: "graveyard", label: "Graveyard", kind: "pile" },
 ];
 
-    // --- Topbar Back button (between title and subtitle) ---
-  const topbar = document.querySelector(".topbar");
-  const titleEl = document.querySelector(".title");
 
-  const topBackBtn = document.createElement("button");
-  topBackBtn.className = "topBackBtn";
-  topBackBtn.textContent = "Back";
-  topBackBtn.addEventListener("click", () => {
-    inspector = null;
-    removeInspectorOverlay();
-    removeBoardOverlay();
-    syncDropTargetHighlights(null);
-    inspectorDragging = null;
-    showDock(false);
+// --- Topbar Back button (between title and subtitle) ---
+const topbar = document.querySelector(".topbar");
+const titleEl = document.querySelector(".title");
 
-    view = { type: "overview" };
-    render();
-  });
 
-  if (topbar && titleEl) {
-    // Insert between title and subtitle
-    topbar.insertBefore(topBackBtn, subtitle);
-  }
+const topBackBtn = document.createElement("button");
+topBackBtn.className = "topBackBtn";
+topBackBtn.textContent = "Back";
+topBackBtn.addEventListener("click", () => {
+  inspector = null;
+  removeInspectorOverlay();
+  removeBoardOverlay();
+  syncDropTargetHighlights(null);
+  inspectorDragging = null;
+  showDock(false);
+
+  view = { type: "overview" };
+  render();
+}); // ✅ THIS was missing
+
+if (topbar && titleEl) {
+  topbar.insertBefore(topBackBtn, subtitle);
+}
+
+
+
 
   
+
 function getCardImgSrc(cardId, opts = {}) {
   const playerKey = opts.playerKey || "p1";
 
@@ -71,6 +115,7 @@ function getCardImgSrc(cardId, opts = {}) {
   return `/cards/image${cardId}.png`;
 }
 
+ 
 function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   const c = document.createElement("div");
   c.className = "miniCard";
@@ -816,50 +861,51 @@ function renderDropArea(zoneKey, opts = {}) {
   const zoneArr = state.zones[zoneKey] || [];
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
-  // ===== PILES (deck / graveyard) =====
-  if (zMeta.kind === "pile") {
-    area.classList.add("isPile");
+// ===== PILES (deck / graveyard) =====
+if (zMeta.kind === "pile") {
+  area.classList.add("isPile");
 
-    const pile = document.createElement("div");
-    pile.className = "pileSilhouette";
+  const pile = document.createElement("div");
+  pile.className = "pileSilhouette";
 
-    const pileCard = document.createElement("div");
-    pileCard.className = "miniCard pileCard";
-    pileCard.dataset.cardId = "__PILE__";
-    pileCard.dataset.fromZoneKey = zoneKey;
+  const pileCard = document.createElement("div");
+  pileCard.className = "miniCard pileCard";
+  pileCard.dataset.cardId = "__PILE__";
+  pileCard.dataset.fromZoneKey = zoneKey;
 
-    const count = document.createElement("div");
-    count.className = "pileCount";
-    count.textContent = String(zoneArr.length);
-    pileCard.appendChild(count);
+  const count = document.createElement("div");
+  count.className = "pileCount";
+  count.textContent = String(zoneArr.length);
+  pileCard.appendChild(count);
 
-    pile.appendChild(pileCard);
+  pile.appendChild(pileCard);
 
-    const label = document.createElement("div");
-    label.className = "pileLabel";
-    label.textContent = zMeta.label;
+  const label = document.createElement("div");
+  label.className = "pileLabel";
+  label.textContent = zMeta.label;
 
-    area.appendChild(pile);
-    area.appendChild(label);
+  area.appendChild(pile);
+  area.appendChild(label);
 
-    if (!overlay) {
-      // Single tap => inspector
+  if (!overlay) {
+    if (zoneKey === "deck") {
+      // Deck handler already does single(inspect)+double(draw)
+      attachDeckDrawDoubleTap(area);
+    } else {
+      // Graveyard: single tap => inspector
       area.addEventListener("click", (e) => {
         if (dragging || inspectorDragging) return;
         inspector = { zoneKey };
         render();
       });
-
-      // Deck: double tap => draw
-      if (zoneKey === "deck") attachDeckDrawDoubleTap(area);
-
-      // Don’t let the inner card interfere
-      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
-      pileCard.addEventListener("click", (e) => e.stopPropagation());
     }
 
-    return area;
+    pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+    pileCard.addEventListener("click", (e) => e.stopPropagation());
   }
+
+  return area;
+}
 
   // ===== NON-PILE zones: click -> inspector (unless overlay) =====
   if (!overlay) {
@@ -1463,15 +1509,58 @@ function renderTopPilesBar() {
 }
 
 
- function ensureDeckSeeded() {
-  // If deck empty, seed it with some IDs so draw works immediately.
-  if (Array.isArray(state.zones.deck) && state.zones.deck.length === 0) {
-    // quick demo seed: a mix of creatures + lands
-    state.zones.deck = [
-      200,201,202,203,204,205,
-      210,211,212,213,
-      101,102,103,104,105,
-      220,221,222,230,231,240,241
-    ];
-  }
+
+
+
+
+
+
+
+
+
+  
+
+// ✅ MUST call render once to mount UI
+render();
+
+
+// ---------------------------
+// End of boot scope
+// ---------------------------
+
+
+// (Your render() and all other functions must be defined above this call.)
+
+
+// NOTE: If your code defines render() later, move render(); to the very bottom
+// right before the end of boot().
+};
+
+
+try {
+if (document.readyState === "loading") {
+document.addEventListener("DOMContentLoaded", boot, { once: true });
+} else {
+boot();
 }
+} catch (err) {
+console.error(err);
+document.body.innerHTML =
+`<pre style="padding:16px;white-space:pre-wrap;color:#fff;background:#b00020">\n` +
+`Boot error: ${String(err?.message || err)}\n` +
+`</pre>`;
+}
+})();
+
+
+/*
+WHAT WAS BROKEN IN YOUR VERSION
+- You had `})();` and THEN functions like ensureZoneArrays() using `state`.
+- That makes `state` out-of-scope => ReferenceError => blank screen.
+
+
+TO APPLY THIS FIX
+1) Keep exactly ONE `})();` at the very bottom of the file.
+2) Move ALL your existing functions + logic (everything after `})();`) inside boot().
+3) Ensure `render();` is called once at the end of boot() after render() is defined.
+*/
