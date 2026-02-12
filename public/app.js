@@ -263,22 +263,41 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
 
 function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
   let holdTimer = null;
-  let lifted = false;
 
-  // reorder state
-  let reordering = false;
+  // modes
+  let lifted = false;     // long-press lift-to-board mode
+  let reordering = false; // short horizontal drag reorder mode
+
+  // refs/state
   let start = null;
-  let trackEl = null;
   let overlayEl = null;
+  let trackEl = null;
 
-  // auto-scroll state (reorder mode)
-  let autoScrollRaf = null;
-  let autoScrollDir = 0; // -1 left, +1 right, 0 none
+  // reorder UX
+  let placeholderEl = null;
+  let draggingEl = null;        // same as cardEl but we treat as “floating”
+  let dragStartRect = null;
   let lastClientX = 0;
 
-  const EDGE_PX = 72;         // edge zone size for auto-scroll
-  const MAX_SPEED = 16;       // px per frame at the extreme edge (tweak 10–22)
-  const SWAP_GUARD_PX = 120;  // only swap when reasonably near another card
+  // auto-scroll
+  let autoScrollRaf = null;
+  let autoScrollDir = 0; // -1 left, +1 right, 0 none
+
+  // tuning
+  const EDGE_PX = 84;            // edge zone for auto-scroll
+  const MAX_SPEED = 22;          // px/frame at extreme edge
+  const ACTIVATION_DX = 10;      // how quickly reorder starts
+  const SWAP_HYSTERESIS = 0.08;  // deadzone around midpoints (0.0-0.2)
+  const CENTER_ON_DROP = true;
+
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+  const cleanupOverlay = () => {
+    if (!overlayEl) return;
+    overlayEl.classList.remove("reordering");
+    overlayEl.classList.remove("liftDragging");
+    overlayEl.style.overflowX = "auto";
+  };
 
   const stopAutoScroll = () => {
     autoScrollDir = 0;
@@ -286,37 +305,8 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
     autoScrollRaf = null;
   };
 
-  const tickAutoScroll = () => {
-    if (!reordering || !overlayEl || autoScrollDir === 0) {
-      stopAutoScroll();
-      return;
-    }
-
-    const rect = overlayEl.getBoundingClientRect();
-
-    // how deep into the edge zone are we? -> maps to speed
-    let intensity = 0;
-    if (autoScrollDir < 0) {
-      intensity = Math.max(0, (rect.left + EDGE_PX) - lastClientX) / EDGE_PX;
-    } else {
-      intensity = Math.max(0, lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
-    }
-
-    const speed = Math.round(MAX_SPEED * Math.min(1, intensity));
-
-    if (speed > 0) {
-      overlayEl.scrollLeft += autoScrollDir * speed;
-
-      // keep reordering “alive” while scrolling
-      reorderAtPointer(lastClientX);
-    }
-
-    autoScrollRaf = requestAnimationFrame(tickAutoScroll);
-  };
-
   const updateAutoScrollDir = (clientX) => {
     if (!overlayEl) return;
-
     const rect = overlayEl.getBoundingClientRect();
 
     let dir = 0;
@@ -330,42 +320,192 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
     }
   };
 
-  // reorder hit-testing (DOM reorder)
-  const reorderAtPointer = (clientX) => {
-    if (!trackEl) return;
+  const tickAutoScroll = () => {
+    if (!reordering || !overlayEl || autoScrollDir === 0) {
+      stopAutoScroll();
+      return;
+    }
 
-    const cards = Array.from(trackEl.querySelectorAll(".inspectorCard"));
-    const self = cardEl;
+    const rect = overlayEl.getBoundingClientRect();
 
-    // find nearest card by x midpoints
+    // intensity based on how deep into edge zone pointer is
+    let intensity = 0;
+    if (autoScrollDir < 0) {
+      intensity = (rect.left + EDGE_PX - lastClientX) / EDGE_PX;
+    } else {
+      intensity = (lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
+    }
+    intensity = clamp01(intensity);
+
+    const speed = Math.round(MAX_SPEED * intensity);
+    if (speed > 0) {
+      overlayEl.scrollLeft += autoScrollDir * speed;
+      // while scrolling, keep placeholder updated
+      updatePlaceholderFromPointer(lastClientX);
+    }
+
+    autoScrollRaf = requestAnimationFrame(tickAutoScroll);
+  };
+
+  const ensurePlaceholder = () => {
+    if (placeholderEl) return;
+
+    placeholderEl = document.createElement("div");
+    placeholderEl.className = "inspectorPlaceholder";
+
+    // inline style so you don’t need CSS
+    const r = cardEl.getBoundingClientRect();
+    placeholderEl.style.width = `${r.width}px`;
+    placeholderEl.style.height = `${r.height}px`;
+    placeholderEl.style.borderRadius = "18px";
+    placeholderEl.style.border = "1px dashed rgba(255,255,255,0.22)";
+    placeholderEl.style.background = "rgba(255,255,255,0.06)";
+    placeholderEl.style.boxShadow = "inset 0 0 0 1px rgba(0,0,0,0.25)";
+
+    trackEl.insertBefore(placeholderEl, cardEl.nextSibling);
+  };
+
+  const beginReorderMode = () => {
+    reordering = true;
+    lifted = false;
+    clearTimeout(holdTimer);
+
+    overlayEl.classList.add("reordering");
+    overlayEl.classList.remove("liftDragging");
+    overlayEl.style.overflowX = "auto"; // MUST allow scroll for auto-scroll
+
+    ensurePlaceholder();
+
+    // freeze the card’s “home” rect (so translation feels stable)
+    dragStartRect = cardEl.getBoundingClientRect();
+    draggingEl = cardEl;
+
+    // lift visual a bit
+    draggingEl.style.zIndex = "10010";
+    draggingEl.style.opacity = "0.96";
+    draggingEl.style.willChange = "transform";
+    draggingEl.style.transition = "transform 0ms"; // no lag while dragging
+  };
+
+  const endReorderModeCommit = () => {
+    stopAutoScroll();
+
+    // Drop card into placeholder spot
+    if (placeholderEl && trackEl && draggingEl) {
+      trackEl.insertBefore(draggingEl, placeholderEl);
+      placeholderEl.remove();
+      placeholderEl = null;
+    }
+
+    // reset styles
+    if (draggingEl) {
+      draggingEl.style.transform = "";
+      draggingEl.style.zIndex = "";
+      draggingEl.style.opacity = "";
+      draggingEl.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
+      draggingEl.style.willChange = "";
+    }
+
+    // commit new order to state
+    if (trackEl) {
+      const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
+        .map(el => Number(el.dataset.cardId))
+        .filter(n => Number.isFinite(n));
+      state.zones[fromZoneKey] = ids;
+    }
+
+    // optional: center the card that was dragged
+    if (CENTER_ON_DROP && draggingEl) {
+      try {
+        draggingEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+      } catch {}
+    }
+
+    reordering = false;
+    draggingEl = null;
+    dragStartRect = null;
+
+    cleanupOverlay();
+    render();
+  };
+
+  const endReorderModeCancel = () => {
+    stopAutoScroll();
+
+    // remove placeholder, put card back where it was (placeholder was after card)
+    if (placeholderEl) {
+      placeholderEl.remove();
+      placeholderEl = null;
+    }
+
+    if (draggingEl) {
+      draggingEl.style.transform = "";
+      draggingEl.style.zIndex = "";
+      draggingEl.style.opacity = "";
+      draggingEl.style.transition = "";
+      draggingEl.style.willChange = "";
+    }
+
+    reordering = false;
+    draggingEl = null;
+    dragStartRect = null;
+
+    cleanupOverlay();
+  };
+
+  const updatePlaceholderFromPointer = (clientX) => {
+    if (!trackEl || !placeholderEl || !draggingEl) return;
+
+    // Decide where placeholder should go based on closest midpoint
+    const cards = Array.from(trackEl.querySelectorAll(".inspectorCard")).filter(el => el !== draggingEl);
+
+    // If there are no other cards, keep placeholder where it is
+    if (cards.length === 0) return;
+
+    // find best candidate by midpoint distance
     let best = null;
+    let bestMid = 0;
     let bestDist = Infinity;
 
     for (const c of cards) {
-      if (c === self) continue;
       const r = c.getBoundingClientRect();
       const mid = r.left + r.width / 2;
       const d = Math.abs(clientX - mid);
       if (d < bestDist) {
         bestDist = d;
         best = c;
+        bestMid = mid;
       }
     }
 
-    // ✅ guard: if we're not close to any card, don't jitter-swap
-    if (!best || bestDist > SWAP_GUARD_PX) return;
+    if (!best) return;
 
+    // Hysteresis: don’t flip-flop near the midpoint
     const br = best.getBoundingClientRect();
-    const insertBefore = clientX < (br.left + br.width / 2);
+    const mid = bestMid;
+    const dead = br.width * SWAP_HYSTERESIS;
 
-    // ✅ avoid pointless DOM ops if already “in the right spot”
+    const insertBefore = clientX < (mid - dead) ? true : (clientX > (mid + dead) ? false : null);
+    if (insertBefore === null) return; // in deadzone: do nothing
+
+    // move placeholder (NOT the actual card) — much smoother
     if (insertBefore) {
-      if (self.previousElementSibling === best) return;
-      trackEl.insertBefore(self, best);
+      if (placeholderEl.nextSibling === best) return; // already right before best
+      trackEl.insertBefore(placeholderEl, best);
     } else {
-      if (self.nextElementSibling === best) return;
-      trackEl.insertBefore(self, best.nextSibling);
+      if (best.nextSibling === placeholderEl) return; // already right after best
+      trackEl.insertBefore(placeholderEl, best.nextSibling);
     }
+  };
+
+  const updateDraggingTransform = (clientX) => {
+    if (!draggingEl || !dragStartRect) return;
+
+    // translate relative to original rect center
+    const dx = clientX - start.x;
+
+    // subtle “lift” and tiny tilt makes it feel better
+    draggingEl.style.transform = `translateX(${dx}px) translateY(-6px) rotate(${dx * 0.02}deg)`;
   };
 
   cardEl.addEventListener("pointerdown", (e) => {
@@ -374,49 +514,37 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
     const pointerId = e.pointerId;
     try { cardEl.setPointerCapture(pointerId); } catch {}
 
-    start = { x: e.clientX, y: e.clientY };
-    lastClientX = e.clientX;
-
-    lifted = false;
-    reordering = false;
-
     overlayEl = document.getElementById("inspectorOverlay");
     trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
 
-    const cleanupOverlay = () => {
-      if (!overlayEl) return;
-      overlayEl.classList.remove("reordering");
-      overlayEl.classList.remove("liftDragging");
-      overlayEl.style.overflowX = "auto";
-    };
+    if (!overlayEl || !trackEl) return;
 
+    start = { x: e.clientX, y: e.clientY };
+    lastClientX = e.clientX;
+    lifted = false;
+    reordering = false;
+
+    // wipe stale states
     cleanupOverlay();
     stopAutoScroll();
 
     const cancel = () => {
       clearTimeout(holdTimer);
       stopAutoScroll();
-      cleanupOverlay();
 
       try { cardEl.releasePointerCapture(pointerId); } catch {}
       cardEl.removeEventListener("pointermove", onMove);
       cardEl.removeEventListener("pointerup", onUp);
       cardEl.removeEventListener("pointercancel", onCancel);
-
-      cardEl.style.transform = "";
-      cardEl.style.zIndex = "";
-      cardEl.style.opacity = "";
     };
 
     const lift = () => {
       if (reordering) return;
       lifted = true;
 
-      if (overlayEl) {
-        overlayEl.classList.add("liftDragging");
-        overlayEl.classList.remove("reordering");
-        overlayEl.style.overflowX = "hidden"; // lift-mode should not scroll
-      }
+      overlayEl.classList.add("liftDragging");
+      overlayEl.classList.remove("reordering");
+      overlayEl.style.overflowX = "hidden"; // lift-mode: don't scroll
 
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
@@ -436,43 +564,32 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
     const onMove = (ev) => {
       ev.preventDefault();
+      lastClientX = ev.clientX;
 
       const dx = ev.clientX - start.x;
       const dy = ev.clientY - start.y;
-      lastClientX = ev.clientX;
 
       // Decide reorder vs lift
       if (!lifted && !reordering) {
-        // horizontal intent => reorder
-        if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
-          reordering = true;
-          clearTimeout(holdTimer);
-
-          if (overlayEl) {
-            overlayEl.classList.add("reordering");
-            overlayEl.classList.remove("liftDragging");
-            overlayEl.style.overflowX = "auto"; // ✅ allow auto-scroll
-          }
-
-          cardEl.style.zIndex = "10010";
-          cardEl.style.opacity = "0.85";
+        if (Math.abs(dx) > ACTIVATION_DX && Math.abs(dx) > Math.abs(dy)) {
+          beginReorderMode();
         }
 
-        // if they move a lot (esp vertical), cancel lift
+        // if they move a lot vertically, cancel lift timer
         if (!reordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
           clearTimeout(holdTimer);
         }
       }
 
-      // Reorder mode: drag + swap positions + edge auto-scroll
+      // Reorder mode
       if (reordering) {
-        cardEl.style.transform = `translateX(${dx}px)`;
-        reorderAtPointer(ev.clientX);
+        updateDraggingTransform(ev.clientX);
+        updatePlaceholderFromPointer(ev.clientX);
         updateAutoScrollDir(ev.clientX);
         return;
       }
 
-      // Lift-mode: drag ghost to zone
+      // Lift-mode ghost drag to zones
       if (inspectorDragging?.ghostEl) {
         positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
         const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
@@ -484,29 +601,9 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       ev.preventDefault();
       clearTimeout(holdTimer);
 
-      // Reordering: commit DOM order
+      // Reorder commit
       if (reordering) {
-        stopAutoScroll();
-
-        if (trackEl) {
-          const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
-            .map((el) => Number(el.dataset.cardId))
-            .filter((n) => Number.isFinite(n));
-
-          state.zones[fromZoneKey] = ids;
-        }
-
-        // reset styles
-        cardEl.style.transform = "";
-        cardEl.style.zIndex = "";
-        cardEl.style.opacity = "";
-
-        // ✅ snap/center the dragged card after reorder
-        try {
-          cardEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-        } catch {}
-
-        render();
+        endReorderModeCommit();
         cancel();
         return;
       }
@@ -521,12 +618,11 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
         removeBoardOverlay();
         syncDropTargetHighlights(null);
 
-        if (overZoneKey) {
-          moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
-        }
+        if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
 
         inspectorDragging = null;
         showDock(false);
+        cleanupOverlay();
         render();
       }
 
@@ -537,7 +633,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       ev.preventDefault();
       clearTimeout(holdTimer);
 
-      stopAutoScroll();
+      if (reordering) endReorderModeCancel();
 
       if (inspectorDragging) {
         const g = inspectorDragging.ghostEl;
@@ -548,6 +644,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
         inspectorDragging = null;
         showDock(false);
+        cleanupOverlay();
         render();
       }
 
