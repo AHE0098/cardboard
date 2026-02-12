@@ -911,12 +911,30 @@ body.isFocus #root{
   background-position: center;
   box-shadow: 0 18px 40px rgba(0,0,0,0.45);
   transform: translate(0,0) scale(1) rotate(-2deg);
-  transition: transform 260ms cubic-bezier(.2,.9,.2,1);
+   transition: transform 520ms cubic-bezier(.2,.9,.2,1);
   z-index: 12050;
   pointer-events: none;
   left: 0;
   top: 0;
 }
+
+/* Ghosts for the “hand shifts right” animation */
+.handShiftGhost{
+  position: fixed;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background:
+    radial-gradient(120px 120px at 30% 20%, rgba(255,255,255,0.08), transparent 65%),
+    linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 18px 40px rgba(0,0,0,0.45);
+  transform: translate(0,0) rotate(0deg);
+  transition: transform 420ms cubic-bezier(.2,.9,.2,1);
+  z-index: 12040; /* under flyCard (12050), over UI */
+  pointer-events: none;
+}
+
 
 /* ===== Deck placement chooser (Top / Bottom + Tinder swipe) ===== */
 .deckChoiceOverlay{
