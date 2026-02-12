@@ -10,7 +10,12 @@ const state = structuredClone(window.DEMO_STATE || {
   tarped: {}
 });
 
-
+function ensureZoneArrays() {
+  state.zones ||= {};
+  const keys = ["hand", "lands", "permanents", "deck", "graveyard"];
+  for (const k of keys) state.zones[k] ||= [];
+}
+ensureZoneArrays();
 
   subtitle.textContent = state.playerName;
 
@@ -275,8 +280,16 @@ function showDock(active) {
 function moveCard(cardId, fromZoneKey, toZoneKey) {
   if (!toZoneKey || toZoneKey === fromZoneKey) return;
 
-  const fromArr = state.zones[fromZoneKey];
-  const toArr = state.zones[toZoneKey];
+  ensureZoneArrays();
+
+  // Special: moving INTO deck triggers a placement chooser
+  if (toZoneKey === "deck" && fromZoneKey !== "deck") {
+    openDeckPlacementChooser(cardId, fromZoneKey);
+    return;
+  }
+
+  const fromArr = state.zones[fromZoneKey] || [];
+  const toArr = state.zones[toZoneKey] || [];
   const idx = fromArr.indexOf(cardId);
   if (idx >= 0) {
     fromArr.splice(idx, 1);
@@ -781,6 +794,8 @@ track.appendChild(card);
 function renderDropArea(zoneKey, opts = {}) {
   const { overlay = false } = opts;
 
+  ensureZoneArrays();
+
   const area = document.createElement("section");
   area.className = "dropArea";
   area.dataset.zoneKey = zoneKey;
@@ -797,20 +812,18 @@ function renderDropArea(zoneKey, opts = {}) {
     });
   }
 
-  // ===== PILES (deck / graveyard): render compact silhouette + label + count =====
+  // ===== PILES (deck / graveyard): compact silhouette + label + count =====
   if (zMeta.kind === "pile") {
     area.classList.add("isPile");
 
     const pile = document.createElement("div");
     pile.className = "pileSilhouette";
 
-    // Show a “card back” / silhouette as the pile
     const pileCard = document.createElement("div");
     pileCard.className = "miniCard pileCard";
-    pileCard.dataset.cardId = "-1";
     pileCard.dataset.fromZoneKey = zoneKey;
 
-    // Optional count badge
+    // count badge
     const count = document.createElement("div");
     count.className = "pileCount";
     count.textContent = String(zoneArr.length);
@@ -825,6 +838,11 @@ function renderDropArea(zoneKey, opts = {}) {
     area.appendChild(pile);
     area.appendChild(label);
 
+    // Double-tap deck to draw 1 (ONLY in main board, not overlay)
+    if (!overlay && zoneKey === "deck") {
+      attachDeckDrawDoubleTap(pileCard);
+    }
+
     return area;
   }
 
@@ -836,12 +854,9 @@ function renderDropArea(zoneKey, opts = {}) {
 
   if (zoneKey === "hand") {
     for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      row.appendChild(makeMiniCardEl(id, zoneKey, { overlay }));
+      row.appendChild(makeMiniCardEl(ids[i], zoneKey, { overlay }));
     }
-
     layoutHandFan(row, ids);
-
     area.appendChild(row);
     return area;
   }
@@ -857,10 +872,7 @@ function renderDropArea(zoneKey, opts = {}) {
     const id = ids[i];
     if (id !== undefined) {
       const c = makeMiniCardEl(id, zoneKey, { overlay });
-
-      // tapped/tarp toggles only on real board
       if (!overlay) attachTapStates(c, id);
-
       slot.appendChild(c);
     }
 
@@ -1171,3 +1183,233 @@ function attachTapStates(el, cardId) {
 
   render();
 })();
+
+function attachDeckDrawDoubleTap(pileCardEl) {
+  let lastTapAt = 0;
+  let singleTimer = null;
+  const dblMs = 320;
+
+  pileCardEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (dragging || inspectorDragging) return;
+
+    const now = performance.now();
+
+    if (now - lastTapAt <= dblMs) {
+      if (singleTimer) clearTimeout(singleTimer);
+      singleTimer = null;
+      lastTapAt = 0;
+
+      drawOneFromDeckWithAnimation();
+      return;
+    }
+
+    lastTapAt = now;
+    if (singleTimer) clearTimeout(singleTimer);
+    singleTimer = setTimeout(() => {
+      singleTimer = null;
+      // Single tap still opens inspector via parent dropArea click.
+      // We stopPropagation above, so to keep “tap opens inspector”:
+      // manually open inspector on single tap.
+      inspector = { zoneKey: "deck" };
+      render();
+    }, dblMs);
+  });
+}
+
+function drawOneFromDeckWithAnimation() {
+  ensureZoneArrays();
+
+  const deck = state.zones.deck;
+  if (!deck || deck.length === 0) return;
+
+  // capture start rect from deck pile
+  const pile = document.querySelector(".zone-deck .pileCard");
+  const fromRect = pile?.getBoundingClientRect?.();
+  const cardId = deck[0]; // TOP of deck
+
+  // Update state FIRST (so hand will contain it)
+  deck.shift();
+  state.zones.hand.push(cardId);
+
+  // Render so the card exists in hand DOM
+  render();
+
+  // Animate on next frame once layout is updated
+  requestAnimationFrame(() => {
+    const toEl = document.querySelector(`.zone-hand .miniCard[data-card-id="${cardId}"]`);
+    if (!fromRect || !toEl) return;
+
+    // Hide the destination briefly so the “fly-in” feels real
+    toEl.style.visibility = "hidden";
+    animateCardFlight(cardId, fromRect, toEl, () => {
+      toEl.style.visibility = "";
+    });
+  });
+}
+
+function animateCardFlight(cardId, fromRect, toEl, done) {
+  const toRect = toEl.getBoundingClientRect();
+
+  const ghost = document.createElement("div");
+  ghost.className = "flyCard";
+
+  // Try to use image if available
+  const src = getCardImgSrc(cardId, { playerKey: "p1" });
+  if (src) ghost.style.backgroundImage = `url("${src}")`;
+
+  // Start at deck pile center
+  const startX = fromRect.left + fromRect.width / 2;
+  const startY = fromRect.top + fromRect.height / 2;
+
+  // End at target card center
+  const endX = toRect.left + toRect.width / 2;
+  const endY = toRect.top + toRect.height / 2;
+
+  ghost.style.left = `${startX}px`;
+  ghost.style.top = `${startY}px`;
+
+  document.body.appendChild(ghost);
+
+  // Force layout
+  ghost.getBoundingClientRect();
+
+  const dx = endX - startX;
+  const dy = endY - startY;
+
+  // Fly + slight scale for juice
+  ghost.style.transform = `translate(${dx}px, ${dy}px) scale(1.04) rotate(2deg)`;
+
+  const cleanup = () => {
+    ghost.removeEventListener("transitionend", cleanup);
+    if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
+    if (typeof done === "function") done();
+  };
+
+  ghost.addEventListener("transitionend", cleanup);
+}
+
+function openDeckPlacementChooser(cardId, fromZoneKey) {
+  ensureZoneArrays();
+
+  // Remove from its origin immediately (so it feels committed)
+  const fromArr = state.zones[fromZoneKey] || [];
+  const idx = fromArr.indexOf(cardId);
+  if (idx >= 0) fromArr.splice(idx, 1);
+
+  // Build overlay
+  const ov = document.createElement("div");
+  ov.id = "deckChoiceOverlay";
+  ov.className = "deckChoiceOverlay";
+
+  const card = document.createElement("div");
+  card.className = "deckChoiceCard";
+  card.dataset.cardId = String(cardId);
+
+  const imgSrc = getCardImgSrc(cardId, { playerKey: "p1" });
+  if (imgSrc) card.style.backgroundImage = `url("${imgSrc}")`;
+
+  const hint = document.createElement("div");
+  hint.className = "deckChoiceHint";
+  hint.textContent = "Swipe → TOP • Swipe ← BOTTOM";
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "deckChoiceButtons";
+
+  const btnBottom = document.createElement("button");
+  btnBottom.className = "deckChoiceBtn bottom";
+  btnBottom.textContent = "Bottom";
+
+  const btnTop = document.createElement("button");
+  btnTop.className = "deckChoiceBtn top";
+  btnTop.textContent = "Top";
+
+  btnRow.appendChild(btnBottom);
+  btnRow.appendChild(btnTop);
+
+  ov.appendChild(card);
+  ov.appendChild(hint);
+  ov.appendChild(btnRow);
+  document.body.appendChild(ov);
+
+  const commit = (where) => {
+    const deck = state.zones.deck;
+    if (where === "top") deck.unshift(cardId);
+    else deck.push(cardId);
+
+    ov.remove();
+    render();
+  };
+
+  const cancel = () => {
+    // If they back out, put it back where it came from (end)
+    state.zones[fromZoneKey].push(cardId);
+    ov.remove();
+    render();
+  };
+
+  btnTop.addEventListener("click", (e) => { e.stopPropagation(); commit("top"); });
+  btnBottom.addEventListener("click", (e) => { e.stopPropagation(); commit("bottom"); });
+
+  // Click outside cancels
+  ov.addEventListener("click", (e) => {
+    if (e.target === ov) cancel();
+  });
+
+  // Swipe logic
+  let startX = 0, startY = 0, active = false;
+
+  card.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    active = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    try { card.setPointerCapture(e.pointerId); } catch {}
+    card.style.transition = "transform 0ms";
+  }, { passive: false });
+
+  card.addEventListener("pointermove", (e) => {
+    if (!active) return;
+    e.preventDefault();
+
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+
+    // Tinder-ish: mostly horizontal
+    const rot = Math.max(-12, Math.min(12, dx * 0.06));
+    card.style.transform = `translate(${dx}px, ${dy * 0.15}px) rotate(${rot}deg)`;
+  }, { passive: false });
+
+  card.addEventListener("pointerup", (e) => {
+    if (!active) return;
+    active = false;
+    e.preventDefault();
+
+    const dx = e.clientX - startX;
+
+    // Threshold: swipe right => top, left => bottom
+    if (dx > 90) {
+      card.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
+      card.style.transform = "translate(220px, 0) rotate(12deg)";
+      setTimeout(() => commit("top"), 120);
+      return;
+    }
+    if (dx < -90) {
+      card.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
+      card.style.transform = "translate(-220px, 0) rotate(-12deg)";
+      setTimeout(() => commit("bottom"), 120);
+      return;
+    }
+
+    // Snap back if not far enough
+    card.style.transition = "transform 160ms cubic-bezier(.2,.9,.2,1)";
+    card.style.transform = "translate(0,0) rotate(0deg)";
+  }, { passive: false });
+
+  card.addEventListener("pointercancel", () => {
+    active = false;
+    card.style.transition = "transform 160ms cubic-bezier(.2,.9,.2,1)";
+    card.style.transform = "translate(0,0) rotate(0deg)";
+  });
+}
+
