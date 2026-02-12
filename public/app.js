@@ -5,7 +5,7 @@
 
 const state = structuredClone(window.DEMO_STATE || {
   playerName: "Player 1",
-  zones: { hand: [1,2,3], lands: [], permanents: [] },
+ zones: { hand: [200,201,202], lands: [101,102], permanents: [210], deck: [], graveyard: [] },
   tapped: {},
   tarped: {}
 });
@@ -19,10 +19,14 @@ const state = structuredClone(window.DEMO_STATE || {
   let inspector = null;
   let inspectorDragging = null;
 
- const ZONES = [
-  { key: "permanents", label: "Permanents" },
-  { key: "lands", label: "Lands" },
-  { key: "hand", label: "Hand" }
+const ZONES = [
+  { key: "permanents", label: "Permanents", kind: "row" },
+  { key: "lands",      label: "Lands",      kind: "row" },
+  { key: "hand",       label: "Hand",       kind: "hand" },
+
+  // New piles (small zones)
+  { key: "deck",       label: "Deck",       kind: "pile" },
+  { key: "graveyard",  label: "Graveyard",  kind: "pile" },
 ];
 
     // --- Topbar Back button (between title and subtitle) ---
@@ -235,13 +239,20 @@ function renderOverview() {
   const tiles = document.createElement("div");
   tiles.className = "zoneTiles";
 
-  ZONES.forEach(z => {
+  // Show “main” zones first
+  ["permanents", "lands", "hand"].forEach((k) => {
+    const z = ZONES.find(x => x.key === k);
+    tiles.appendChild(renderZoneTile(z.key, z.label, true));
+  });
+
+  // Then show the piles
+  ["deck", "graveyard"].forEach((k) => {
+    const z = ZONES.find(x => x.key === k);
     tiles.appendChild(renderZoneTile(z.key, z.label, true));
   });
 
   wrap.appendChild(tiles);
 
-  // (Optional) tiny hint row
   const hint = document.createElement("div");
   hint.className = "overviewHint";
   hint.textContent = "Tap a zone to inspect. Double-tap a zone to focus.";
@@ -775,6 +786,10 @@ function renderDropArea(zoneKey, opts = {}) {
   area.dataset.zoneKey = zoneKey;
   area.classList.add(`zone-${zoneKey}`);
 
+  const zoneArr = state.zones[zoneKey] || [];
+  const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
+
+  // Click -> open inspector (unless overlay)
   if (!overlay) {
     area.addEventListener("click", () => {
       inspector = { zoneKey };
@@ -782,47 +797,78 @@ function renderDropArea(zoneKey, opts = {}) {
     });
   }
 
+  // ===== PILES (deck / graveyard): render compact silhouette + label + count =====
+  if (zMeta.kind === "pile") {
+    area.classList.add("isPile");
+
+    const pile = document.createElement("div");
+    pile.className = "pileSilhouette";
+
+    // Show a “card back” / silhouette as the pile
+    const pileCard = document.createElement("div");
+    pileCard.className = "miniCard pileCard";
+    pileCard.dataset.cardId = "-1";
+    pileCard.dataset.fromZoneKey = zoneKey;
+
+    // Optional count badge
+    const count = document.createElement("div");
+    count.className = "pileCount";
+    count.textContent = String(zoneArr.length);
+    pileCard.appendChild(count);
+
+    pile.appendChild(pileCard);
+
+    const label = document.createElement("div");
+    label.className = "pileLabel";
+    label.textContent = zMeta.label;
+
+    area.appendChild(pile);
+    area.appendChild(label);
+
+    return area;
+  }
+
+  // ===== HAND: render cards directly + fan layout =====
   const row = document.createElement("div");
   row.className = "slotRow";
 
-  const ids = state.zones[zoneKey];
+  const ids = zoneArr;
 
- // ===== HAND: render cards directly + fan layout =====
-if (zoneKey === "hand") {
-  for (let i = 0; i < ids.length; i++) {
-    const id = ids[i];
-    row.appendChild(makeMiniCardEl(id, zoneKey, { overlay }));
+  if (zoneKey === "hand") {
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      row.appendChild(makeMiniCardEl(id, zoneKey, { overlay }));
+    }
+
+    layoutHandFan(row, ids);
+
+    area.appendChild(row);
+    return area;
   }
 
-  layoutHandFan(row, ids);
+  // ===== NON-HAND battlefield zones =====
+  const minSlots = 6;
+  const slotCount = Math.max(minSlots, ids.length + 1);
+
+  for (let i = 0; i < slotCount; i++) {
+    const slot = document.createElement("div");
+    slot.className = "slot";
+
+    const id = ids[i];
+    if (id !== undefined) {
+      const c = makeMiniCardEl(id, zoneKey, { overlay });
+
+      // tapped/tarp toggles only on real board
+      if (!overlay) attachTapStates(c, id);
+
+      slot.appendChild(c);
+    }
+
+    row.appendChild(slot);
+  }
 
   area.appendChild(row);
   return area;
-}
-
-// ===== NON-HAND =====
-const minSlots = 6;
-const slotCount = Math.max(minSlots, ids.length + 1);
-
-for (let i = 0; i < slotCount; i++) {
-  const slot = document.createElement("div");
-  slot.className = "slot";
-
-  const id = ids[i];
-  if (id !== undefined) {
-    const c = makeMiniCardEl(id, zoneKey, { overlay });
-
-    // tapped/tarp toggles only on real board
-    if (!overlay) attachTapStates(c, id);
-
-    slot.appendChild(c);
-  }
-
-  row.appendChild(slot);
-}
-
-area.appendChild(row);
-return area;
 }
 
 
@@ -898,6 +944,7 @@ function renderZoneTile(zoneKey, label, clickable) {
 
   return tile;
 }
+  
 function renderFocus(zoneKey) {
   const container = document.createElement("div");
   container.className = "focusView";
@@ -905,23 +952,28 @@ function renderFocus(zoneKey) {
   const top = document.createElement("div");
   top.className = "focusTop";
 
+  // Piles bar uses the “top space” above the board
+  const pilesBar = document.createElement("div");
+  pilesBar.className = "pilesBar";
 
-  const title = document.createElement("div");
-  title.style.display = "flex";
-  title.style.flexDirection = "column";
-  title.style.gap = "2px";
+  const deckArea = renderDropArea("deck");
+  deckArea.classList.add("pileCompact");
+  const gyArea = renderDropArea("graveyard");
+  gyArea.classList.add("pileCompact");
 
-  top.appendChild(title);
+  pilesBar.appendChild(deckArea);
+  pilesBar.appendChild(gyArea);
+
+  top.appendChild(pilesBar);
   container.appendChild(top);
 
-  // Board in focus: still show all zones as drop targets,
-  // but add a class to the focused one for styling.
+  // Board in focus: show all three battlefield zones as drop targets
   const board = document.createElement("div");
   board.className = "board focusBoard";
 
-  ZONES.forEach(z => {
-    const area = renderDropArea(z.key);
-    if (z.key === zoneKey) area.classList.add("isFocusZone");
+  ["permanents", "lands", "hand"].forEach((k) => {
+    const area = renderDropArea(k);
+    if (k === zoneKey) area.classList.add("isFocusZone");
     board.appendChild(area);
   });
 
