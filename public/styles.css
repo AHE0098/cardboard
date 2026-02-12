@@ -271,7 +271,7 @@ body{
   -webkit-overflow-scrolling: touch;
 }
 
-.inspectorOverlay.dragging{
+.inspectorOverlay.liftdragging{
   cursor: grabbing;
   touch-action: none;
 }
@@ -427,8 +427,8 @@ body{
   border: 1px solid rgba(255,255,255,0.08);
 }
 
-/* when overlay is active, inspector visuals should not steal clicks */
-.inspectorOverlay.dragging .inspectorTrack{
+/* Only dim/disable during lift-to-board drag */
+.inspectorOverlay.liftDragging .inspectorTrack{
   pointer-events: none;
   opacity: 0.35;
 }
