@@ -25,7 +25,31 @@ const state = structuredClone(window.DEMO_STATE || {
   { key: "hand", label: "Hand" }
 ];
 
+    // --- Topbar Back button (between title and subtitle) ---
+  const topbar = document.querySelector(".topbar");
+  const titleEl = document.querySelector(".title");
 
+  const topBackBtn = document.createElement("button");
+  topBackBtn.className = "topBackBtn";
+  topBackBtn.textContent = "Back";
+  topBackBtn.addEventListener("click", () => {
+    inspector = null;
+    removeInspectorOverlay();
+    removeBoardOverlay();
+    syncDropTargetHighlights(null);
+    inspectorDragging = null;
+    showDock(false);
+
+    view = { type: "overview" };
+    render();
+  });
+
+  if (topbar && titleEl) {
+    // Insert between title and subtitle
+    topbar.insertBefore(topBackBtn, subtitle);
+  }
+
+  
 function getCardImgSrc(cardId) {
   return `/cards/image${cardId}.png`; // matches /public/cards/imageXYZ.png
 }
@@ -50,13 +74,7 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   pic.appendChild(img);
   c.appendChild(pic);
 
-  // id badge
-  const tag = document.createElement("div");
-  tag.className = "miniId";
-  tag.textContent = String(cardId);
-  c.appendChild(tag);
-
-  // PT badge (bottom-center) if available
+   // PT badge (bottom-center) if available
   const data = window.CARD_REPO?.[cardId];
   if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
     const pt = document.createElement("div");
@@ -177,6 +195,10 @@ function render() {
   root.innerHTML = "";
  document.body.classList.toggle("isFocus", view?.type === "focus");
   document.body.classList.toggle("isOverview", view?.type !== "focus");
+    // show Back only when we're in focus
+  const b = document.querySelector(".topBackBtn");
+  if (b) b.style.display = (view?.type === "focus") ? "inline-flex" : "none";
+  
   if (view?.type === "focus" && view.zoneKey) {
     root.appendChild(renderFocus(view.zoneKey));
   } else {
@@ -220,7 +242,7 @@ function renderOverview() {
 function showDock(active) {
   const overlay = document.getElementById("inspectorOverlay");
   if (overlay) {
-    overlay.classList.toggle("dragging", !!active);
+    // Do NOT toggle ".dragging" here (that's reserved for lift-mode UI only)
     overlay.style.overflowX = active ? "hidden" : "auto";
   }
 }
@@ -309,9 +331,12 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       cardEl.style.opacity = "";
     };
 
-    const lift = () => {
-      if (reordering) return;     // ✅ don’t lift if we’re reordering
+        const lift = () => {
+      if (reordering) return;
       lifted = true;
+
+      // ✅ NEW: lift-mode state class
+      if (overlayEl) overlayEl.classList.add("dragging");
 
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
@@ -343,7 +368,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
           clearTimeout(holdTimer);             // ✅ cancel long-press lift
           if (overlayEl) {
             overlayEl.style.overflowX = "hidden"; // ✅ stop scroll fighting
-            overlayEl.classList.add("dragging");
+            overlayEl.classList.add("reordering");
           }
           cardEl.style.zIndex = "10010";
           cardEl.style.opacity = "0.85";
@@ -378,15 +403,17 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       if (reordering) {
         if (overlayEl) {
           overlayEl.style.overflowX = "auto";
-          overlayEl.classList.remove("dragging");
+          overlayEl.classList.remove("reordering");
         }
 
-        // commit new order from DOM
-        const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
-          .map(el => Number(el.dataset.cardId))
-          .filter(n => Number.isFinite(n));
+        // commit new order from DOM (guard null)
+        if (trackEl) {
+          const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
+            .map(el => Number(el.dataset.cardId))
+            .filter(n => Number.isFinite(n));
 
-        state.zones[fromZoneKey] = ids;
+          state.zones[fromZoneKey] = ids;
+        }
 
         // reset styles
         cardEl.style.transform = "";
@@ -409,14 +436,19 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
         removeBoardOverlay();
         syncDropTargetHighlights(null);
 
-        if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
+        if (overZoneKey) {
+          moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
+        }
 
         inspectorDragging = null;
-        showDock(false);
 
+        // ✅ NEW: lift-mode cleanup lives here (not in showDock)
+        if (overlayEl) overlayEl.classList.remove("dragging");
+
+        showDock(false);
         render();
       }
-
+      if (overlayEl) overlayEl.classList.remove("dragging");
       cancel();
     };
 
@@ -426,13 +458,14 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
       if (overlayEl) {
         overlayEl.style.overflowX = "auto";
+        overlayEl.classList.remove("reordering");
         overlayEl.classList.remove("dragging");
       }
 
       if (inspectorDragging) {
         const g = inspectorDragging.ghostEl;
         if (g && g.parentNode) g.parentNode.removeChild(g);
-
+if (overlayEl) overlayEl.classList.remove("dragging");
         removeBoardOverlay();
         syncDropTargetHighlights(null);
 
@@ -515,17 +548,12 @@ closeBtn.addEventListener("click", (e) => {
       name.textContent = data.name || `Card ${id}`;
       card.appendChild(name);
 
-     if (data.power !== undefined) {
+    if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
   const pt = document.createElement("div");
   pt.className = "inspectorPT";
   pt.textContent = `${data.power}|${data.toughness}`;
   card.appendChild(pt);
 }
-
-      const idTag = document.createElement("div");
-      idTag.className = "inspectorId";
-      idTag.textContent = `#${id}`;
-      card.appendChild(idTag);
 
 attachInspectorLongPress(card, id, zoneKey);
 
@@ -686,13 +714,6 @@ function renderFocus(zoneKey) {
   const top = document.createElement("div");
   top.className = "focusTop";
 
-  const back = document.createElement("button");
-  back.className = "backBtn";
-  back.textContent = "Back";
-  back.addEventListener("click", () => {
-    view = { type: "overview" };
-    render();
-  });
 
   const title = document.createElement("div");
   title.style.display = "flex";
@@ -711,7 +732,6 @@ function renderFocus(zoneKey) {
   title.appendChild(t1);
   title.appendChild(t2);
 
-  top.appendChild(back);
   top.appendChild(title);
   container.appendChild(top);
 
