@@ -1187,6 +1187,47 @@ body.isFocus .app{
   box-shadow: 0 2px 10px rgba(0,0,0,0.38);
 }
 
+/* ===== Mana pips: MUCH more vibrant (final overrides) ===== */
+.manaSymbol{
+  border-color: rgba(255,255,255,0.28);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.42), inset 0 0 0 1px rgba(0,0,0,0.25);
+}
+
+/* punchy colors */
+.manaSymbol[data-mana="w"]{ background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.98), rgba(255,255,255,0.38) 58%, rgba(255,255,255,0.16)); }
+.manaSymbol[data-mana="u"]{ background: radial-gradient(circle at 30% 30%, rgba(130,205,255,0.98), rgba(55,135,255,0.52) 62%, rgba(35,70,220,0.28)); }
+.manaSymbol[data-mana="b"]{ background: radial-gradient(circle at 30% 30%, rgba(210,190,255,0.92), rgba(120,90,210,0.54) 60%, rgba(35,20,70,0.34)); }
+.manaSymbol[data-mana="r"]{ background: radial-gradient(circle at 30% 30%, rgba(255,170,140,0.98), rgba(255,80,60,0.58) 62%, rgba(210,30,25,0.34)); }
+.manaSymbol[data-mana="g"]{ background: radial-gradient(circle at 30% 30%, rgba(180,255,195,0.96), rgba(60,220,120,0.52) 62%, rgba(20,140,70,0.30)); }
+
+/* keep neutral numbers readable */
+.manaSymbol[data-mana="c"]{ background: rgba(255,255,255,0.10); }
+.manaSymbol[data-mana="x"]{ background: rgba(255,255,255,0.10); }
 
 
-/* Ensure miniCard already has relative positioning (you already do) */
+/* ===== Focus topbar layout: Back on the left, piles on the right ===== */
+body.isFocus .title,
+body.isFocus .subtitle{
+  display: none !important;
+}
+
+body.isFocus .topbar{
+  justify-content: flex-start;
+  align-items: center;
+}
+
+body.isFocus .topBackBtn{
+  margin-right: auto; /* pushes piles to the far right */
+}
+
+/* In focus mode, #topPiles lives inside the topbar (not fixed) */
+body.isFocus #topPiles{
+  position: static !important;
+  transform: none !important;
+  top: auto !important;
+  left: auto !important;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 0 !important;
+}
