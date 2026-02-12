@@ -35,7 +35,7 @@ body{
 }
 .topBackBtn:active{ transform: translateY(1px); }
 
-.topbar{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .title{font-weight:800;letter-spacing:0.2px;font-size:20px}
 .subtitle{color:var(--muted);font-size:13px}
 
@@ -321,10 +321,13 @@ body{
 }
 
 .inspectorId {
-  display:none !important;
   font-size: 12px;
   color: #777;
   margin-top: 6px;
+}
+
+.miniId{
+  display:none !important;
 }
 
 .inspectorEmpty {
