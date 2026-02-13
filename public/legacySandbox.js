@@ -54,15 +54,27 @@ function persistSandboxForPlayer() {
     try {
       const key = `cb_save_${sandboxPlayerId}`;
       const prev = JSON.parse(localStorage.getItem(key) || '{}');
+
+      // Persist only gameplay-ish state (not UI/session-ish state)
+      const snapshot = {
+        playerName: state.playerName,
+        zones: state.zones,
+        sharedZones: state.sharedZones,
+        players: state.players,
+        tapped: state.tapped,
+        tarped: state.tarped,
+      };
+
       localStorage.setItem(key, JSON.stringify({
         ...prev,
         lastMode: 'sandbox',
-        sandboxState: state,
+        sandboxState: snapshot,
         updatedAt: Date.now()
       }));
     } catch {}
   }, 500);
 }
+
 setInterval(persistSandboxForPlayer, 1500);
 
 function getMode() {
@@ -188,7 +200,10 @@ function ensureDeckSeeded() {
 
 ensureZoneArrays();
 ensureDeckSeeded();
-
+// Always start in a predictable UI state after refresh
+state.mode ||= "solo";
+state.activePlayerKey ||= "p1";
+view = { type: "overview" };
 
 function updateSubtitle() {
   if (getMode() === "battle") {
@@ -477,6 +492,22 @@ function layoutHandFan(slotRowEl, cardIds) {
   });
 }
 
+function goBackToOverview() {
+  // always close transient UI first
+  inspector = null;
+  inspectorDragging = null;
+  dragging = null;
+
+  removeInspectorOverlay();
+  removeBoardOverlay();
+  syncDropTargetHighlights(null);
+
+  const dc = document.getElementById("deckChoiceOverlay");
+  if (dc) dc.remove();
+
+  view = { type: "overview" };
+  render();
+}  
   
 function renderBoardOverlay() {
   removeBoardOverlay();
@@ -1923,6 +1954,26 @@ function renderTopPilesBar() {
 
 
 
+// Strong mobile back: pointerup works much more reliably than click
+(function bindBackButton() {
+  const btn = document.querySelector(".topBackBtn");
+  if (!btn) return;
+
+  btn.type = "button";
+  btn.style.touchAction = "manipulation";
+
+  // prevent double-binding if render runs multiple times
+  if (btn.__cbBoundBack) return;
+  btn.__cbBoundBack = true;
+
+  const onBack = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    goBackToOverview();
+  };
+
+  btn.addEventListener("pointerup", onBack, { passive: false });
+})();
 
 
 
