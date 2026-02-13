@@ -75,7 +75,6 @@ function validateZoneAccess(role, move) {
   const toShared = zoneIsShared(move.to.zone);
 
   if (!zoneExists(move.from.zone) || !zoneExists(move.to.zone)) return "Illegal zone";
-  if (move.to.zone === "deck") return "Cannot move to deck";
 
   if (!fromShared && move.from.owner !== role) return "Cannot move opponent card";
   if (!toShared && move.to.owner !== role) return "Cannot move to opponent zone";
@@ -86,6 +85,17 @@ function validateZoneAccess(role, move) {
     return "Cross-owner private move blocked";
   }
 
+  return null;
+}
+
+function validateDeckPlace(role, payload) {
+  const from = payload.from || {};
+  const owner = payload.owner || role;
+  if (owner !== role) return "Cannot place into opponent deck";
+  if (!zoneExists(from.zone)) return "Illegal source zone";
+  if (!from.zone || from.zone === "deck") return "Illegal source zone";
+  if (from.owner !== role && !zoneIsShared(from.zone)) return "Cannot move opponent card";
+  if (!["top", "bottom"].includes(payload.where)) return "Invalid deck placement";
   return null;
 }
 
@@ -126,6 +136,19 @@ function applyIntent(room, role, intent) {
 
     fromArr.splice(idx, 1);
     toArr.push(cardId);
+  } else if (type === "DECK_PLACE") {
+    const invalid = validateDeckPlace(role, payload);
+    if (invalid) return { ok: false, error: invalid };
+    const cardId = payload.cardId;
+    const from = { owner: payload.from?.owner || role, zone: payload.from?.zone };
+    const fromArr = zoneArr(s, from.owner, from.zone);
+    const deck = zoneArr(s, role, "deck");
+    if (!fromArr || !deck) return { ok: false, error: "Illegal zone" };
+    const idx = fromArr.indexOf(cardId);
+    if (idx < 0) return { ok: false, error: "Card not in source" };
+    fromArr.splice(idx, 1);
+    if (payload.where === "top") deck.unshift(cardId);
+    else deck.push(cardId);
   } else {
     return { ok: false, error: "Unknown intent" };
   }
@@ -215,5 +238,6 @@ module.exports = {
   zoneExists,
   PRIVATE_ZONES,
   BATTLEFIELD_ZONES,
-  SHARED_ZONES
+  SHARED_ZONES,
+  validateDeckPlace
 };
