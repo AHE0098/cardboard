@@ -527,7 +527,6 @@ Screen + data architecture:
         frame.src = `/sandbox.html?playerId=${encodeURIComponent(session.playerId || "")}`;
         frame.title = "Sandbox mode";
         wrap.appendChild(frame);
-        wrap.appendChild(renderBoard());
       }
 
       const panel = renderInspector();
