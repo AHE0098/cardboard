@@ -20,6 +20,7 @@ Screen + data architecture:
     const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard"];
     const SHARED_ZONES = ["lands", "permanents", "stack"];
     const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
+    const PILE_ZONES = ["stack", "deck", "graveyard"];
     const demo = window.DEMO_STATE || { zones: { hand: [], lands: [], permanents: [] }, tapped: {}, tarped: {} };
 
     let uiScreen = "playerMenu";
@@ -235,10 +236,69 @@ Screen + data architecture:
     function canDropTo(fromZone, toZone) {
       if (appMode !== "battle") return true;
       if (toZone === "deck") return false;
-      if (SHARED_ZONES.includes(fromZone) && toZone === "hand") return true;
-      if (fromZone === "hand" && SHARED_ZONES.includes(toZone)) return true;
-      if (SHARED_ZONES.includes(fromZone) && SHARED_ZONES.includes(toZone)) return true;
-      return false;
+      const fromShared = SHARED_ZONES.includes(fromZone);
+      const toShared = SHARED_ZONES.includes(toZone);
+      const fromPrivate = PRIVATE_ZONES.includes(fromZone);
+      const toPrivate = PRIVATE_ZONES.includes(toZone);
+      return (fromShared && toShared) || (fromPrivate && toPrivate) || (fromShared && toPrivate) || (fromPrivate && toShared);
+    }
+
+    function isPileZone(zoneKey) {
+      return PILE_ZONES.includes(zoneKey);
+    }
+
+    function layoutHandFan(slotRowEl, cardIds) {
+      const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
+      const rx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-rx")) || 340;
+      const ry = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-ry")) || 130;
+      const arcY = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-y")) || 18;
+      const niceMax = 7;
+      const n = cardIds.length;
+      const baseRange = 42;
+      const range = baseRange * (1.15 - overlap);
+      const niceN = Math.min(n, niceMax);
+      const centerNice = (niceN - 1) / 2;
+      const niceStep = niceN > 1 ? (range / centerNice) : 0;
+      const extraStep = 7.5 * (0.95 - overlap);
+
+      const cards = Array.from(slotRowEl.querySelectorAll(".miniCard"));
+      cards.forEach((el, i) => {
+        let thetaDeg;
+        if (i < niceN) {
+          thetaDeg = (i - centerNice) * niceStep;
+        } else {
+          const extra = i - (niceN - 1);
+          thetaDeg = (niceN - 1 - centerNice) * niceStep + extra * extraStep;
+        }
+        const theta = (thetaDeg * Math.PI) / 180;
+        const x = rx * Math.sin(theta);
+        const y = ry * (1 - Math.cos(theta)) + arcY;
+        const rot = thetaDeg * 0.9;
+        el.style.zIndex = String(1000 + i);
+        el.style.transform = `translate(-50%, 0) translate(${x}px, ${y}px) rotate(${rot}deg)`;
+      });
+    }
+
+    function applyDropHandlers(zone, zoneKey) {
+      zone.addEventListener("dragover", (e) => {
+        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
+        e.preventDefault();
+        zone.classList.add("active");
+      });
+      zone.addEventListener("dragleave", () => {
+        zone.classList.remove("active");
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("active");
+        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
+        const payload = {
+          cardId: dragging.cardId,
+          from: { owner: getZoneOwner(dragging.from), zone: dragging.from },
+          to: { owner: getZoneOwner(zoneKey), zone: zoneKey }
+        };
+        moveCard(payload, true);
+      });
     }
 
     function renderCard(cardId, zoneKey) {
@@ -251,6 +311,12 @@ Screen + data architecture:
       if (s?.tarped?.[cardId]) card.classList.add("tarped");
       card.addEventListener("click", () => { inspector = { zoneKey, cardId }; renderApp(); });
       card.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleMark(cardId, "tapped"); });
+      card.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (zoneKey === "hand") return;
+        toggleMark(cardId, e.shiftKey ? "tarped" : "tapped");
+      });
       card.draggable = canDragFrom(zoneKey);
       card.addEventListener("dragstart", () => { dragging = { cardId, from: zoneKey }; });
       card.addEventListener("dragend", () => { dragging = null; });
@@ -261,36 +327,65 @@ Screen + data architecture:
       const zone = document.createElement("section");
       zone.className = `dropArea zone-${zoneKey}`;
       zone.dataset.zone = zoneKey;
+      zone.dataset.zoneKey = zoneKey;
       zone.dataset.owner = getZoneOwner(zoneKey);
-      const label = document.createElement("div");
-      label.className = "zoneMeta";
-      label.textContent = `${zoneKey.toUpperCase()} (${getZone(zoneKey).length})`;
-      label.addEventListener("dblclick", () => {
+      const zoneCards = getZone(zoneKey);
+
+      if (isPileZone(zoneKey)) {
+        zone.classList.add("isPile");
+        const pile = document.createElement("div");
+        pile.className = "pileSilhouette";
+        const pileCard = document.createElement("div");
+        pileCard.className = "miniCard pileCard";
+        pileCard.dataset.cardId = "__PILE__";
+        const count = document.createElement("div");
+        count.className = "pileCount";
+        count.textContent = String(zoneCards.length);
+        pileCard.appendChild(count);
+        if (zoneKey === "stack") {
+          const intensity = Math.max(0, Math.min(10, zoneCards.length));
+          pileCard.classList.add("stackPileCard");
+          pileCard.style.setProperty("--stackI", String(intensity));
+          pileCard.style.setProperty("--stackOn", zoneCards.length > 0 ? "1" : "0");
+        }
+        pile.appendChild(pileCard);
+
+        const label = document.createElement("div");
+        label.className = "pileLabel";
+        label.textContent = zoneKey === "stack" ? "THE STACK" : zoneKey.toUpperCase();
+        zone.append(pile, label);
+
+        if (zoneKey === "deck") {
+          pileCard.addEventListener("click", (e) => {
+            e.stopPropagation();
+            drawCard();
+          });
+        } else {
+          pileCard.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!canSeeZone(zoneKey)) return;
+            inspector = { zoneKey, cardId: null };
+            renderApp();
+          });
+        }
+
+        applyDropHandlers(zone, zoneKey);
+        return zone;
+      }
+
+      zone.addEventListener("click", () => {
         if (!canSeeZone(zoneKey)) return;
         inspector = { zoneKey, cardId: null };
         renderApp();
       });
-      zone.appendChild(label);
 
       const row = document.createElement("div");
       row.className = "slotRow";
-      getZone(zoneKey).forEach((id) => row.appendChild(renderCard(id, zoneKey)));
+      zoneCards.forEach((id) => row.appendChild(renderCard(id, zoneKey)));
+      if (zoneKey === "hand") layoutHandFan(row, zoneCards);
       zone.appendChild(row);
 
-      zone.addEventListener("dragover", (e) => {
-        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
-        e.preventDefault();
-      });
-      zone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
-        const payload = {
-          cardId: dragging.cardId,
-          from: { owner: getZoneOwner(dragging.from), zone: dragging.from },
-          to: { owner: getZoneOwner(zoneKey), zone: zoneKey }
-        };
-        moveCard(payload, true);
-      });
+      applyDropHandlers(zone, zoneKey);
 
       return zone;
     }
@@ -298,20 +393,32 @@ Screen + data architecture:
     function renderInspector() {
       if (!inspector) return null;
       const overlay = document.createElement("div");
-      overlay.className = "cbOverlay";
+      overlay.className = "inspectorOverlay";
+      overlay.id = "inspectorOverlay";
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay) { inspector = null; renderApp(); }
       });
       const panel = document.createElement("div");
-      panel.className = "cbPanel";
+      panel.className = "inspectorTrack";
       const zoneCards = getZone(inspector.zoneKey);
-      panel.innerHTML = `<h3>${inspector.zoneKey.toUpperCase()}</h3><p>${zoneCards.length} cards</p>`;
+      if (!zoneCards.length) {
+        const empty = document.createElement("div");
+        empty.className = "inspectorEmpty";
+        empty.textContent = `${inspector.zoneKey.toUpperCase()} is empty`;
+        panel.appendChild(empty);
+      }
       zoneCards.forEach((id) => {
-        const row = document.createElement("button");
-        row.className = "menuBtn";
-        row.textContent = `${id} • ${cardName(id)}`;
+        const row = document.createElement("div");
+        row.className = "inspectorCard";
+        row.textContent = `${id}`;
+        row.title = cardName(id);
         panel.appendChild(row);
       });
+      const closeBtn = document.createElement("button");
+      closeBtn.className = "inspectorCloseBtn";
+      closeBtn.textContent = "Close";
+      closeBtn.addEventListener("click", () => { inspector = null; renderApp(); });
+      overlay.appendChild(closeBtn);
       overlay.appendChild(panel);
       return overlay;
     }
@@ -319,22 +426,12 @@ Screen + data architecture:
     function renderBoard() {
       const wrap = document.createElement("div");
       wrap.className = "board";
-      ["permanents", "lands", "hand", "stack", "deck", "graveyard"].forEach((z) => wrap.appendChild(renderZone(z)));
+      const piles = document.createElement("div");
+      piles.className = "pilesBar";
+      ["stack", "deck", "graveyard"].forEach((z) => piles.appendChild(renderZone(z)));
+      wrap.appendChild(piles);
+      ["permanents", "lands", "hand"].forEach((z) => wrap.appendChild(renderZone(z)));
 
-      const controls = document.createElement("div");
-      controls.className = "menuCard";
-      const drawBtn = document.createElement("button");
-      drawBtn.className = "menuBtn";
-      drawBtn.textContent = "Draw 1";
-      drawBtn.onclick = drawCard;
-      controls.appendChild(drawBtn);
-      if (appMode === "battle") {
-        const room = document.createElement("div");
-        room.className = "zoneMeta";
-        room.textContent = `Room ${battleRoomId} • You are ${session.role || "-"}`;
-        controls.appendChild(room);
-      }
-      wrap.prepend(controls);
       return wrap;
     }
 
@@ -504,12 +601,22 @@ Screen + data architecture:
         renderApp();
       };
 
-      card.append(createBtn, input, joinBtn);
+      const hint = document.createElement("div");
+      hint.className = "zoneMeta";
+      hint.textContent = "Create a room and share the code with your opponent to join from another device.";
+
+      card.append(createBtn, input, joinBtn, hint);
       host.appendChild(card);
     }
 
     function renderModeScreen() {
-      subtitle.textContent = `${session.playerName} • ${appMode}`;
+      if (appMode === "battle") {
+        subtitle.textContent = battleRoomId
+          ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+          : `${session.playerName} • battle`;
+      } else {
+        subtitle.textContent = `${session.playerName} • ${appMode}`;
+      }
       const wrap = document.createElement("div");
       wrap.className = "view";
 
