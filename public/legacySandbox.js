@@ -197,30 +197,32 @@ function ensureDeckSeeded() {
   });
 }
 
+// ✅ declare UI vars BEFORE any code uses them
+let view = { type: "overview" };
+let dragging = null;
+let inspector = null;
+let inspectorDragging = null;
 
+// ✅ init once (ONLY ONCE)
 ensureZoneArrays();
 ensureDeckSeeded();
-// Always start in a predictable UI state after refresh
+
 state.mode ||= "solo";
 state.activePlayerKey ||= "p1";
-view = { type: "overview" };
 
 function updateSubtitle() {
+  // battle: show which player you're "viewing"
   if (getMode() === "battle") {
     const active = getPlayer(getActivePlayerKey());
     subtitle.textContent = `Battle • Viewing: ${active.name}`;
     return;
   }
-  subtitle.textContent = state.playerName;
+
+  // solo: show playerName
+  subtitle.textContent = state.playerName || "Player";
 }
 
 updateSubtitle();
-
-
-let view = { type: "focus", zoneKey: "hand" };
-let dragging = null;
-let inspector = null;
-let inspectorDragging = null;
 
 
 const ZONES = [
