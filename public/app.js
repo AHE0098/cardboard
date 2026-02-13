@@ -1,6 +1,21 @@
+/*
+WHAT CHANGED / HOW TO TEST (Battle Mode)
+- Added optional Battle (2P) mode with shared battlefield zones (lands/permanents/stack)
+  and per-player hand/deck/graveyard. Solo mode behavior remains intact.
+- Added player swap control in focus mode for battle perspective switching.
+- Routed zone reads/writes through helpers so drag/drop, inspector, deck draw animation,
+  and deck placement chooser work in both solo + battle.
+
+Quick test:
+1) Open overview and click "Battle (2P)", then double-click Hand to focus.
+2) Use "View P1/P2" to swap perspective; hand/deck/graveyard should switch.
+3) Drag from hand to lands/permanents/stack, then swap player; shared zones persist.
+4) Double-tap deck pile to draw; card should animate into active player's hand.
+*/
+
 // ✅ FIXED STRUCTURE
 // Everything that uses: root / subtitle / dragLayer / state / view / dragging / inspector
-// MUST live inside boot() (or be passed in). Your current file closes the IIFE too early.
+// MUST live inside boot() (or be passed in).
 
 
 (() => {
@@ -30,26 +45,123 @@ const state = typeof structuredClone === "function"
 ? structuredClone(window.DEMO_STATE || fallbackState)
 : JSON.parse(JSON.stringify(window.DEMO_STATE || fallbackState));
 
+function getMode() {
+  return state.mode || "solo";
+}
+
+function getActivePlayerKey() {
+  return state.activePlayerKey || "p1";
+}
+
+function getPlayer(playerKey = getActivePlayerKey()) {
+  state.players ||= {};
+  state.players[playerKey] ||= { name: playerKey === "p2" ? "Player 2" : "Player 1", zones: {} };
+  state.players[playerKey].zones ||= {};
+  return state.players[playerKey];
+}
+
+function isSharedZone(zoneKey) {
+  return ["lands", "permanents", "stack"].includes(zoneKey);
+}
+
+function getZoneOwnerKey(zoneKey, opts = {}) {
+  if (getMode() === "solo") return "solo";
+  if (isSharedZone(zoneKey)) return "shared";
+  return opts.playerKey || getActivePlayerKey();
+}
+
+function getZoneArray(zoneKey, opts = {}) {
+  ensureZoneArrays();
+
+  if (getMode() === "solo") {
+    state.zones ||= {};
+    state.zones[zoneKey] ||= [];
+    return state.zones[zoneKey];
+  }
+
+  if (isSharedZone(zoneKey)) {
+    state.sharedZones ||= {};
+    state.sharedZones[zoneKey] ||= [];
+    return state.sharedZones[zoneKey];
+  }
+
+  const p = getPlayer(opts.playerKey || getActivePlayerKey());
+  p.zones[zoneKey] ||= [];
+  return p.zones[zoneKey];
+}
+
+function setZoneArray(zoneKey, arr, opts = {}) {
+  if (getMode() === "solo") {
+    state.zones ||= {};
+    state.zones[zoneKey] = arr;
+    return;
+  }
+
+  if (isSharedZone(zoneKey)) {
+    state.sharedZones ||= {};
+    state.sharedZones[zoneKey] = arr;
+    return;
+  }
+
+  const p = getPlayer(opts.playerKey || getActivePlayerKey());
+  p.zones[zoneKey] = arr;
+}
+
 
 // ✅ EVERYTHING BELOW (your existing code) goes inside boot(), so it can see state/root/etc.
 
 
 function ensureZoneArrays() {
+  const soloKeys = ["hand", "lands", "permanents", "deck", "graveyard", "stack"];
+  const sharedKeys = ["lands", "permanents", "stack"];
+  const playerKeys = ["hand", "deck", "graveyard"];
+
+  if (!state.mode) state.mode = "solo";
+  if (!state.activePlayerKey) state.activePlayerKey = "p1";
+
   state.zones ||= {};
-  const keys = ["hand", "lands", "permanents", "deck", "graveyard", "stack"];
-  for (const k of keys) state.zones[k] ||= [];
+  for (const k of soloKeys) state.zones[k] ||= [];
+
+  state.sharedZones ||= {};
+  for (const k of sharedKeys) state.sharedZones[k] ||= [];
+
+  state.players ||= {};
+  ["p1", "p2"].forEach((pk, idx) => {
+    state.players[pk] ||= { name: idx === 0 ? "Player 1" : "Player 2", zones: {} };
+    state.players[pk].name ||= idx === 0 ? "Player 1" : "Player 2";
+    state.players[pk].zones ||= {};
+    for (const zk of playerKeys) state.players[pk].zones[zk] ||= [];
+  });
 }
 
 
 function ensureDeckSeeded() {
-if (Array.isArray(state.zones.deck) && state.zones.deck.length === 0) {
-state.zones.deck = [
+  const seedDeck = [
 200, 201, 202, 203, 204, 205,
 210, 211, 212, 213,
 101, 102, 103, 104, 105,
 220, 221, 222, 230, 231, 240, 241,
-];
-}
+  ];
+
+  if (getMode() === "solo") {
+    const deck = getZoneArray("deck");
+    if (Array.isArray(deck) && deck.length === 0) setZoneArray("deck", [...seedDeck]);
+    return;
+  }
+
+  ["p1", "p2"].forEach((pk, idx) => {
+    const deck = getZoneArray("deck", { playerKey: pk });
+    if (deck.length === 0) {
+      const rotated = seedDeck.map((id, i) => seedDeck[(i + (idx * 5)) % seedDeck.length]);
+      setZoneArray("deck", rotated, { playerKey: pk });
+    }
+
+    const hand = getZoneArray("hand", { playerKey: pk });
+    if (hand.length === 0) {
+      const d = getZoneArray("deck", { playerKey: pk });
+      for (let i = 0; i < 3 && d.length > 0; i++) hand.unshift(d.shift());
+    }
+  });
 }
 
 
@@ -57,7 +169,16 @@ ensureZoneArrays();
 ensureDeckSeeded();
 
 
-subtitle.textContent = state.playerName;
+function updateSubtitle() {
+  if (getMode() === "battle") {
+    const active = getPlayer(getActivePlayerKey());
+    subtitle.textContent = `Battle • Viewing: ${active.name}`;
+    return;
+  }
+  subtitle.textContent = state.playerName;
+}
+
+updateSubtitle();
 
 
 let view = { type: "focus", zoneKey: "hand" };
@@ -241,7 +362,7 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
   img.alt = "";
   img.draggable = false;
 
-  const src = getCardImgSrc(cardId, { playerKey: "p1" });
+  const src = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
   if (src) {
     img.onload = () => img.classList.add("isLoaded");
     img.onerror = () => img.remove(); // silhouette fallback
@@ -383,6 +504,8 @@ function render() {
   const b = document.querySelector(".topBackBtn");
   if (b) b.style.display = (view?.type === "focus") ? "inline-flex" : "none";
 
+  updateSubtitle();
+
   if (view?.type === "focus" && view.zoneKey) {
     root.appendChild(renderFocus(view.zoneKey));
   } else {
@@ -421,6 +544,29 @@ function renderOverview() {
     tiles.appendChild(renderZoneTile(z.key, z.label, true));
   });
 
+  const battleTile = document.createElement("button");
+  battleTile.className = "zoneTile";
+  battleTile.type = "button";
+  battleTile.innerHTML = `<div class="zoneHead"><div class="zoneName">${getMode() === "battle" ? "Leave Battle" : "Battle (2P)"}</div><div class="zoneMeta">Prototype</div></div><div class="previewRow"></div>`;
+  battleTile.addEventListener("click", () => {
+    if (getMode() === "battle") {
+      state.mode = "solo";
+      inspector = null;
+      view = { type: "overview" };
+      render();
+      return;
+    }
+
+    state.mode = "battle";
+    state.activePlayerKey = "p1";
+    ensureZoneArrays();
+    ensureDeckSeeded();
+    inspector = null;
+    view = { type: "focus", zoneKey: "hand" };
+    render();
+  });
+  tiles.appendChild(battleTile);
+
   wrap.appendChild(tiles);
 
   const hint = document.createElement("div");
@@ -449,8 +595,8 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
 
   ensureZoneArrays();
 
-  const fromArr = state.zones[fromZoneKey] || [];
-  const toArr = state.zones[toZoneKey] || [];
+  const fromArr = getZoneArray(fromZoneKey);
+  const toArr = getZoneArray(toZoneKey);
 
   const idx = fromArr.indexOf(cardId);
   if (idx < 0) return;
@@ -475,7 +621,7 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
 }
   
 
-function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
+function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
   let holdTimer = null;
 
   // modes
@@ -625,7 +771,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
       const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
         .map(el => Number(el.dataset.cardId))
         .filter(n => Number.isFinite(n));
-      state.zones[fromZoneKey] = ids;
+      setZoneArray(fromZoneKey, ids, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
     }
 
     // optional: center the card that was dragged
@@ -876,7 +1022,8 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey) {
 
 function renderInspector(zoneKey) {
   removeInspectorOverlay(); // prevents stacking
-  const zoneCards = state.zones[zoneKey];
+  const ownerKey = getZoneOwnerKey(zoneKey);
+  const zoneCards = getZoneArray(zoneKey, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
 
   const overlay = document.createElement("div");
   overlay.id = "inspectorOverlay";
@@ -925,7 +1072,7 @@ function renderInspector(zoneKey) {
 
       // Art
       const img = document.createElement("img");
-      const src = getCardImgSrc(id, { playerKey: "p1" });
+      const src = getCardImgSrc(id, { playerKey: getActivePlayerKey() });
       if (src) {
         img.src = src;
         img.onerror = () => img.remove(); // silhouette fallback
@@ -949,7 +1096,7 @@ function renderInspector(zoneKey) {
         card.appendChild(pt);
       }
 
-      attachInspectorLongPress(card, id, zoneKey);
+      attachInspectorLongPress(card, id, zoneKey, ownerKey);
 
       // allow tap/tarp from inspector too (not in hand)
       if (zoneKey !== "hand") attachTapStates(card, id);
@@ -974,9 +1121,16 @@ function renderDropArea(zoneKey, opts = {}) {
   const area = document.createElement("section");
   area.className = "dropArea";
   area.dataset.zoneKey = zoneKey;
+  area.dataset.ownerKey = getZoneOwnerKey(zoneKey);
   area.classList.add(`zone-${zoneKey}`);
 
-  const zoneArr = state.zones[zoneKey] || [];
+  if (zoneKey === "hand" && getMode() === "battle") {
+    const owner = getActivePlayerKey();
+    area.dataset.ownerKey = owner;
+    area.classList.add(`owner-${owner}`);
+  }
+
+  const zoneArr = getZoneArray(zoneKey);
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
   // ===== PILES (stack / deck / graveyard) =====
@@ -1093,7 +1247,7 @@ function renderZoneTile(zoneKey, label, clickable) {
 
   const right = document.createElement("div");
   right.className = "zoneMeta";
-  right.textContent = `${state.zones[zoneKey].length} cards`;
+  right.textContent = `${getZoneArray(zoneKey).length} cards`;
 
   head.appendChild(left);
   head.appendChild(right);
@@ -1101,7 +1255,7 @@ function renderZoneTile(zoneKey, label, clickable) {
   const preview = document.createElement("div");
   preview.className = "previewRow";
 
-  const cards = state.zones[zoneKey];
+  const cards = getZoneArray(zoneKey);
   const max = 9;
 
   cards.slice(0, max).forEach((id) => {
@@ -1402,15 +1556,17 @@ function attachDeckDrawDoubleTap(deckAreaEl) {
 function drawOneFromDeckWithAnimation() {
   ensureZoneArrays();
 
-  const deck = state.zones.deck;
+  const deck = getZoneArray("deck");
   if (!deck || deck.length === 0) return;
 
   // --- snapshot old hand ids + their DOM rects (for shift animation) ---
-  const oldHandIds = [...(state.zones.hand || [])];
+  const oldHandIds = [...getZoneArray("hand")];
   const oldRects = new Map();
 
+  const ownerSel = getMode() === "battle" ? `[data-owner-key="${getActivePlayerKey()}"]` : "";
+
   oldHandIds.forEach((id) => {
-    const el = document.querySelector(`.zone-hand .miniCard[data-card-id="${id}"]`);
+    const el = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${id}"]`);
     if (el) oldRects.set(id, el.getBoundingClientRect());
   });
 
@@ -1421,13 +1577,13 @@ function drawOneFromDeckWithAnimation() {
   // --- update state: draw TOP card and insert LEFTMOST in hand ---
   const cardId = deck[0];
   deck.shift();
-  state.zones.hand.unshift(cardId); // ✅ leftmost, pushes others right
+  getZoneArray("hand").unshift(cardId); // ✅ leftmost, pushes others right
 
   // Render new state so new hand layout exists in DOM
   render();
 
   // Hide real hand cards during animation to avoid “double”
-  const handZone = document.querySelector(".zone-hand");
+  const handZone = document.querySelector(`.zone-hand${ownerSel}`);
   const realHandCards = handZone ? Array.from(handZone.querySelectorAll(".miniCard")) : [];
   realHandCards.forEach(el => (el.style.visibility = "hidden"));
 
@@ -1436,7 +1592,7 @@ function drawOneFromDeckWithAnimation() {
 
   oldHandIds.forEach((id) => {
     const start = oldRects.get(id);
-    const endEl = document.querySelector(`.zone-hand .miniCard[data-card-id="${id}"]`);
+    const endEl = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${id}"]`);
     const end = endEl?.getBoundingClientRect?.();
 
     if (!start || !end) return;
@@ -1444,7 +1600,7 @@ function drawOneFromDeckWithAnimation() {
     const g = document.createElement("div");
     g.className = "handShiftGhost";
 
-    const src = getCardImgSrc(id, { playerKey: "p1" });
+    const src = getCardImgSrc(id, { playerKey: getActivePlayerKey() });
     if (src) g.style.backgroundImage = `url("${src}")`;
 
     g.style.left = `${start.left}px`;
@@ -1469,7 +1625,7 @@ function drawOneFromDeckWithAnimation() {
 
   // --- fly the NEW drawn card from deck -> its new leftmost spot ---
   requestAnimationFrame(() => {
-    const toEl = document.querySelector(`.zone-hand .miniCard[data-card-id="${cardId}"]`);
+    const toEl = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${cardId}"]`);
     if (!toEl) {
       // cleanup + show cards anyway
       ghosts.forEach(g => g.remove());
@@ -1511,7 +1667,7 @@ function animateCardFlight(cardId, fromRect, toEl, done) {
   ghost.className = "flyCard";
 
   // Try to use image if available
-  const src = getCardImgSrc(cardId, { playerKey: "p1" });
+  const src = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
   if (src) ghost.style.backgroundImage = `url("${src}")`;
 
   // Start at deck pile center
@@ -1549,7 +1705,7 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   ensureZoneArrays();
 
   // Remove from its origin immediately (so it feels committed)
-  const fromArr = state.zones[fromZoneKey] || [];
+  const fromArr = getZoneArray(fromZoneKey);
   const idx = fromArr.indexOf(cardId);
   if (idx >= 0) fromArr.splice(idx, 1);
 
@@ -1562,7 +1718,7 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   card.className = "deckChoiceCard";
   card.dataset.cardId = String(cardId);
 
-  const imgSrc = getCardImgSrc(cardId, { playerKey: "p1" });
+  const imgSrc = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
   if (imgSrc) card.style.backgroundImage = `url("${imgSrc}")`;
 
   const hint = document.createElement("div");
@@ -1589,7 +1745,7 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   document.body.appendChild(ov);
 
   const commit = (where) => {
-    const deck = state.zones.deck;
+    const deck = getZoneArray("deck");
     if (where === "top") deck.unshift(cardId);
     else deck.push(cardId);
 
@@ -1599,7 +1755,7 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
 
   const cancel = () => {
     // If they back out, put it back where it came from (end)
-    state.zones[fromZoneKey].push(cardId);
+    getZoneArray(fromZoneKey).push(cardId);
     ov.remove();
     render();
   };
@@ -1709,6 +1865,20 @@ function renderTopPilesBar() {
   host.appendChild(stackArea);
   host.appendChild(deckArea);
   host.appendChild(gyArea);
+
+  if (getMode() === "battle") {
+    const swapBtn = document.createElement("button");
+    swapBtn.className = "topSwapBtn";
+    const active = getPlayer(getActivePlayerKey());
+    swapBtn.textContent = `View ${active.name === "Player 1" ? "P2" : "P1"}`;
+    swapBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.activePlayerKey = getActivePlayerKey() === "p1" ? "p2" : "p1";
+      inspector = null;
+      render();
+    });
+    host.appendChild(swapBtn);
+  }
 }
 
 
