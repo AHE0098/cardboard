@@ -18,7 +18,7 @@ Screen + data architecture:
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
     const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard"];
-    const SHARED_ZONES = ["lands", "permanents", "stack"];
+    const SHARED_ZONES = ["stack"];
     const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
     const PILE_ZONES = ["stack", "deck", "graveyard"];
     const demo = window.DEMO_STATE || { zones: { hand: [], lands: [], permanents: [] }, tapped: {}, tarped: {} };
@@ -28,6 +28,7 @@ Screen + data architecture:
     let view = { type: "board" };
     let dragging = null;
     let inspector = null;
+    let opponentFlipped = false;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -158,27 +159,33 @@ Screen + data architecture:
       return appMode === "battle" ? battleState : sandboxState;
     }
 
-    function getZoneOwner(zoneKey) {
-      if (appMode !== "battle") return "solo";
-      return SHARED_ZONES.includes(zoneKey) ? "shared" : (session.role || "p1");
+    function getOpponentRole() {
+      if (session.role === "p1") return "p2";
+      if (session.role === "p2") return "p1";
+      return "p2";
     }
 
-    function getZone(zoneKey) {
+    function getZoneOwner(zoneKey, ownerRole = session.role) {
+      if (appMode !== "battle") return "solo";
+      return SHARED_ZONES.includes(zoneKey) ? "shared" : (ownerRole || "p1");
+    }
+
+    function getZone(zoneKey, ownerRole = session.role) {
       const s = modeState();
       if (!s) return [];
       if (appMode === "battle") {
         if (SHARED_ZONES.includes(zoneKey)) return s.sharedZones[zoneKey] || [];
-        return s.players?.[session.role]?.zones?.[zoneKey] || [];
+        return s.players?.[ownerRole]?.zones?.[zoneKey] || [];
       }
       return s.zones[zoneKey] || [];
     }
 
-    function setZone(zoneKey, arr) {
+    function setZone(zoneKey, arr, ownerRole = session.role) {
       const s = modeState();
       if (!s) return;
       if (appMode === "battle") {
         if (SHARED_ZONES.includes(zoneKey)) s.sharedZones[zoneKey] = arr;
-        else s.players[session.role].zones[zoneKey] = arr;
+        else s.players[ownerRole].zones[zoneKey] = arr;
       } else {
         s.zones[zoneKey] = arr;
         persistPlayerSaveDebounced();
@@ -197,12 +204,12 @@ Screen + data architecture:
     }
 
     function drawCard() {
-      const deck = [...getZone("deck")];
-      const hand = [...getZone("hand")];
+      const deck = [...getZone("deck", session.role)];
+      const hand = [...getZone("hand", session.role)];
       if (!deck.length) return;
       hand.unshift(deck.shift());
-      setZone("deck", deck);
-      setZone("hand", hand);
+      setZone("deck", deck, session.role);
+      setZone("hand", hand, session.role);
       if (appMode === "battle") battleClient.sendIntent("DRAW_CARD", { count: 1 });
       renderApp();
     }
@@ -210,30 +217,31 @@ Screen + data architecture:
     function moveCard(intentPayload, optimistic = true) {
       const { cardId, from, to } = intentPayload;
       if (!ALL_ZONES.includes(from.zone) || !ALL_ZONES.includes(to.zone)) return;
-      const fromArr = [...getZone(from.zone)];
+      const fromArr = [...getZone(from.zone, from.owner || session.role)];
       const idx = fromArr.indexOf(cardId);
       if (idx < 0) return;
       fromArr.splice(idx, 1);
-      const toArr = [...getZone(to.zone), cardId];
-      setZone(from.zone, fromArr);
-      setZone(to.zone, toArr);
+      const toArr = [...getZone(to.zone, to.owner || session.role), cardId];
+      setZone(from.zone, fromArr, from.owner || session.role);
+      setZone(to.zone, toArr, to.owner || session.role);
       if (appMode === "battle" && optimistic) battleClient.sendIntent("MOVE_CARD", intentPayload);
       renderApp();
     }
 
-    function canSeeZone(zoneKey) {
+    function canSeeZone(zoneKey, ownerRole = session.role) {
       if (appMode !== "battle") return true;
-      if (SHARED_ZONES.includes(zoneKey)) return true;
-      return PRIVATE_ZONES.includes(zoneKey);
+      if (zoneKey === "hand" || zoneKey === "deck" || zoneKey === "graveyard") return ownerRole === session.role;
+      return SHARED_ZONES.includes(zoneKey) || BATTLEFIELD_ZONES.includes(zoneKey);
     }
 
-    function canDragFrom(zoneKey) {
+    function canDragFrom(zoneKey, ownerRole = session.role) {
       if (appMode !== "battle") return true;
       if (zoneKey === "deck") return false;
-      return SHARED_ZONES.includes(zoneKey) || PRIVATE_ZONES.includes(zoneKey);
+      if (ownerRole !== session.role && !SHARED_ZONES.includes(zoneKey)) return false;
+      return SHARED_ZONES.includes(zoneKey) || PRIVATE_ZONES.includes(zoneKey) || BATTLEFIELD_ZONES.includes(zoneKey);
     }
 
-    function canDropTo(fromZone, toZone) {
+    function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
       if (appMode !== "battle") return true;
       if (toZone === "deck") return false;
       const fromShared = SHARED_ZONES.includes(fromZone);
@@ -301,7 +309,65 @@ Screen + data architecture:
       });
     }
 
-    function renderCard(cardId, zoneKey) {
+    function isPileZone(zoneKey) {
+      return PILE_ZONES.includes(zoneKey);
+    }
+
+    function layoutHandFan(slotRowEl, cardIds) {
+      const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
+      const rx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-rx")) || 340;
+      const ry = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-ry")) || 130;
+      const arcY = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-y")) || 18;
+      const niceMax = 7;
+      const n = cardIds.length;
+      const baseRange = 42;
+      const range = baseRange * (1.15 - overlap);
+      const niceN = Math.min(n, niceMax);
+      const centerNice = (niceN - 1) / 2;
+      const niceStep = niceN > 1 ? (range / centerNice) : 0;
+      const extraStep = 7.5 * (0.95 - overlap);
+
+      const cards = Array.from(slotRowEl.querySelectorAll(".miniCard"));
+      cards.forEach((el, i) => {
+        let thetaDeg;
+        if (i < niceN) {
+          thetaDeg = (i - centerNice) * niceStep;
+        } else {
+          const extra = i - (niceN - 1);
+          thetaDeg = (niceN - 1 - centerNice) * niceStep + extra * extraStep;
+        }
+        const theta = (thetaDeg * Math.PI) / 180;
+        const x = rx * Math.sin(theta);
+        const y = ry * (1 - Math.cos(theta)) + arcY;
+        const rot = thetaDeg * 0.9;
+        el.style.zIndex = String(1000 + i);
+        el.style.transform = `translate(-50%, 0) translate(${x}px, ${y}px) rotate(${rot}deg)`;
+      });
+    }
+
+    function applyDropHandlers(zone, zoneKey, ownerRole = session.role) {
+      zone.addEventListener("dragover", (e) => {
+        if (!dragging || !canDropTo(dragging.from, zoneKey, dragging.owner || session.role, ownerRole)) return;
+        e.preventDefault();
+        zone.classList.add("active");
+      });
+      zone.addEventListener("dragleave", () => {
+        zone.classList.remove("active");
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("active");
+        if (!dragging || !canDropTo(dragging.from, zoneKey, dragging.owner || session.role, ownerRole)) return;
+        const payload = {
+          cardId: dragging.cardId,
+          from: { owner: dragging.owner || session.role, zone: dragging.from },
+          to: { owner: ownerRole, zone: zoneKey }
+        };
+        moveCard(payload, true);
+      });
+    }
+
+    function renderCard(cardId, zoneKey, ownerRole = session.role) {
       const card = document.createElement("div");
       card.className = "miniCard";
       card.textContent = String(cardId);
@@ -323,9 +389,11 @@ Screen + data architecture:
       return card;
     }
 
-    function renderZone(zoneKey) {
+    function renderZone(zoneKey, ownerRole = session.role, opts = {}) {
       const zone = document.createElement("section");
       zone.className = `dropArea zone-${zoneKey}`;
+      if (opts.mirrored) zone.classList.add("battleMirrorZone");
+      if (opts.flipped) zone.classList.add("battleFlipZone");
       zone.dataset.zone = zoneKey;
       zone.dataset.zoneKey = zoneKey;
       zone.dataset.owner = getZoneOwner(zoneKey);

@@ -28,7 +28,7 @@ function seedDeck(offset = 0) {
 function makePlayer(id = null, name = "") {
   const deck = seedDeck(name ? name.length % 7 : 0);
   const hand = [deck.shift(), deck.shift(), deck.shift()];
-  return { id, name, zones: { hand, deck, graveyard: [] } };
+  return { id, name, zones: { hand, deck, graveyard: [], lands: [], permanents: [] } };
 }
 
 function makeRoom(creator) {
@@ -36,7 +36,7 @@ function makeRoom(creator) {
   const room = {
     roomId,
     state: {
-      sharedZones: { lands: [], permanents: [], stack: [] },
+      sharedZones: { stack: [] },
       players: {
         p1: makePlayer(creator.playerId, creator.playerName),
         p2: makePlayer(null, "Waiting...")
@@ -57,12 +57,16 @@ function getRole(room, playerId) {
 }
 
 function zoneIsShared(zone) {
-  return ["lands", "permanents", "stack"].includes(zone);
+  return zone === "stack";
 }
 
-function zoneArr(state, role, zone) {
-  if (zoneIsShared(zone)) return state.sharedZones[zone];
-  return state.players[role].zones[zone];
+function zoneArr(state, role, zone, owner = role) {
+  if (zoneIsShared(zone)) {
+    state.sharedZones[zone] ||= [];
+    return state.sharedZones[zone];
+  }
+  state.players[owner].zones[zone] ||= [];
+  return state.players[owner].zones[zone];
 }
 
 function applyIntent(room, role, intent) {
@@ -78,18 +82,24 @@ function applyIntent(room, role, intent) {
     map[payload.cardId] = !map[payload.cardId];
   } else if (type === "MOVE_CARD") {
     const { cardId, from, to } = payload;
+    const ownerFrom = from.owner || role;
+    const ownerTo = to.owner || role;
     const fromShared = zoneIsShared(from.zone);
     const toShared = zoneIsShared(to.zone);
-    if (!fromShared && from.zone !== "hand" && from.zone !== "graveyard") return { ok: false, error: "Illegal from zone" };
-    if (!toShared && to.zone !== "hand" && to.zone !== "graveyard") return { ok: false, error: "Illegal to zone" };
+    const playerZones = ["hand", "graveyard", "lands", "permanents"];
 
-    if (!fromShared && from.zone !== "hand" && from.zone !== "graveyard") return { ok: false, error: "Not allowed" };
+    if (!fromShared && !playerZones.includes(from.zone)) return { ok: false, error: "Illegal from zone" };
+    if (!toShared && !playerZones.includes(to.zone)) return { ok: false, error: "Illegal to zone" };
+    if (to.zone === "deck") return { ok: false, error: "Cannot move to deck" };
 
-    const fromArr = zoneArr(s, role, from.zone);
+    if (!fromShared && ownerFrom !== role) return { ok: false, error: "Cannot move opponent card" };
+    if (!toShared && ownerTo !== role) return { ok: false, error: "Cannot move to opponent zone" };
+
+    const fromArr = zoneArr(s, role, from.zone, ownerFrom);
     const idx = fromArr.indexOf(cardId);
     if (idx < 0) return { ok: false, error: "Card not in source" };
     fromArr.splice(idx, 1);
-    zoneArr(s, role, to.zone).push(cardId);
+    zoneArr(s, role, to.zone, ownerTo).push(cardId);
   } else {
     return { ok: false, error: "Unknown intent" };
   }

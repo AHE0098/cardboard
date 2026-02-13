@@ -1350,3 +1350,17 @@ body.isFocus #topPiles{
   border-radius:14px;
   background:transparent;
 }
+
+/* Battle-only orientation helpers */
+.battleMirrorZone .slotRow {
+  direction: rtl;
+}
+.battleMirrorZone .miniCard {
+  direction: ltr;
+}
+.battleFlipZone .slotRow,
+.battleFlipZone .pileSilhouette,
+.battleFlipZone .pileLabel,
+.battleFlipZone .zoneMeta {
+  transform: rotate(180deg);
+}
