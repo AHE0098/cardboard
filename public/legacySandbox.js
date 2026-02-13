@@ -1143,56 +1143,59 @@ function renderDropArea(zoneKey, opts = {}) {
   const zoneArr = getZoneArray(zoneKey);
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
-  // ===== PILES =====
-  if (zMeta.kind === "pile") {
-    area.classList.add("isPile");
+ // ===== PILES (stack / deck / graveyard) =====
+if (zMeta.kind === "pile") {
+  area.classList.add("isPile");
 
-    const pile = document.createElement("div");
-    pile.className = "pileSilhouette";
+  const pile = document.createElement("div");
+  pile.className = "pileSilhouette";
 
-    const pileCard = document.createElement("div");
-    pileCard.className = "miniCard pileCard";
-    pileCard.dataset.cardId = "__PILE__";
-    pileCard.dataset.fromZoneKey = zoneKey;
+  const pileCard = document.createElement("div");
+  pileCard.className = "miniCard pileCard";
+  pileCard.dataset.cardId = "__PILE__";
+  pileCard.dataset.fromZoneKey = zoneKey;
 
-    const count = document.createElement("div");
-    count.className = "pileCount";
-    count.textContent = String(zoneArr.length);
-    pileCard.appendChild(count);
+  // Count badge
+  const count = document.createElement("div");
+  count.className = "pileCount";
+  count.textContent = String(zoneArr.length);
+  pileCard.appendChild(count);
 
-    if (zoneKey === "stack") {
-      const intensity = Math.max(0, Math.min(10, zoneArr.length));
-      pileCard.classList.add("stackPileCard");
-      pileCard.style.setProperty("--stackI", String(intensity));
-      pileCard.style.setProperty("--stackOn", zoneArr.length > 0 ? "1" : "0");
-    }
+  // Title INSIDE silhouette
+  const inLabel = document.createElement("div");
+  inLabel.className = "pileInnerLabel";
+  inLabel.textContent = (zoneKey === "stack") ? "THE STACK" : zMeta.label;
+  pileCard.appendChild(inLabel);
 
-    pile.appendChild(pileCard);
-
-    const label = document.createElement("div");
-    label.className = "pileLabel";
-    label.textContent = (zoneKey === "stack") ? "THE STACK" : zMeta.label;
-
-    area.appendChild(pile);
-    area.appendChild(label);
-
-    if (!overlay) {
-      if (zoneKey === "deck") {
-        attachDeckDrawDoubleTap(pileCard);
-      } else {
-        pileCard.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (dragging || inspectorDragging) return;
-          inspector = { zoneKey };
-          render();
-        });
-      }
-
-      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
-    }
-
-    return area;
+  // Special: magical stack intensity (1..10)
+  if (zoneKey === "stack") {
+    const intensity = Math.max(0, Math.min(10, zoneArr.length)); // 0..10
+    pileCard.classList.add("stackPileCard");
+    pileCard.style.setProperty("--stackI", String(intensity));
+    pileCard.style.setProperty("--stackOn", zoneArr.length > 0 ? "1" : "0");
   }
+
+  pile.appendChild(pileCard);
+  area.appendChild(pile);
+
+  if (!overlay) {
+    if (zoneKey === "deck") {
+      attachDeckDrawDoubleTap(pileCard);
+    } else {
+      pileCard.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (dragging || inspectorDragging) return;
+        inspector = { zoneKey };
+        render();
+      });
+    }
+
+    pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+  }
+
+  return area;
+}
+
 
   // ===== NON-PILE zones: click -> inspector (unless overlay) =====
   if (!overlay) {
@@ -1227,8 +1230,13 @@ function renderDropArea(zoneKey, opts = {}) {
 
     const id = ids[i];
     if (id !== undefined) {
-      const c = makeMiniCardEl(id, zoneKey, { overlay, flipped: isOpp });
-      if (!overlay) attachTapStates(c, id);
+const c = makeMiniCardEl(id, zoneKey, { overlay, flipped: isOpp });
+if (!overlay) {
+  attachTapStates(c, id);
+  // ensure taps still work even in opponent-rotated rows
+  c.style.pointerEvents = "auto";
+}
+
       slot.appendChild(c);
     }
 
