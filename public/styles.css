@@ -1364,3 +1364,45 @@ body.isFocus #topPiles{
 .battleFlipZone .zoneMeta {
   transform: rotate(180deg);
 }
+
+.battleBoard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.battleTopPrivate {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+}
+
+.battleTrack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.battleHiddenRow {
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.battleHiddenPill {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .battleTopPrivate {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

@@ -1,0 +1,54 @@
+const assert = require('node:assert/strict');
+const { applyIntent, makeRoom } = require('../server');
+
+function mkRoom() {
+  const room = makeRoom({ playerId: 'p1-id', playerName: 'Alice' });
+  room.state.players.p2.id = 'p2-id';
+  room.state.players.p2.name = 'Bob';
+  return room;
+}
+
+(function run() {
+  const room = mkRoom();
+
+  const p1Card = room.state.players.p1.zones.hand[0];
+  const p2Card = room.state.players.p2.zones.hand[0];
+
+  let res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: p1Card,
+      from: { owner: 'p1', zone: 'hand' },
+      to: { owner: 'p1', zone: 'lands' }
+    }
+  });
+  assert.equal(res.ok, true, 'p1 should move own card to own battlefield');
+
+  res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: p2Card,
+      from: { owner: 'p2', zone: 'hand' },
+      to: { owner: 'p1', zone: 'lands' }
+    }
+  });
+  assert.equal(res.ok, false, 'p1 cannot move opponent private card');
+
+  res = applyIntent(room, 'p1', {
+    type: 'DRAW_CARD',
+    payload: { owner: 'p2' }
+  });
+  assert.equal(res.ok, false, 'p1 cannot draw from p2 deck');
+
+  res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: room.state.players.p1.zones.lands[0],
+      from: { owner: 'p1', zone: 'lands' },
+      to: { owner: 'p1', zone: 'stack' }
+    }
+  });
+  assert.equal(res.ok, true, 'p1 can move own battlefield card to shared stack');
+
+  console.log('battle permissions tests passed');
+})();
