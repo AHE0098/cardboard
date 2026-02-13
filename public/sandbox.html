@@ -27,7 +27,7 @@
       const playerId = qs.get('playerId');
       if (!playerId) return;
       try {
-        const raw = localStorage.getItem(`cb_save_${playerId}`);
+       const raw = localStorage.getItem(`cb_legacy_save_${playerId}`);
         if (!raw) return;
         const parsed = JSON.parse(raw);
         if (parsed && parsed.sandboxState) {
