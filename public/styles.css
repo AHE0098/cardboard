@@ -1406,3 +1406,16 @@ body.isFocus #topPiles{
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Opponent zones: mirrored placement + flipped cards */
+.dropArea.isOpponentZone { transform: rotate(180deg); }
+.dropArea.isOpponentZone .miniCard.flip180 { transform: rotate(180deg); }
+
+/* Middle divider line in focus board */
+.midLine{
+  height: 2px;
+  margin: 10px 0;
+  background: rgba(255,255,255,0.10);
+  border-radius: 999px;
+}
+
