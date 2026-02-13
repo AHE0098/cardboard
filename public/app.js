@@ -18,8 +18,10 @@ Screen + data architecture:
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
     const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard"];
-    const SHARED_ZONES = ["lands", "permanents", "stack"];
+    const SHARED_ZONES = ["stack"];
     const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
+    const BATTLEFIELD_ZONES = ["lands", "permanents"];
+    const PILE_ZONES = ["stack", "deck", "graveyard"];
     const demo = window.DEMO_STATE || { zones: { hand: [], lands: [], permanents: [] }, tapped: {}, tarped: {} };
 
     let uiScreen = "playerMenu";
@@ -27,6 +29,7 @@ Screen + data architecture:
     let view = { type: "board" };
     let dragging = null;
     let inspector = null;
+    let opponentFlipped = false;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -157,27 +160,33 @@ Screen + data architecture:
       return appMode === "battle" ? battleState : sandboxState;
     }
 
-    function getZoneOwner(zoneKey) {
-      if (appMode !== "battle") return "solo";
-      return SHARED_ZONES.includes(zoneKey) ? "shared" : (session.role || "p1");
+    function getOpponentRole() {
+      if (session.role === "p1") return "p2";
+      if (session.role === "p2") return "p1";
+      return "p2";
     }
 
-    function getZone(zoneKey) {
+    function getZoneOwner(zoneKey, ownerRole = session.role) {
+      if (appMode !== "battle") return "solo";
+      return SHARED_ZONES.includes(zoneKey) ? "shared" : (ownerRole || "p1");
+    }
+
+    function getZone(zoneKey, ownerRole = session.role) {
       const s = modeState();
       if (!s) return [];
       if (appMode === "battle") {
         if (SHARED_ZONES.includes(zoneKey)) return s.sharedZones[zoneKey] || [];
-        return s.players?.[session.role]?.zones?.[zoneKey] || [];
+        return s.players?.[ownerRole]?.zones?.[zoneKey] || [];
       }
       return s.zones[zoneKey] || [];
     }
 
-    function setZone(zoneKey, arr) {
+    function setZone(zoneKey, arr, ownerRole = session.role) {
       const s = modeState();
       if (!s) return;
       if (appMode === "battle") {
         if (SHARED_ZONES.includes(zoneKey)) s.sharedZones[zoneKey] = arr;
-        else s.players[session.role].zones[zoneKey] = arr;
+        else s.players[ownerRole].zones[zoneKey] = arr;
       } else {
         s.zones[zoneKey] = arr;
         persistPlayerSaveDebounced();
@@ -196,12 +205,12 @@ Screen + data architecture:
     }
 
     function drawCard() {
-      const deck = [...getZone("deck")];
-      const hand = [...getZone("hand")];
+      const deck = [...getZone("deck", session.role)];
+      const hand = [...getZone("hand", session.role)];
       if (!deck.length) return;
       hand.unshift(deck.shift());
-      setZone("deck", deck);
-      setZone("hand", hand);
+      setZone("deck", deck, session.role);
+      setZone("hand", hand, session.role);
       if (appMode === "battle") battleClient.sendIntent("DRAW_CARD", { count: 1 });
       renderApp();
     }
@@ -209,39 +218,111 @@ Screen + data architecture:
     function moveCard(intentPayload, optimistic = true) {
       const { cardId, from, to } = intentPayload;
       if (!ALL_ZONES.includes(from.zone) || !ALL_ZONES.includes(to.zone)) return;
-      const fromArr = [...getZone(from.zone)];
+      const fromArr = [...getZone(from.zone, from.owner || session.role)];
       const idx = fromArr.indexOf(cardId);
       if (idx < 0) return;
       fromArr.splice(idx, 1);
-      const toArr = [...getZone(to.zone), cardId];
-      setZone(from.zone, fromArr);
-      setZone(to.zone, toArr);
+      const toArr = [...getZone(to.zone, to.owner || session.role), cardId];
+      setZone(from.zone, fromArr, from.owner || session.role);
+      setZone(to.zone, toArr, to.owner || session.role);
       if (appMode === "battle" && optimistic) battleClient.sendIntent("MOVE_CARD", intentPayload);
       renderApp();
     }
 
-    function canSeeZone(zoneKey) {
+    function canSeeZone(zoneKey, ownerRole = session.role) {
       if (appMode !== "battle") return true;
-      if (SHARED_ZONES.includes(zoneKey)) return true;
-      return PRIVATE_ZONES.includes(zoneKey);
+      if (zoneKey === "hand" || zoneKey === "deck" || zoneKey === "graveyard") return ownerRole === session.role;
+      return SHARED_ZONES.includes(zoneKey) || BATTLEFIELD_ZONES.includes(zoneKey);
     }
 
-    function canDragFrom(zoneKey) {
+    function canDragFrom(zoneKey, ownerRole = session.role) {
       if (appMode !== "battle") return true;
       if (zoneKey === "deck") return false;
-      return SHARED_ZONES.includes(zoneKey) || PRIVATE_ZONES.includes(zoneKey);
+      if (ownerRole !== session.role && !SHARED_ZONES.includes(zoneKey)) return false;
+      return SHARED_ZONES.includes(zoneKey) || PRIVATE_ZONES.includes(zoneKey) || BATTLEFIELD_ZONES.includes(zoneKey);
     }
 
-    function canDropTo(fromZone, toZone) {
+    function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
       if (appMode !== "battle") return true;
       if (toZone === "deck") return false;
-      if (SHARED_ZONES.includes(fromZone) && toZone === "hand") return true;
-      if (fromZone === "hand" && SHARED_ZONES.includes(toZone)) return true;
-      if (SHARED_ZONES.includes(fromZone) && SHARED_ZONES.includes(toZone)) return true;
+      if (toOwner !== session.role && !SHARED_ZONES.includes(toZone)) return false;
+
+      const fromShared = SHARED_ZONES.includes(fromZone);
+      const toShared = SHARED_ZONES.includes(toZone);
+      const fromPrivate = PRIVATE_ZONES.includes(fromZone);
+      const toPrivate = PRIVATE_ZONES.includes(toZone);
+      const fromBattlefield = BATTLEFIELD_ZONES.includes(fromZone);
+      const toBattlefield = BATTLEFIELD_ZONES.includes(toZone);
+
+      if ((fromPrivate || fromBattlefield) && fromOwner !== session.role) return false;
+      if (toPrivate && toOwner !== session.role) return false;
+
+      if (fromShared && (toPrivate || toBattlefield)) return true;
+      if ((fromPrivate || fromBattlefield) && toShared) return true;
+      if ((fromBattlefield || fromPrivate) && (toBattlefield || toPrivate)) return true;
+      if (fromShared && toShared) return true;
       return false;
     }
 
-    function renderCard(cardId, zoneKey) {
+    function isPileZone(zoneKey) {
+      return PILE_ZONES.includes(zoneKey);
+    }
+
+    function layoutHandFan(slotRowEl, cardIds) {
+      const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
+      const rx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-rx")) || 340;
+      const ry = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-ry")) || 130;
+      const arcY = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-y")) || 18;
+      const niceMax = 7;
+      const n = cardIds.length;
+      const baseRange = 42;
+      const range = baseRange * (1.15 - overlap);
+      const niceN = Math.min(n, niceMax);
+      const centerNice = (niceN - 1) / 2;
+      const niceStep = niceN > 1 ? (range / centerNice) : 0;
+      const extraStep = 7.5 * (0.95 - overlap);
+
+      const cards = Array.from(slotRowEl.querySelectorAll(".miniCard"));
+      cards.forEach((el, i) => {
+        let thetaDeg;
+        if (i < niceN) {
+          thetaDeg = (i - centerNice) * niceStep;
+        } else {
+          const extra = i - (niceN - 1);
+          thetaDeg = (niceN - 1 - centerNice) * niceStep + extra * extraStep;
+        }
+        const theta = (thetaDeg * Math.PI) / 180;
+        const x = rx * Math.sin(theta);
+        const y = ry * (1 - Math.cos(theta)) + arcY;
+        const rot = thetaDeg * 0.9;
+        el.style.zIndex = String(1000 + i);
+        el.style.transform = `translate(-50%, 0) translate(${x}px, ${y}px) rotate(${rot}deg)`;
+      });
+    }
+
+    function applyDropHandlers(zone, zoneKey, ownerRole = session.role) {
+      zone.addEventListener("dragover", (e) => {
+        if (!dragging || !canDropTo(dragging.from, zoneKey, dragging.owner || session.role, ownerRole)) return;
+        e.preventDefault();
+        zone.classList.add("active");
+      });
+      zone.addEventListener("dragleave", () => {
+        zone.classList.remove("active");
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        zone.classList.remove("active");
+        if (!dragging || !canDropTo(dragging.from, zoneKey, dragging.owner || session.role, ownerRole)) return;
+        const payload = {
+          cardId: dragging.cardId,
+          from: { owner: dragging.owner || session.role, zone: dragging.from },
+          to: { owner: ownerRole, zone: zoneKey }
+        };
+        moveCard(payload, true);
+      });
+    }
+
+    function renderCard(cardId, zoneKey, ownerRole = session.role) {
       const card = document.createElement("div");
       card.className = "miniCard";
       card.textContent = String(cardId);
@@ -251,46 +332,91 @@ Screen + data architecture:
       if (s?.tarped?.[cardId]) card.classList.add("tarped");
       card.addEventListener("click", () => { inspector = { zoneKey, cardId }; renderApp(); });
       card.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleMark(cardId, "tapped"); });
-      card.draggable = canDragFrom(zoneKey);
-      card.addEventListener("dragstart", () => { dragging = { cardId, from: zoneKey }; });
+      card.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (zoneKey === "hand") return;
+        toggleMark(cardId, e.shiftKey ? "tarped" : "tapped");
+      });
+      card.draggable = canDragFrom(zoneKey, ownerRole);
+      card.addEventListener("dragstart", () => { dragging = { cardId, from: zoneKey, owner: ownerRole }; });
       card.addEventListener("dragend", () => { dragging = null; });
       return card;
     }
 
-    function renderZone(zoneKey) {
+    function renderZone(zoneKey, ownerRole = session.role, opts = {}) {
       const zone = document.createElement("section");
       zone.className = `dropArea zone-${zoneKey}`;
+      if (opts.mirrored) zone.classList.add("battleMirrorZone");
+      if (opts.flipped) zone.classList.add("battleFlipZone");
       zone.dataset.zone = zoneKey;
-      zone.dataset.owner = getZoneOwner(zoneKey);
-      const label = document.createElement("div");
-      label.className = "zoneMeta";
-      label.textContent = `${zoneKey.toUpperCase()} (${getZone(zoneKey).length})`;
-      label.addEventListener("dblclick", () => {
-        if (!canSeeZone(zoneKey)) return;
+      zone.dataset.zoneKey = zoneKey;
+      zone.dataset.owner = getZoneOwner(zoneKey, ownerRole);
+      const zoneCards = getZone(zoneKey, ownerRole);
+      const zoneLabel = (appMode === "battle" && BATTLEFIELD_ZONES.includes(zoneKey))
+        ? `${zoneKey.toUpperCase()} • ${(ownerRole || "").toUpperCase()}`
+        : zoneKey.toUpperCase();
+
+      if (isPileZone(zoneKey)) {
+        zone.classList.add("isPile");
+        const pile = document.createElement("div");
+        pile.className = "pileSilhouette";
+        const pileCard = document.createElement("div");
+        pileCard.className = "miniCard pileCard";
+        pileCard.dataset.cardId = "__PILE__";
+        const count = document.createElement("div");
+        count.className = "pileCount";
+        count.textContent = String(zoneCards.length);
+        pileCard.appendChild(count);
+        if (zoneKey === "stack") {
+          const intensity = Math.max(0, Math.min(10, zoneCards.length));
+          pileCard.classList.add("stackPileCard");
+          pileCard.style.setProperty("--stackI", String(intensity));
+          pileCard.style.setProperty("--stackOn", zoneCards.length > 0 ? "1" : "0");
+        }
+        pile.appendChild(pileCard);
+
+        const label = document.createElement("div");
+        label.className = "pileLabel";
+        label.textContent = zoneKey === "stack" ? "THE STACK" : zoneLabel;
+        zone.append(pile, label);
+
+        if (zoneKey === "deck") {
+          pileCard.addEventListener("click", (e) => {
+            e.stopPropagation();
+            drawCard();
+          });
+        } else {
+          pileCard.addEventListener("click", (e) => {
+            e.stopPropagation();
+            if (!canSeeZone(zoneKey, ownerRole)) return;
+            inspector = { zoneKey, cardId: null };
+            renderApp();
+          });
+        }
+
+        applyDropHandlers(zone, zoneKey, ownerRole);
+        return zone;
+      }
+
+      zone.addEventListener("click", () => {
+        if (!canSeeZone(zoneKey, ownerRole)) return;
         inspector = { zoneKey, cardId: null };
         renderApp();
       });
+
+      const label = document.createElement("div");
+      label.className = "zoneMeta";
+      label.textContent = `${zoneLabel} (${zoneCards.length})`;
       zone.appendChild(label);
 
       const row = document.createElement("div");
       row.className = "slotRow";
-      getZone(zoneKey).forEach((id) => row.appendChild(renderCard(id, zoneKey)));
+      zoneCards.forEach((id) => row.appendChild(renderCard(id, zoneKey, ownerRole)));
+      if (zoneKey === "hand") layoutHandFan(row, zoneCards);
       zone.appendChild(row);
 
-      zone.addEventListener("dragover", (e) => {
-        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
-        e.preventDefault();
-      });
-      zone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
-        const payload = {
-          cardId: dragging.cardId,
-          from: { owner: getZoneOwner(dragging.from), zone: dragging.from },
-          to: { owner: getZoneOwner(zoneKey), zone: zoneKey }
-        };
-        moveCard(payload, true);
-      });
+      applyDropHandlers(zone, zoneKey, ownerRole);
 
       return zone;
     }
@@ -298,20 +424,32 @@ Screen + data architecture:
     function renderInspector() {
       if (!inspector) return null;
       const overlay = document.createElement("div");
-      overlay.className = "cbOverlay";
+      overlay.className = "inspectorOverlay";
+      overlay.id = "inspectorOverlay";
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay) { inspector = null; renderApp(); }
       });
       const panel = document.createElement("div");
-      panel.className = "cbPanel";
+      panel.className = "inspectorTrack";
       const zoneCards = getZone(inspector.zoneKey);
-      panel.innerHTML = `<h3>${inspector.zoneKey.toUpperCase()}</h3><p>${zoneCards.length} cards</p>`;
+      if (!zoneCards.length) {
+        const empty = document.createElement("div");
+        empty.className = "inspectorEmpty";
+        empty.textContent = `${inspector.zoneKey.toUpperCase()} is empty`;
+        panel.appendChild(empty);
+      }
       zoneCards.forEach((id) => {
-        const row = document.createElement("button");
-        row.className = "menuBtn";
-        row.textContent = `${id} • ${cardName(id)}`;
+        const row = document.createElement("div");
+        row.className = "inspectorCard";
+        row.textContent = `${id}`;
+        row.title = cardName(id);
         panel.appendChild(row);
       });
+      const closeBtn = document.createElement("button");
+      closeBtn.className = "inspectorCloseBtn";
+      closeBtn.textContent = "Close";
+      closeBtn.addEventListener("click", () => { inspector = null; renderApp(); });
+      overlay.appendChild(closeBtn);
       overlay.appendChild(panel);
       return overlay;
     }
@@ -319,22 +457,29 @@ Screen + data architecture:
     function renderBoard() {
       const wrap = document.createElement("div");
       wrap.className = "board";
-      ["permanents", "lands", "hand", "stack", "deck", "graveyard"].forEach((z) => wrap.appendChild(renderZone(z)));
+      wrap.style.justifyContent = "flex-start";
 
-      const controls = document.createElement("div");
-      controls.className = "menuCard";
-      const drawBtn = document.createElement("button");
-      drawBtn.className = "menuBtn";
-      drawBtn.textContent = "Draw 1";
-      drawBtn.onclick = drawCard;
-      controls.appendChild(drawBtn);
-      if (appMode === "battle") {
-        const room = document.createElement("div");
-        room.className = "zoneMeta";
-        room.textContent = `Room ${battleRoomId} • You are ${session.role || "-"}`;
-        controls.appendChild(room);
-      }
-      wrap.prepend(controls);
+      const opponentRole = getOpponentRole();
+      const piles = document.createElement("div");
+      piles.className = "pilesBar";
+      ["stack", "deck", "graveyard"].forEach((z) => piles.appendChild(renderZone(z, session.role)));
+
+      const flipBtn = document.createElement("button");
+      flipBtn.className = "menuBtn";
+      flipBtn.textContent = opponentFlipped ? "Opponent: 180°" : "Opponent: Normal";
+      flipBtn.addEventListener("click", () => {
+        opponentFlipped = !opponentFlipped;
+        renderApp();
+      });
+      piles.appendChild(flipBtn);
+
+      wrap.appendChild(piles);
+      wrap.appendChild(renderZone("permanents", opponentRole, { mirrored: true, flipped: opponentFlipped }));
+      wrap.appendChild(renderZone("lands", opponentRole, { mirrored: true, flipped: opponentFlipped }));
+      wrap.appendChild(renderZone("permanents", session.role));
+      wrap.appendChild(renderZone("lands", session.role));
+      wrap.appendChild(renderZone("hand", session.role));
+
       return wrap;
     }
 
@@ -504,12 +649,22 @@ Screen + data architecture:
         renderApp();
       };
 
-      card.append(createBtn, input, joinBtn);
+      const hint = document.createElement("div");
+      hint.className = "zoneMeta";
+      hint.textContent = "Create a room and share the code with your opponent to join from another device.";
+
+      card.append(createBtn, input, joinBtn, hint);
       host.appendChild(card);
     }
 
     function renderModeScreen() {
-      subtitle.textContent = `${session.playerName} • ${appMode}`;
+      if (appMode === "battle") {
+        subtitle.textContent = battleRoomId
+          ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+          : `${session.playerName} • battle`;
+      } else {
+        subtitle.textContent = `${session.playerName} • ${appMode}`;
+      }
       const wrap = document.createElement("div");
       wrap.className = "view";
 
