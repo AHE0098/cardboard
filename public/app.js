@@ -16,8 +16,8 @@ Screen + data architecture:
 
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
-    const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard"];
-    const BATTLEFIELD_ZONES = ["lands", "permanents"];
+    const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard", "opponentPermanents", "opponentLands"];
+    const BATTLEFIELD_ZONES = ["lands", "permanents", "opponentPermanents", "opponentLands"];
     const SHARED_ZONES = ["stack"];
     const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
     const PILE_ZONES = ["stack", "deck", "graveyard"];
@@ -142,7 +142,7 @@ Screen + data architecture:
 
     function onBack() {
       if (uiScreen === "mode") {
-        if (appMode === "sandbox") persistPlayerSaveDebounced();
+        if (appMode === "sandbox") { persistPlayerSaveDebounced(); clearSandboxTopPilesHost(); }
         if (appMode === "battle") battleClient.leaveRoom();
         uiScreen = "mainMenu";
         appMode = null;
@@ -168,6 +168,13 @@ Screen + data architecture:
       return appMode === "battle" ? (battleViewRole || session.role || "p1") : "solo";
     }
 
+    function resolveZoneBinding(zoneKey, ownerRole = session.role) {
+      if (appMode !== "battle") return { zone: zoneKey, owner: ownerRole };
+      if (zoneKey === "opponentPermanents") return { zone: "permanents", owner: getOpponentRole() };
+      if (zoneKey === "opponentLands") return { zone: "lands", owner: getOpponentRole() };
+      return { zone: zoneKey, owner: ownerRole };
+    }
+
     function isSharedZone(zoneKey) {
       return SHARED_ZONES.includes(zoneKey);
     }
@@ -181,11 +188,17 @@ Screen + data architecture:
     }
 
     function getZoneOwner(zoneKey, ownerRole = session.role) {
+      const resolved = resolveZoneBinding(zoneKey, ownerRole);
+      zoneKey = resolved.zone;
+      ownerRole = resolved.owner;
       if (appMode !== "battle") return "solo";
       return isSharedZone(zoneKey) ? "shared" : (ownerRole || session.role || "p1");
     }
 
     function getZone(zoneKey, ownerRole = session.role) {
+      const resolved = resolveZoneBinding(zoneKey, ownerRole);
+      zoneKey = resolved.zone;
+      ownerRole = resolved.owner;
       const s = modeState();
       if (!s) return [];
       if (appMode === "battle") {
@@ -196,6 +209,9 @@ Screen + data architecture:
     }
 
     function setZone(zoneKey, arr, ownerRole = session.role) {
+      const resolved = resolveZoneBinding(zoneKey, ownerRole);
+      zoneKey = resolved.zone;
+      ownerRole = resolved.owner;
       const s = modeState();
       if (!s) return;
       if (appMode === "battle") {
@@ -208,6 +224,9 @@ Screen + data architecture:
     }
 
     function canSeeZone(zoneKey, ownerRole = session.role) {
+      const resolved = resolveZoneBinding(zoneKey, ownerRole);
+      zoneKey = resolved.zone;
+      ownerRole = resolved.owner;
       if (appMode !== "battle") return true;
       if (isPrivateZone(zoneKey)) return ownerRole === session.role;
       return isSharedZone(zoneKey) || isBattlefieldZone(zoneKey);
@@ -269,6 +288,7 @@ Screen + data architecture:
     }
 
     function canDragFrom(zoneKey, ownerRole = session.role) {
+      if (zoneKey === "opponentPermanents" || zoneKey === "opponentLands") return false;
       if (appMode !== "battle") return true;
       if (zoneKey === "deck") return false;
       if (!canSeeZone(zoneKey, ownerRole)) return false;
@@ -278,6 +298,8 @@ Screen + data architecture:
 
     function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
       if (appMode !== "battle") return true;
+      if (toZone === "opponentPermanents" || toZone === "opponentLands") return false;
+      if (fromZone === "opponentPermanents" || fromZone === "opponentLands") return false;
       if (!ALL_ZONES.includes(fromZone) || !ALL_ZONES.includes(toZone)) return false;
       const fromShared = isSharedZone(fromZone);
       const toShared = isSharedZone(toZone);
@@ -988,27 +1010,18 @@ Screen + data architecture:
       }
 
       const myRole = session.role || "p1";
-      const viewedRole = getViewedRole();
-      const otherRole = viewedRole === "p1" ? "p2" : "p1";
+      const otherRole = myRole === "p1" ? "p2" : "p1";
       const wrap = document.createElement("div");
       wrap.className = "board battleBoard";
 
       const topPrivate = document.createElement("div");
       topPrivate.className = "battleTopPrivate";
-      const topMeta = document.createElement("div");
-      topMeta.className = "zoneMeta";
-      topMeta.textContent = viewedRole === myRole ? "Your private zones" : `${viewedRole.toUpperCase()} private zones`;
-      topPrivate.append(topMeta, renderZone("deck", viewedRole, { compactPile: true }), renderZone("graveyard", viewedRole, { compactPile: true }), renderZone("stack", myRole, { compactPile: true }));
-      wrap.append(topPrivate, renderZone("hand", viewedRole));
+      topPrivate.append(renderZone("deck", myRole, { compactPile: true }), renderZone("graveyard", myRole, { compactPile: true }), renderZone("stack", myRole, { compactPile: true }));
+      wrap.append(topPrivate, renderZone("hand", myRole));
 
-      const viewBtn = document.createElement("button");
-      viewBtn.className = "menuBtn";
-      viewBtn.textContent = `View ${viewedRole === "p1" ? "P2" : "P1"}`;
-      viewBtn.onclick = () => { battleViewRole = viewedRole === "p1" ? "p2" : "p1"; inspector = null; renderApp(); };
-      wrap.appendChild(viewBtn);
-
-      wrap.appendChild(renderBattlefieldTrack(viewedRole, viewedRole.toUpperCase()));
-      wrap.appendChild(renderBattlefieldTrack(otherRole, otherRole.toUpperCase(), { mirrored: true }));
+      wrap.appendChild(renderBattlefieldTrack(myRole, myRole.toUpperCase()));
+      wrap.appendChild(renderZone("opponentPermanents", myRole, { mirrored: true }));
+      wrap.appendChild(renderZone("opponentLands", myRole, { mirrored: true }));
       return wrap;
     }
 
@@ -1149,6 +1162,22 @@ Screen + data architecture:
       root.replaceChildren(card);
     }
 
+    function clearSandboxTopPilesHost() {
+      const host = document.getElementById("topPiles");
+      if (host) host.remove();
+    }
+
+    function mountLegacySandboxInApp() {
+      window.DEMO_STATE = sandboxState;
+      window.__CB_PLAYER_ID = session.playerId || null;
+      const existing = document.querySelector('script[data-in-app-sandbox="1"]');
+      if (existing) existing.remove();
+      const script = document.createElement("script");
+      script.src = `./legacySandbox.js?t=${Date.now()}`;
+      script.dataset.inAppSandbox = "1";
+      document.body.appendChild(script);
+    }
+
     function renderBattleLobby(host) {
       const card = document.createElement("div");
       card.className = "menuCard";
@@ -1207,15 +1236,11 @@ Screen + data architecture:
         if (!battleState) renderBattleLobby(wrap);
         else wrap.appendChild(renderBoard());
       } else {
-        const frame = document.createElement("iframe");
-        frame.className = "sandboxFrame";
-        frame.src = `/sandbox.html?playerId=${encodeURIComponent(session.playerId || "")}`;
-        frame.title = "Sandbox mode";
-        wrap.appendChild(frame);
+        mountLegacySandboxInApp();
       }
 
-      const panel = renderInspector();
-      const deckPanel = renderDeckPlacementChooser();
+      const panel = appMode === "sandbox" ? null : renderInspector();
+      const deckPanel = appMode === "sandbox" ? null : renderDeckPlacementChooser();
       root.replaceChildren(wrap);
       if (panel) root.appendChild(panel);
       if (deckPanel) root.appendChild(deckPanel);
@@ -1223,6 +1248,7 @@ Screen + data architecture:
 
     function renderApp() {
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
+      if (!(uiScreen === "mode" && appMode === "sandbox")) clearSandboxTopPilesHost();
       if (uiScreen === "playerMenu") return renderPlayerMenu();
       if (uiScreen === "mainMenu") return renderMainMenu();
       return renderModeScreen();
