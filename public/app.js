@@ -1,1949 +1,558 @@
 /*
-WHAT CHANGED / HOW TO TEST (Battle Mode)
-- Added optional Battle (2P) mode with shared battlefield zones (lands/permanents/stack)
-  and per-player hand/deck/graveyard. Solo mode behavior remains intact.
-- Added player swap control in focus mode for battle perspective switching.
-- Routed zone reads/writes through helpers so drag/drop, inspector, deck draw animation,
-  and deck placement chooser work in both solo + battle.
-
-Quick test:
-1) Open overview and click "Battle (2P)", then double-click Hand to focus.
-2) Use "View P1/P2" to swap perspective; hand/deck/graveyard should switch.
-3) Drag from hand to lands/permanents/stack, then swap player; shared zones persist.
-4) Double-tap deck pile to draw; card should animate into active player's hand.
+Screen + data architecture:
+- uiScreen: playerMenu -> mainMenu -> mode
+- appMode: sandbox | battle | deckbuilder
+- localStorage keys:
+  - cb_players: { players:[{id,name,createdAt,lastSeenAt}], lastPlayerId }
+  - cb_save_<playerId>: { lastMode, sandboxState, lastBattleRoomId, updatedAt }
+- Battle networking uses Socket.IO with a server-authoritative room state and client intents.
 */
-
-// ✅ FIXED STRUCTURE
-// Everything that uses: root / subtitle / dragLayer / state / view / dragging / inspector
-// MUST live inside boot() (or be passed in).
-
 
 (() => {
-const boot = () => {
-// Grab DOM refs *after* DOM exists
-const root = document.getElementById("root");
-const subtitle = document.getElementById("subtitle");
-const dragLayer = document.getElementById("dragLayer");
+  const boot = () => {
+    const root = document.getElementById("root");
+    const subtitle = document.getElementById("subtitle");
+    const dragLayer = document.getElementById("dragLayer");
+    if (!root || !subtitle || !dragLayer) throw new Error("Missing required DOM roots");
 
+    const PLAYER_KEY = "cb_players";
+    const SAVE_PREFIX = "cb_save_";
+    const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard"];
+    const SHARED_ZONES = ["lands", "permanents", "stack"];
+    const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
+    const demo = window.DEMO_STATE || { zones: { hand: [], lands: [], permanents: [] }, tapped: {}, tarped: {} };
 
-// Fail loudly (prevents “blank page” mystery)
-if (!root) throw new Error("Missing #root");
-if (!subtitle) throw new Error("Missing #subtitle");
-if (!dragLayer) throw new Error("Missing #dragLayer");
+    let uiScreen = "playerMenu";
+    let appMode = null;
+    let view = { type: "board" };
+    let dragging = null;
+    let inspector = null;
 
+    let session = { playerId: null, playerName: null, role: null };
+    let playerRegistry = loadPlayerRegistry();
+    let saveTimer = null;
 
-// State (safe clone + fallback)
-const fallbackState = {
-playerName: "Player 1",
-zones: { hand: [200, 201, 202], lands: [101, 102], permanents: [210], deck: [], graveyard: [] },
-tapped: {},
-tarped: {},
-};
+    let sandboxState = createSandboxState();
 
+    let battleState = null;
+    let battleRoomId = "";
+    let battleClient = createBattleClient();
 
-const state = typeof structuredClone === "function"
-? structuredClone(window.DEMO_STATE || fallbackState)
-: JSON.parse(JSON.stringify(window.DEMO_STATE || fallbackState));
+    const topBackBtn = document.createElement("button");
+    topBackBtn.className = "topBackBtn";
+    topBackBtn.textContent = "Back";
+    document.querySelector(".topbar")?.insertBefore(topBackBtn, subtitle);
+    topBackBtn.addEventListener("click", onBack);
 
-function getMode() {
-  return state.mode || "solo";
-}
-
-function getActivePlayerKey() {
-  return state.activePlayerKey || "p1";
-}
-
-function getPlayer(playerKey = getActivePlayerKey()) {
-  state.players ||= {};
-  state.players[playerKey] ||= { name: playerKey === "p2" ? "Player 2" : "Player 1", zones: {} };
-  state.players[playerKey].zones ||= {};
-  return state.players[playerKey];
-}
-
-function isSharedZone(zoneKey) {
-  return ["lands", "permanents", "stack"].includes(zoneKey);
-}
-
-function getZoneOwnerKey(zoneKey, opts = {}) {
-  if (getMode() === "solo") return "solo";
-  if (isSharedZone(zoneKey)) return "shared";
-  return opts.playerKey || getActivePlayerKey();
-}
-
-function getZoneArray(zoneKey, opts = {}) {
-  ensureZoneArrays();
-
-  if (getMode() === "solo") {
-    state.zones ||= {};
-    state.zones[zoneKey] ||= [];
-    return state.zones[zoneKey];
-  }
-
-  if (isSharedZone(zoneKey)) {
-    state.sharedZones ||= {};
-    state.sharedZones[zoneKey] ||= [];
-    return state.sharedZones[zoneKey];
-  }
-
-  const p = getPlayer(opts.playerKey || getActivePlayerKey());
-  p.zones[zoneKey] ||= [];
-  return p.zones[zoneKey];
-}
-
-function setZoneArray(zoneKey, arr, opts = {}) {
-  if (getMode() === "solo") {
-    state.zones ||= {};
-    state.zones[zoneKey] = arr;
-    return;
-  }
-
-  if (isSharedZone(zoneKey)) {
-    state.sharedZones ||= {};
-    state.sharedZones[zoneKey] = arr;
-    return;
-  }
-
-  const p = getPlayer(opts.playerKey || getActivePlayerKey());
-  p.zones[zoneKey] = arr;
-}
-
-
-// ✅ EVERYTHING BELOW (your existing code) goes inside boot(), so it can see state/root/etc.
-
-
-function ensureZoneArrays() {
-  const soloKeys = ["hand", "lands", "permanents", "deck", "graveyard", "stack"];
-  const sharedKeys = ["lands", "permanents", "stack"];
-  const playerKeys = ["hand", "deck", "graveyard"];
-
-  if (!state.mode) state.mode = "solo";
-  if (!state.activePlayerKey) state.activePlayerKey = "p1";
-
-  state.zones ||= {};
-  for (const k of soloKeys) state.zones[k] ||= [];
-
-  state.sharedZones ||= {};
-  for (const k of sharedKeys) state.sharedZones[k] ||= [];
-
-  state.players ||= {};
-  ["p1", "p2"].forEach((pk, idx) => {
-    state.players[pk] ||= { name: idx === 0 ? "Player 1" : "Player 2", zones: {} };
-    state.players[pk].name ||= idx === 0 ? "Player 1" : "Player 2";
-    state.players[pk].zones ||= {};
-    for (const zk of playerKeys) state.players[pk].zones[zk] ||= [];
-  });
-}
-
-
-function ensureDeckSeeded() {
-  const seedDeck = [
-200, 201, 202, 203, 204, 205,
-210, 211, 212, 213,
-101, 102, 103, 104, 105,
-220, 221, 222, 230, 231, 240, 241,
-  ];
-
-  if (getMode() === "solo") {
-    const deck = getZoneArray("deck");
-    if (Array.isArray(deck) && deck.length === 0) setZoneArray("deck", [...seedDeck]);
-    return;
-  }
-
-  ["p1", "p2"].forEach((pk, idx) => {
-    const deck = getZoneArray("deck", { playerKey: pk });
-    if (deck.length === 0) {
-      const rotated = seedDeck.map((id, i) => seedDeck[(i + (idx * 5)) % seedDeck.length]);
-      setZoneArray("deck", rotated, { playerKey: pk });
+    function uid() {
+      return (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
     }
 
-    const hand = getZoneArray("hand", { playerKey: pk });
-    if (hand.length === 0) {
-      const d = getZoneArray("deck", { playerKey: pk });
-      for (let i = 0; i < 3 && d.length > 0; i++) hand.unshift(d.shift());
-    }
-  });
-}
+    function clone(x) { return JSON.parse(JSON.stringify(x)); }
 
-
-ensureZoneArrays();
-ensureDeckSeeded();
-
-
-function updateSubtitle() {
-  if (getMode() === "battle") {
-    const active = getPlayer(getActivePlayerKey());
-    subtitle.textContent = `Battle • Viewing: ${active.name}`;
-    return;
-  }
-  subtitle.textContent = state.playerName;
-}
-
-updateSubtitle();
-
-
-let view = { type: "focus", zoneKey: "hand" };
-let dragging = null;
-let inspector = null;
-let inspectorDragging = null;
-
-
-const ZONES = [
-  { key: "permanents", label: "Permanents", kind: "row" },
-  { key: "lands", label: "Lands", kind: "row" },
-  { key: "hand", label: "Hand", kind: "hand" },
-
-  // piles
-  { key: "stack", label: "THE STACK", kind: "pile" },
-  { key: "deck", label: "Deck", kind: "pile" },
-  { key: "graveyard", label: "Graveyard", kind: "pile" },
-];
-
-
-// --- Topbar Back button (between title and subtitle) ---
-const topbar = document.querySelector(".topbar");
-const titleEl = document.querySelector(".title");
-
-
-const topBackBtn = document.createElement("button");
-topBackBtn.className = "topBackBtn";
-topBackBtn.textContent = "Back";
-topBackBtn.addEventListener("click", () => {
-  inspector = null;
-  removeInspectorOverlay();
-  removeBoardOverlay();
-  syncDropTargetHighlights(null);
-  inspectorDragging = null;
-  showDock(false);
-
-  view = { type: "overview" };
-  render();
-}); // ✅ THIS was missing
-
-if (topbar && titleEl) {
-  topbar.insertBefore(topBackBtn, subtitle);
-}
-
-function getCardCostString(cardId) {
-  const data = window.CARD_REPO?.[String(cardId)] || {};
-  // support both "cost" and "costs"
-  const c = (data.costs ?? data.cost ?? "").toString().trim();
-  return c;
-}
-
-function parseManaCost(costStr) {
-  // Accepts: "1W", "2UU", "10G", "XRR", "" etc.
-  // Returns array like: ["1","W","U","U"]
-  if (!costStr) return [];
-  const s = String(costStr).trim();
-  if (!s) return [];
-  const tokens = s.match(/(\d+|[WUBRGX])/g);
-  return tokens ? tokens : [];
-}
-
-function getManaTokenKey(tok) {
-  // normalize token to a display key
-  if (!tok) return "";
-  if (/^\d+$/.test(tok)) return "C"; // generic for numerals (we'll print the number)
-  const t = tok.toUpperCase();
-  if (["W","U","B","R","G","X"].includes(t)) return t;
-  return "";
-}
-
-function buildManaSymbolEl(tok) {
-  // Fallback symbol: a styled circle.
-  // NEW: colored pips show NO LETTERS — just a stronger color fill.
-  // Neutral costs (numbers) remain as text. Colorless stays neutral. X stays as text.
-
-  const key = getManaTokenKey(tok);
-  if (!key) return null;
-
-  const el = document.createElement("div");
-  el.className = "manaSymbol";
-
-  const isNumber = /^\d+$/.test(tok);
-  const manaKey =
-    key === "W" ? "w" :
-    key === "U" ? "u" :
-    key === "B" ? "b" :
-    key === "R" ? "r" :
-    key === "G" ? "g" :
-    key === "X" ? "x" : "c";
-
-  el.dataset.mana = manaKey;
-
-  // ✅ Keep neutral costs as-is (numbers)
-  if (isNumber) {
-    el.textContent = tok;
-    return el;
-  }
-
-  // ✅ For the 5 colored pips: no letters, just color fill
-  if (["W", "U", "B", "R", "G"].includes(key)) {
-    el.textContent = "";            // remove letter
-    el.setAttribute("aria-label", key);
-    return el;
-  }
-
-  // ✅ Keep X visible as text (still neutral-ish)
-  if (key === "X") {
-    el.textContent = "X";
-    return el;
-  }
-
-  // ✅ Colorless / generic fallback
-  el.textContent = key;
-  return el;
-}
-
-function renderManaCostOverlay(costStr, opts = {}) {
-  // opts: { mode: "mini" | "inspector" }
-  const mode = opts.mode || "mini";
-
-  const tokens = parseManaCost(costStr);
-  if (!tokens.length) return null;
-
-  // icon sizing assumptions (must match CSS presets)
-  const icon = mode === "inspector" ? 22 : 12;
-  const gap = mode === "inspector" ? 6 : 3;
-
-  // card widths in your UI:
-  // miniCard = 56px; inspectorCard varies but we can estimate 260 max (you set max-width 260)
-  const cardW = mode === "inspector" ? 260 : 56;
-
-  const pad = 10; // matches CSS max-width calc
-  const usable = Math.max(10, cardW - pad);
-  const cols = Math.max(1, Math.floor((usable + gap) / (icon + gap)));
-
-  const wrap = document.createElement("div");
-  wrap.className = "manaCost " + (mode === "inspector" ? "isInspector" : "isMini");
-
-  for (let i = 0; i < tokens.length; i += cols) {
-    const row = document.createElement("div");
-    row.className = "manaRow";
-
-    tokens.slice(i, i + cols).forEach((tok) => {
-      const sym = buildManaSymbolEl(tok);
-      if (sym) row.appendChild(sym);
-    });
-
-    wrap.appendChild(row);
-  }
-
-  return wrap;
-}
-
-
-  
-
-function getCardImgSrc(cardId, opts = {}) {
-  const playerKey = opts.playerKey || "p1";
-
-  if (window.resolveCardImage) {
-    return window.resolveCardImage(cardId, { playerKey }); // may return null
-  }
-
-  // old local convention as a last resort:
-  return `/cards/image${cardId}.png`;
-}
-
- 
-function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
-  const c = document.createElement("div");
-  c.className = "miniCard";
-  c.dataset.cardId = String(cardId);
-  c.dataset.fromZoneKey = fromZoneKey;
-
-  // ===== Art layer =====
-  const pic = document.createElement("div");
-  pic.className = "miniPic";
-
-  const img = document.createElement("img");
-  img.className = "miniImg";
-  img.alt = "";
-  img.draggable = false;
-
-  const src = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
-  if (src) {
-    img.onload = () => img.classList.add("isLoaded");
-    img.onerror = () => img.remove(); // silhouette fallback
-    img.src = src;
-    pic.appendChild(img);
-  }
-
-  c.appendChild(pic);
-
-  // ===== Mana cost (top-center, wraps, never spills) =====
-  const costStr = getCardCostString(cardId);
-  const costEl = renderManaCostOverlay(costStr, { mode: "mini" });
-  if (costEl) c.appendChild(costEl);
-
-  // ===== PT badge (bottom-center) =====
-  const data = window.CARD_REPO?.[String(cardId)];
-  if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
-    const pt = document.createElement("div");
-    pt.className = "miniPT";
-    pt.textContent = `${data.power}|${data.toughness}`;
-    c.appendChild(pt);
-  }
-
-  if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
-  if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
-
-  if (!overlay) {
-    c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-    c.addEventListener("click", (e) => e.stopPropagation());
-  }
-
-  return c;
-}
-  
-function removeInspectorOverlay() {
-  const existing = document.getElementById("inspectorOverlay");
-  if (existing) existing.remove();
-}
-
-  function removeBoardOverlay() {
-  const existing = document.getElementById("boardOverlay");
-  if (existing) existing.remove();
-}
-
-function layoutHandFan(slotRowEl, cardIds) {
-  // Tweak these constants to taste (they map to CSS vars too)
-  const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
-
-  const rx = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-rx")) || 340;
-  const ry = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-ry")) || 130;
-  const arcY = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-arc-y")) || 18;
-
-  // The “nice” spread for up to 7 cards
-  const niceMax = 7;
-  const n = cardIds.length;
-
-  // Angle range for the "nice" portion (degrees)
-  const baseRange = 42; // total spread (~-21..+21) at overlap ~0.55
-  const range = baseRange * (1.15 - overlap); // higher overlap -> smaller range
-
-  // For >7, keep the first 7 nicely centered, and let the rest march to the right
-  const niceN = Math.min(n, niceMax);
-  const startIdx = 0;
-
-  // Centering for the nice set
-  const centerNice = (niceN - 1) / 2;
-
-  // Step for angles inside the nice range
-  const niceStep = niceN > 1 ? (range / centerNice) : 0;
-
-  // Extra cards: extend angles to the right; overlap controls how fast they “fall away”
-  const extraStep = 7.5 * (0.95 - overlap); // smaller overlap => faster spread; larger => tighter
-
-  // Apply transform to each .miniCard in slotRow order
-  const cards = Array.from(slotRowEl.querySelectorAll(".miniCard"));
-  cards.forEach((el, i) => {
-    // Base index for curve
-    let thetaDeg;
-    if (i < niceN) {
-      thetaDeg = (i - centerNice) * niceStep; // centered fan
-    } else {
-      const extra = i - (niceN - 1);
-      thetaDeg = (niceN - 1 - centerNice) * niceStep + extra * extraStep; // keep going right
+    function createSeedDeck(offset = 0) {
+      const seed = [200, 201, 202, 203, 204, 205, 210, 211, 212, 213, 220, 221, 222, 230, 231, 240, 241, 101, 102, 103, 104, 105];
+      return seed.map((_, i) => seed[(i + offset) % seed.length]);
     }
 
-    const theta = (thetaDeg * Math.PI) / 180;
-
-    // Parametric ellipse: x = rx*sin(theta), y = ry*(1 - cos(theta))
-    // y grows downward as theta increases; perfect for “disappear down-right”
-    const x = rx * Math.sin(theta);
-    const y = ry * (1 - Math.cos(theta)) + arcY;
-
-    // Rotate slightly to match curve
-    const rot = thetaDeg * 0.9;
-
-    // Z-order: later cards should sit on top (typical hand feel)
-    el.style.zIndex = String(1000 + i);
-
-    // Anchor at center then move to arc point, then rotate.
-    // translate(-50%,0) pulls element center to the 50% left anchor.
-    el.style.transform = `translate(-50%, 0) translate(${x}px, ${y}px) rotate(${rot}deg)`;
-
-    // Optional: tiny scale taper for depth, feels "globe eye"
-    // const scale = 1 - Math.min(Math.abs(thetaDeg) / 140, 0.06);
-    // el.style.transform += ` scale(${scale})`;
-  });
-}
-
-  
-function renderBoardOverlay() {
-  removeBoardOverlay();
-
-  const wrap = document.createElement("div");
-  wrap.id = "boardOverlay";
-  wrap.className = "boardOverlay";
-
-  const inner = document.createElement("div");
-  inner.className = "boardOverlayInner";
-
-  const board = document.createElement("div");
-  board.className = "board";
-
-  // reuse same drop areas (they already have dataset.zoneKey)
-  ZONES.forEach(z => board.appendChild(renderDropArea(z.key, { overlay: true })));
-
-
-  inner.appendChild(board);
-  wrap.appendChild(inner);
-  document.body.appendChild(wrap);
-}
-
-function render() {
-  root.innerHTML = "";
-
-  document.body.classList.toggle("isFocus", view?.type === "focus");
-  document.body.classList.toggle("isOverview", view?.type !== "focus");
-
-  // show Back only when we're in focus
-  const b = document.querySelector(".topBackBtn");
-  if (b) b.style.display = (view?.type === "focus") ? "inline-flex" : "none";
-
-  updateSubtitle();
-
-  if (view?.type === "focus" && view.zoneKey) {
-    root.appendChild(renderFocus(view.zoneKey));
-  } else {
-    root.appendChild(renderOverview());
-  }
-
-  // Mount top piles OUTSIDE root (so they stay at real top)
-  renderTopPilesBar();
-
-  // Inspector overlay handling stays global
-  if (inspector) {
-    renderInspector(inspector.zoneKey);
-  } else {
-    removeInspectorOverlay();
-    removeBoardOverlay();
-    syncDropTargetHighlights(null);
-  }
-}
-
-function renderOverview() {
-  const wrap = document.createElement("div");
-  wrap.className = "overview";
-
-  const tiles = document.createElement("div");
-  tiles.className = "zoneTiles";
-
-  // main zones
-  ["permanents", "lands", "hand"].forEach((k) => {
-    const z = ZONES.find(x => x.key === k);
-    tiles.appendChild(renderZoneTile(z.key, z.label, true));
-  });
-
-  // piles
-  ["stack", "deck", "graveyard"].forEach((k) => {
-    const z = ZONES.find(x => x.key === k);
-    tiles.appendChild(renderZoneTile(z.key, z.label, true));
-  });
-
-  const battleTile = document.createElement("button");
-  battleTile.className = "zoneTile";
-  battleTile.type = "button";
-  battleTile.innerHTML = `<div class="zoneHead"><div class="zoneName">${getMode() === "battle" ? "Leave Battle" : "Battle (2P)"}</div><div class="zoneMeta">Prototype</div></div><div class="previewRow"></div>`;
-  battleTile.addEventListener("click", () => {
-    if (getMode() === "battle") {
-      state.mode = "solo";
-      inspector = null;
-      view = { type: "overview" };
-      render();
-      return;
+    function createSandboxState() {
+      return {
+        zones: {
+          permanents: [...(demo.zones?.permanents || [])],
+          lands: [...(demo.zones?.lands || [])],
+          hand: [...(demo.zones?.hand || [])],
+          stack: [],
+          deck: createSeedDeck(),
+          graveyard: []
+        },
+        tapped: clone(demo.tapped || {}),
+        tarped: clone(demo.tarped || {})
+      };
     }
 
-    state.mode = "battle";
-    state.activePlayerKey = "p1";
-    ensureZoneArrays();
-    ensureDeckSeeded();
-    inspector = null;
-    view = { type: "focus", zoneKey: "hand" };
-    render();
-  });
-  tiles.appendChild(battleTile);
-
-  wrap.appendChild(tiles);
-
-  const hint = document.createElement("div");
-  hint.className = "overviewHint";
-  hint.textContent = "Tap a zone to inspect. Double-tap a zone to focus.";
-  wrap.appendChild(hint);
-
-  return wrap;
-}
-
-
-function showDock(active) {
-  const overlay = document.getElementById("inspectorOverlay");
-  if (overlay) {
-    // Do NOT toggle ".dragging" here (that's reserved for lift-mode UI only)
-    overlay.style.overflowX = active ? "hidden" : "auto";
-  }
-}
-
-
-
-function moveCard(cardId, fromZoneKey, toZoneKey) {
-  if (!toZoneKey) return;
-  if (!fromZoneKey) return;
-  if (toZoneKey === fromZoneKey) return;
-
-  ensureZoneArrays();
-
-  const fromArr = getZoneArray(fromZoneKey);
-  const toArr = getZoneArray(toZoneKey);
-
-  const idx = fromArr.indexOf(cardId);
-  if (idx < 0) return;
-
-  // Special: moving INTO deck triggers placement chooser
-  if (toZoneKey === "deck" && fromZoneKey !== "deck") {
-    fromArr.splice(idx, 1);
-    openDeckPlacementChooser(cardId, fromZoneKey);
-    return;
-  }
-
-  fromArr.splice(idx, 1);
-
-  // Special: stack always receives cards "on top"
-  if (toZoneKey === "stack") {
-    toArr.push(cardId); // top = end of array
-    return;
-  }
-
-  // default placement
-  toArr.push(cardId);
-}
-  
-
-function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
-  let holdTimer = null;
-
-  // modes
-  let lifted = false;     // long-press lift-to-board mode
-  let reordering = false; // short horizontal drag reorder mode
-
-  // refs/state
-  let start = null;
-  let overlayEl = null;
-  let trackEl = null;
-
-  // reorder UX
-  let placeholderEl = null;
-  let draggingEl = null;        // same as cardEl but we treat as “floating”
-  let dragStartRect = null;
-  let lastClientX = 0;
-
-  // auto-scroll
-  let autoScrollRaf = null;
-  let autoScrollDir = 0; // -1 left, +1 right, 0 none
-
-  // tuning
-  const EDGE_PX = 84;            // edge zone for auto-scroll
-  const MAX_SPEED = 22;          // px/frame at extreme edge
-  const ACTIVATION_DX = 10;      // how quickly reorder starts
-  const SWAP_HYSTERESIS = 0.08;  // deadzone around midpoints (0.0-0.2)
-  const CENTER_ON_DROP = true;
-
-  const clamp01 = (x) => Math.max(0, Math.min(1, x));
-
-  const cleanupOverlay = () => {
-    if (!overlayEl) return;
-    overlayEl.classList.remove("reordering");
-    overlayEl.classList.remove("liftDragging");
-    overlayEl.style.overflowX = "auto";
-  };
-
-  const stopAutoScroll = () => {
-    autoScrollDir = 0;
-    if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
-    autoScrollRaf = null;
-  };
-
-  const updateAutoScrollDir = (clientX) => {
-    if (!overlayEl) return;
-    const rect = overlayEl.getBoundingClientRect();
-
-    let dir = 0;
-    if (clientX < rect.left + EDGE_PX) dir = -1;
-    else if (clientX > rect.right - EDGE_PX) dir = +1;
-
-    if (dir !== autoScrollDir) {
-      autoScrollDir = dir;
-      if (autoScrollDir === 0) stopAutoScroll();
-      else if (!autoScrollRaf) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
-    }
-  };
-
-  const tickAutoScroll = () => {
-    if (!reordering || !overlayEl || autoScrollDir === 0) {
-      stopAutoScroll();
-      return;
-    }
-
-    const rect = overlayEl.getBoundingClientRect();
-
-    // intensity based on how deep into edge zone pointer is
-    let intensity = 0;
-    if (autoScrollDir < 0) {
-      intensity = (rect.left + EDGE_PX - lastClientX) / EDGE_PX;
-    } else {
-      intensity = (lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
-    }
-    intensity = clamp01(intensity);
-
-    const speed = Math.round(MAX_SPEED * intensity);
-    if (speed > 0) {
-      overlayEl.scrollLeft += autoScrollDir * speed;
-      // while scrolling, keep placeholder updated
-      updatePlaceholderFromPointer(lastClientX);
-    }
-
-    autoScrollRaf = requestAnimationFrame(tickAutoScroll);
-  };
-
-  const ensurePlaceholder = () => {
-    if (placeholderEl) return;
-
-    placeholderEl = document.createElement("div");
-    placeholderEl.className = "inspectorPlaceholder";
-
-    // inline style so you don’t need CSS
-    const r = cardEl.getBoundingClientRect();
-    placeholderEl.style.width = `${r.width}px`;
-    placeholderEl.style.height = `${r.height}px`;
-    placeholderEl.style.borderRadius = "18px";
-    placeholderEl.style.border = "1px dashed rgba(255,255,255,0.22)";
-    placeholderEl.style.background = "rgba(255,255,255,0.06)";
-    placeholderEl.style.boxShadow = "inset 0 0 0 1px rgba(0,0,0,0.25)";
-
-    trackEl.insertBefore(placeholderEl, cardEl.nextSibling);
-  };
-
-  const beginReorderMode = () => {
-    reordering = true;
-    lifted = false;
-    clearTimeout(holdTimer);
-
-    overlayEl.classList.add("reordering");
-    overlayEl.classList.remove("liftDragging");
-    overlayEl.style.overflowX = "auto"; // MUST allow scroll for auto-scroll
-
-    ensurePlaceholder();
-
-    // freeze the card’s “home” rect (so translation feels stable)
-    dragStartRect = cardEl.getBoundingClientRect();
-    draggingEl = cardEl;
-
-    // lift visual a bit
-    draggingEl.style.zIndex = "10010";
-    draggingEl.style.opacity = "0.96";
-    draggingEl.style.willChange = "transform";
-    draggingEl.style.transition = "transform 0ms"; // no lag while dragging
-  };
-
-  const endReorderModeCommit = () => {
-    stopAutoScroll();
-
-    // Drop card into placeholder spot
-    if (placeholderEl && trackEl && draggingEl) {
-      trackEl.insertBefore(draggingEl, placeholderEl);
-      placeholderEl.remove();
-      placeholderEl = null;
-    }
-
-    // reset styles
-    if (draggingEl) {
-      draggingEl.style.transform = "";
-      draggingEl.style.zIndex = "";
-      draggingEl.style.opacity = "";
-      draggingEl.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
-      draggingEl.style.willChange = "";
-    }
-
-    // commit new order to state
-    if (trackEl) {
-      const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
-        .map(el => Number(el.dataset.cardId))
-        .filter(n => Number.isFinite(n));
-      setZoneArray(fromZoneKey, ids, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
-    }
-
-    // optional: center the card that was dragged
-    if (CENTER_ON_DROP && draggingEl) {
+    function loadPlayerRegistry() {
       try {
-        draggingEl.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-      } catch {}
-    }
-
-    reordering = false;
-    draggingEl = null;
-    dragStartRect = null;
-
-    cleanupOverlay();
-    render();
-  };
-
-  const endReorderModeCancel = () => {
-    stopAutoScroll();
-
-    // remove placeholder, put card back where it was (placeholder was after card)
-    if (placeholderEl) {
-      placeholderEl.remove();
-      placeholderEl = null;
-    }
-
-    if (draggingEl) {
-      draggingEl.style.transform = "";
-      draggingEl.style.zIndex = "";
-      draggingEl.style.opacity = "";
-      draggingEl.style.transition = "";
-      draggingEl.style.willChange = "";
-    }
-
-    reordering = false;
-    draggingEl = null;
-    dragStartRect = null;
-
-    cleanupOverlay();
-  };
-
-  const updatePlaceholderFromPointer = (clientX) => {
-    if (!trackEl || !placeholderEl || !draggingEl) return;
-
-    // Decide where placeholder should go based on closest midpoint
-    const cards = Array.from(trackEl.querySelectorAll(".inspectorCard")).filter(el => el !== draggingEl);
-
-    // If there are no other cards, keep placeholder where it is
-    if (cards.length === 0) return;
-
-    // find best candidate by midpoint distance
-    let best = null;
-    let bestMid = 0;
-    let bestDist = Infinity;
-
-    for (const c of cards) {
-      const r = c.getBoundingClientRect();
-      const mid = r.left + r.width / 2;
-      const d = Math.abs(clientX - mid);
-      if (d < bestDist) {
-        bestDist = d;
-        best = c;
-        bestMid = mid;
+        const parsed = JSON.parse(localStorage.getItem(PLAYER_KEY) || "{}");
+        return {
+          players: Array.isArray(parsed.players) ? parsed.players : [],
+          lastPlayerId: parsed.lastPlayerId || null
+        };
+      } catch {
+        return { players: [], lastPlayerId: null };
       }
     }
 
-    if (!best) return;
-
-    // Hysteresis: don’t flip-flop near the midpoint
-    const br = best.getBoundingClientRect();
-    const mid = bestMid;
-    const dead = br.width * SWAP_HYSTERESIS;
-
-    const insertBefore = clientX < (mid - dead) ? true : (clientX > (mid + dead) ? false : null);
-    if (insertBefore === null) return; // in deadzone: do nothing
-
-    // move placeholder (NOT the actual card) — much smoother
-    if (insertBefore) {
-      if (placeholderEl.nextSibling === best) return; // already right before best
-      trackEl.insertBefore(placeholderEl, best);
-    } else {
-      if (best.nextSibling === placeholderEl) return; // already right after best
-      trackEl.insertBefore(placeholderEl, best.nextSibling);
-    }
-  };
-
-  const updateDraggingTransform = (clientX) => {
-    if (!draggingEl || !dragStartRect) return;
-
-    // translate relative to original rect center
-    const dx = clientX - start.x;
-
-    // subtle “lift” and tiny tilt makes it feel better
-    draggingEl.style.transform = `translateX(${dx}px) translateY(-6px) rotate(${dx * 0.02}deg)`;
-  };
-
-  cardEl.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-
-    const pointerId = e.pointerId;
-    try { cardEl.setPointerCapture(pointerId); } catch {}
-
-    overlayEl = document.getElementById("inspectorOverlay");
-    trackEl = overlayEl?.querySelector(".inspectorTrack") || null;
-
-    if (!overlayEl || !trackEl) return;
-
-    start = { x: e.clientX, y: e.clientY };
-    lastClientX = e.clientX;
-    lifted = false;
-    reordering = false;
-
-    // wipe stale states
-    cleanupOverlay();
-    stopAutoScroll();
-
-    const cancel = () => {
-      clearTimeout(holdTimer);
-      stopAutoScroll();
-
-      try { cardEl.releasePointerCapture(pointerId); } catch {}
-      cardEl.removeEventListener("pointermove", onMove);
-      cardEl.removeEventListener("pointerup", onUp);
-      cardEl.removeEventListener("pointercancel", onCancel);
-    };
-
-    const lift = () => {
-      if (reordering) return;
-      lifted = true;
-
-      overlayEl.classList.add("liftDragging");
-      overlayEl.classList.remove("reordering");
-      overlayEl.style.overflowX = "hidden"; // lift-mode: don't scroll
-
-      const ghost = document.createElement("div");
-      ghost.className = "dragGhost";
-      ghost.textContent = cardId;
-      dragLayer.appendChild(ghost);
-      positionGhost(ghost, e.clientX, e.clientY);
-
-      inspectorDragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-      showDock(true);
-      renderBoardOverlay();
-      syncDropTargetHighlights(null);
-
-      if (navigator.vibrate) navigator.vibrate(10);
-    };
-
-    holdTimer = setTimeout(lift, 2200);
-
-    const onMove = (ev) => {
-      ev.preventDefault();
-      lastClientX = ev.clientX;
-
-      const dx = ev.clientX - start.x;
-      const dy = ev.clientY - start.y;
-
-      // Decide reorder vs lift
-      if (!lifted && !reordering) {
-        if (Math.abs(dx) > ACTIVATION_DX && Math.abs(dx) > Math.abs(dy)) {
-          beginReorderMode();
-        }
-
-        // if they move a lot vertically, cancel lift timer
-        if (!reordering && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-          clearTimeout(holdTimer);
-        }
-      }
-
-      // Reorder mode
-      if (reordering) {
-        updateDraggingTransform(ev.clientX);
-        updatePlaceholderFromPointer(ev.clientX);
-        updateAutoScrollDir(ev.clientX);
-        return;
-      }
-
-      // Lift-mode ghost drag to zones
-      if (inspectorDragging?.ghostEl) {
-        positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
-        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-        syncDropTargetHighlights(overZoneKey);
-      }
-    };
-
-    const onUp = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
-
-      // Reorder commit
-      if (reordering) {
-        endReorderModeCommit();
-        cancel();
-        return;
-      }
-
-      // Lift-mode drop
-      if (inspectorDragging) {
-        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-
-        const g = inspectorDragging.ghostEl;
-        if (g && g.parentNode) g.parentNode.removeChild(g);
-
-        removeBoardOverlay();
-        syncDropTargetHighlights(null);
-
-        if (overZoneKey) moveCard(inspectorDragging.cardId, inspectorDragging.fromZoneKey, overZoneKey);
-
-        inspectorDragging = null;
-        showDock(false);
-        cleanupOverlay();
-        render();
-      }
-
-      cancel();
-    };
-
-    const onCancel = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
-
-      if (reordering) endReorderModeCancel();
-
-      if (inspectorDragging) {
-        const g = inspectorDragging.ghostEl;
-        if (g && g.parentNode) g.parentNode.removeChild(g);
-
-        removeBoardOverlay();
-        syncDropTargetHighlights(null);
-
-        inspectorDragging = null;
-        showDock(false);
-        cleanupOverlay();
-        render();
-      }
-
-      cancel();
-    };
-
-    cardEl.addEventListener("pointermove", onMove, { passive: false });
-    cardEl.addEventListener("pointerup", onUp, { passive: false });
-    cardEl.addEventListener("pointercancel", onCancel, { passive: false });
-  }, { passive: false });
-}
-
-
-  
-
-function renderInspector(zoneKey) {
-  removeInspectorOverlay(); // prevents stacking
-  const ownerKey = getZoneOwnerKey(zoneKey);
-  const zoneCards = getZoneArray(zoneKey, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
-
-  const overlay = document.createElement("div");
-  overlay.id = "inspectorOverlay";
-  overlay.className = "inspectorOverlay";
-
-  overlay.addEventListener("click", (e) => {
-    if (inspectorDragging) return;
-    if (e.target === overlay) {
-      inspector = null;
-      removeInspectorOverlay();
-      render();
-    }
-  });
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "inspectorCloseBtn";
-  closeBtn.textContent = "✕";
-  closeBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    inspector = null;
-
-    removeInspectorOverlay();
-    removeBoardOverlay();
-    syncDropTargetHighlights(null);
-
-    inspectorDragging = null;
-    showDock(false);
-
-    render();
-  });
-
-  const track = document.createElement("div");
-  track.className = "inspectorTrack";
-
-  if (zoneCards.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "inspectorEmpty";
-    empty.innerHTML = "<div>🗄️</div><p>No cards in this zone.</p>";
-    track.appendChild(empty);
-  } else {
-    zoneCards.forEach((id) => {
-      const data = window.CARD_REPO?.[String(id)] || {};
-      const card = document.createElement("div");
-      card.className = "inspectorCard";
-      card.dataset.cardId = String(id);
-
-      // Art
-      const img = document.createElement("img");
-      const src = getCardImgSrc(id, { playerKey: getActivePlayerKey() });
-      if (src) {
-        img.src = src;
-        img.onerror = () => img.remove(); // silhouette fallback
-        card.appendChild(img);
-      }
-
-      // Mana cost (top-center)
-      const costStr = getCardCostString(id);
-      const costEl = renderManaCostOverlay(costStr, { mode: "inspector" });
-      if (costEl) card.appendChild(costEl);
-
-      const name = document.createElement("div");
-      name.className = "inspectorName";
-      name.textContent = data.name || `Card ${id}`;
-      card.appendChild(name);
-
-      if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
-        const pt = document.createElement("div");
-        pt.className = "inspectorPT";
-        pt.textContent = `${data.power}|${data.toughness}`;
-        card.appendChild(pt);
-      }
-
-      attachInspectorLongPress(card, id, zoneKey, ownerKey);
-
-      // allow tap/tarp from inspector too (not in hand)
-      if (zoneKey !== "hand") attachTapStates(card, id);
-
-      if (state.tapped?.[String(id)]) card.classList.add("tapped");
-      if (state.tarped?.[String(id)]) card.classList.add("tarped");
-
-      track.appendChild(card);
-    });
-  }
-
-  overlay.appendChild(closeBtn);
-  overlay.appendChild(track);
-  document.body.appendChild(overlay);
-}
-  
-function renderDropArea(zoneKey, opts = {}) {
-  const { overlay = false } = opts;
-
-  ensureZoneArrays();
-
-  const area = document.createElement("section");
-  area.className = "dropArea";
-  area.dataset.zoneKey = zoneKey;
-  area.dataset.ownerKey = getZoneOwnerKey(zoneKey);
-  area.classList.add(`zone-${zoneKey}`);
-
-  if (zoneKey === "hand" && getMode() === "battle") {
-    const owner = getActivePlayerKey();
-    area.dataset.ownerKey = owner;
-    area.classList.add(`owner-${owner}`);
-  }
-
-  const zoneArr = getZoneArray(zoneKey);
-  const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
-
-  // ===== PILES (stack / deck / graveyard) =====
-  if (zMeta.kind === "pile") {
-    area.classList.add("isPile");
-
-    const pile = document.createElement("div");
-    pile.className = "pileSilhouette";
-
-    const pileCard = document.createElement("div");
-    pileCard.className = "miniCard pileCard";
-    pileCard.dataset.cardId = "__PILE__";
-    pileCard.dataset.fromZoneKey = zoneKey;
-
-    // Count badge
-    const count = document.createElement("div");
-    count.className = "pileCount";
-    count.textContent = String(zoneArr.length);
-    pileCard.appendChild(count);
-
-    // Special: magical stack intensity (1..10)
-    if (zoneKey === "stack") {
-      const intensity = Math.max(0, Math.min(10, zoneArr.length)); // 0..10
-      pileCard.classList.add("stackPileCard");
-      pileCard.style.setProperty("--stackI", String(intensity));
-      pileCard.style.setProperty("--stackOn", zoneArr.length > 0 ? "1" : "0");
+    function savePlayerRegistry() {
+      localStorage.setItem(PLAYER_KEY, JSON.stringify(playerRegistry));
     }
 
-    pile.appendChild(pileCard);
+    function getSaveKey(playerId) { return `${SAVE_PREFIX}${playerId}`; }
 
-    const label = document.createElement("div");
-    label.className = "pileLabel";
-    label.textContent = (zoneKey === "stack") ? "THE STACK" : zMeta.label;
+    function loadPlayerSave(playerId) {
+      try {
+        return JSON.parse(localStorage.getItem(getSaveKey(playerId)) || "{}");
+      } catch {
+        return {};
+      }
+    }
 
-    area.appendChild(pile);
-    area.appendChild(label);
+    function persistPlayerSaveDebounced() {
+      if (!session.playerId) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        const prev = loadPlayerSave(session.playerId);
+        const payload = {
+          ...prev,
+          lastMode: appMode || prev.lastMode || "sandbox",
+          sandboxState,
+          lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
+          updatedAt: Date.now()
+        };
+        localStorage.setItem(getSaveKey(session.playerId), JSON.stringify(payload));
+      }, 500);
+    }
 
-    if (!overlay) {
-      if (zoneKey === "deck") {
-        attachDeckDrawDoubleTap(pileCard);
+    function setActivePlayer(player) {
+      session.playerId = player.id;
+      session.playerName = player.name;
+      player.lastSeenAt = Date.now();
+      playerRegistry.lastPlayerId = player.id;
+      savePlayerRegistry();
+      const save = loadPlayerSave(player.id);
+      sandboxState = save.sandboxState ? clone(save.sandboxState) : createSandboxState();
+      appMode = null;
+      uiScreen = "mainMenu";
+      renderApp();
+    }
+
+    function createPlayer(name) {
+      const trimmed = (name || "").trim();
+      if (!trimmed) return;
+      const existing = playerRegistry.players.find((p) => p.name.toLowerCase() === trimmed.toLowerCase());
+      if (existing) return setActivePlayer(existing);
+      const now = Date.now();
+      const p = { id: uid(), name: trimmed, createdAt: now, lastSeenAt: now };
+      playerRegistry.players.push(p);
+      savePlayerRegistry();
+      setActivePlayer(p);
+    }
+
+    function onBack() {
+      if (uiScreen === "mode") {
+        if (appMode === "sandbox") persistPlayerSaveDebounced();
+        if (appMode === "battle") battleClient.leaveRoom();
+        uiScreen = "mainMenu";
+        appMode = null;
+      } else if (uiScreen === "mainMenu") {
+        uiScreen = "playerMenu";
+      }
+      renderApp();
+    }
+
+    function cardName(cardId) {
+      return window.CARD_REPO?.[String(cardId)]?.name || `Card ${cardId}`;
+    }
+
+    function modeState() {
+      return appMode === "battle" ? battleState : sandboxState;
+    }
+
+    function getZoneOwner(zoneKey) {
+      if (appMode !== "battle") return "solo";
+      return SHARED_ZONES.includes(zoneKey) ? "shared" : (session.role || "p1");
+    }
+
+    function getZone(zoneKey) {
+      const s = modeState();
+      if (!s) return [];
+      if (appMode === "battle") {
+        if (SHARED_ZONES.includes(zoneKey)) return s.sharedZones[zoneKey] || [];
+        return s.players?.[session.role]?.zones?.[zoneKey] || [];
+      }
+      return s.zones[zoneKey] || [];
+    }
+
+    function setZone(zoneKey, arr) {
+      const s = modeState();
+      if (!s) return;
+      if (appMode === "battle") {
+        if (SHARED_ZONES.includes(zoneKey)) s.sharedZones[zoneKey] = arr;
+        else s.players[session.role].zones[zoneKey] = arr;
       } else {
-        // stack + graveyard: single tap => inspector
-        pileCard.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (dragging || inspectorDragging) return;
-          inspector = { zoneKey };
-          render();
+        s.zones[zoneKey] = arr;
+        persistPlayerSaveDebounced();
+      }
+    }
+
+    function toggleMark(cardId, kind) {
+      const s = modeState();
+      s[kind][cardId] = !s[kind][cardId];
+      if (appMode === "battle") {
+        battleClient.sendIntent("TOGGLE_TAP", { cardId, kind });
+      } else {
+        persistPlayerSaveDebounced();
+      }
+      renderApp();
+    }
+
+    function drawCard() {
+      const deck = [...getZone("deck")];
+      const hand = [...getZone("hand")];
+      if (!deck.length) return;
+      hand.unshift(deck.shift());
+      setZone("deck", deck);
+      setZone("hand", hand);
+      if (appMode === "battle") battleClient.sendIntent("DRAW_CARD", { count: 1 });
+      renderApp();
+    }
+
+    function moveCard(intentPayload, optimistic = true) {
+      const { cardId, from, to } = intentPayload;
+      if (!ALL_ZONES.includes(from.zone) || !ALL_ZONES.includes(to.zone)) return;
+      const fromArr = [...getZone(from.zone)];
+      const idx = fromArr.indexOf(cardId);
+      if (idx < 0) return;
+      fromArr.splice(idx, 1);
+      const toArr = [...getZone(to.zone), cardId];
+      setZone(from.zone, fromArr);
+      setZone(to.zone, toArr);
+      if (appMode === "battle" && optimistic) battleClient.sendIntent("MOVE_CARD", intentPayload);
+      renderApp();
+    }
+
+    function canSeeZone(zoneKey) {
+      if (appMode !== "battle") return true;
+      if (SHARED_ZONES.includes(zoneKey)) return true;
+      return PRIVATE_ZONES.includes(zoneKey);
+    }
+
+    function canDragFrom(zoneKey) {
+      if (appMode !== "battle") return true;
+      if (zoneKey === "deck") return false;
+      return SHARED_ZONES.includes(zoneKey) || PRIVATE_ZONES.includes(zoneKey);
+    }
+
+    function canDropTo(fromZone, toZone) {
+      if (appMode !== "battle") return true;
+      if (toZone === "deck") return false;
+      if (SHARED_ZONES.includes(fromZone) && toZone === "hand") return true;
+      if (fromZone === "hand" && SHARED_ZONES.includes(toZone)) return true;
+      if (SHARED_ZONES.includes(fromZone) && SHARED_ZONES.includes(toZone)) return true;
+      return false;
+    }
+
+    function renderCard(cardId, zoneKey) {
+      const card = document.createElement("div");
+      card.className = "miniCard";
+      card.textContent = String(cardId);
+      card.title = cardName(cardId);
+      const s = modeState();
+      if (s?.tapped?.[cardId]) card.classList.add("tapped");
+      if (s?.tarped?.[cardId]) card.classList.add("tarped");
+      card.addEventListener("click", () => { inspector = { zoneKey, cardId }; renderApp(); });
+      card.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleMark(cardId, "tapped"); });
+      card.draggable = canDragFrom(zoneKey);
+      card.addEventListener("dragstart", () => { dragging = { cardId, from: zoneKey }; });
+      card.addEventListener("dragend", () => { dragging = null; });
+      return card;
+    }
+
+    function renderZone(zoneKey) {
+      const zone = document.createElement("section");
+      zone.className = `dropArea zone-${zoneKey}`;
+      zone.dataset.zone = zoneKey;
+      zone.dataset.owner = getZoneOwner(zoneKey);
+      const label = document.createElement("div");
+      label.className = "zoneMeta";
+      label.textContent = `${zoneKey.toUpperCase()} (${getZone(zoneKey).length})`;
+      label.addEventListener("dblclick", () => {
+        if (!canSeeZone(zoneKey)) return;
+        inspector = { zoneKey, cardId: null };
+        renderApp();
+      });
+      zone.appendChild(label);
+
+      const row = document.createElement("div");
+      row.className = "slotRow";
+      getZone(zoneKey).forEach((id) => row.appendChild(renderCard(id, zoneKey)));
+      zone.appendChild(row);
+
+      zone.addEventListener("dragover", (e) => {
+        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
+        e.preventDefault();
+      });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (!dragging || !canDropTo(dragging.from, zoneKey)) return;
+        const payload = {
+          cardId: dragging.cardId,
+          from: { owner: getZoneOwner(dragging.from), zone: dragging.from },
+          to: { owner: getZoneOwner(zoneKey), zone: zoneKey }
+        };
+        moveCard(payload, true);
+      });
+
+      return zone;
+    }
+
+    function renderInspector() {
+      if (!inspector) return null;
+      const overlay = document.createElement("div");
+      overlay.className = "cbOverlay";
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) { inspector = null; renderApp(); }
+      });
+      const panel = document.createElement("div");
+      panel.className = "cbPanel";
+      const zoneCards = getZone(inspector.zoneKey);
+      panel.innerHTML = `<h3>${inspector.zoneKey.toUpperCase()}</h3><p>${zoneCards.length} cards</p>`;
+      zoneCards.forEach((id) => {
+        const row = document.createElement("button");
+        row.className = "menuBtn";
+        row.textContent = `${id} • ${cardName(id)}`;
+        panel.appendChild(row);
+      });
+      overlay.appendChild(panel);
+      return overlay;
+    }
+
+    function renderBoard() {
+      const wrap = document.createElement("div");
+      wrap.className = "board";
+      ["permanents", "lands", "hand", "stack", "deck", "graveyard"].forEach((z) => wrap.appendChild(renderZone(z)));
+
+      const controls = document.createElement("div");
+      controls.className = "menuCard";
+      const drawBtn = document.createElement("button");
+      drawBtn.className = "menuBtn";
+      drawBtn.textContent = "Draw 1";
+      drawBtn.onclick = drawCard;
+      controls.appendChild(drawBtn);
+      if (appMode === "battle") {
+        const room = document.createElement("div");
+        room.className = "zoneMeta";
+        room.textContent = `Room ${battleRoomId} • You are ${session.role || "-"}`;
+        controls.appendChild(room);
+      }
+      wrap.prepend(controls);
+      return wrap;
+    }
+
+    async function ensureSocket() {
+      if (window.io) return;
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "/socket.io/socket.io.js";
+        s.onload = resolve;
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+    }
+
+    function createBattleClient() {
+      let socket = null;
+      return {
+        async connect() {
+          if (socket) return socket;
+          await ensureSocket();
+          socket = window.io("/battle");
+          socket.on("room_state", ({ roomId, state, role }) => {
+            battleRoomId = roomId || battleRoomId;
+            if (role) session.role = role;
+            battleState = state;
+            renderApp();
+          });
+          socket.on("intent_rejected", () => {
+            // server pushes authoritative state on rejects
+          });
+          return socket;
+        },
+        async createRoom() {
+          const s = await this.connect();
+          return new Promise((resolve) => {
+            s.emit("create_room", { playerId: session.playerId, playerName: session.playerName }, (res) => {
+              if (res?.ok) {
+                battleRoomId = res.roomId;
+                session.role = res.role;
+                battleState = res.state;
+                persistPlayerSaveDebounced();
+              }
+              resolve(res);
+            });
+          });
+        },
+        async joinRoom(roomId) {
+          const s = await this.connect();
+          return new Promise((resolve) => {
+            s.emit("join_room", { roomId, playerId: session.playerId, playerName: session.playerName }, (res) => {
+              if (res?.ok) {
+                battleRoomId = res.roomId;
+                session.role = res.role;
+                battleState = res.state;
+                persistPlayerSaveDebounced();
+              }
+              resolve(res);
+            });
+          });
+        },
+        sendIntent(type, payload) {
+          if (!socket || !battleRoomId || !battleState) return;
+          socket.emit("intent", {
+            type,
+            roomId: battleRoomId,
+            playerId: session.playerId,
+            clientActionId: uid(),
+            baseVersion: battleState.version || 0,
+            payload
+          });
+        },
+        leaveRoom() {
+          if (socket && battleRoomId) socket.emit("leave_room", { roomId: battleRoomId });
+          battleRoomId = "";
+          battleState = null;
+          session.role = null;
+        }
+      };
+    }
+
+    function renderPlayerMenu() {
+      subtitle.textContent = "Choose player";
+      const card = document.createElement("div");
+      card.className = "menuCard";
+      card.innerHTML = "<h2>Player Menu</h2>";
+
+      const list = document.createElement("div");
+      playerRegistry.players
+        .sort((a, b) => b.lastSeenAt - a.lastSeenAt)
+        .forEach((p) => {
+          const b = document.createElement("button");
+          b.className = "menuBtn";
+          b.textContent = `${p.name}`;
+          b.onclick = () => setActivePlayer(p);
+          list.appendChild(b);
         });
+      if (!playerRegistry.players.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No saved players yet.";
+        list.appendChild(empty);
       }
 
-      pileCard.addEventListener("pointerdown", onPilePointerDown, { passive: false });
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.placeholder = "Create new player name";
+      const create = document.createElement("button");
+      create.className = "menuBtn";
+      create.textContent = "Create / Select";
+      create.onclick = () => createPlayer(input.value);
+
+      card.append(list, input, create);
+      root.replaceChildren(card);
     }
 
-    return area;
-  }
+    function renderMainMenu() {
+      subtitle.textContent = `${session.playerName || "No player"}`;
+      const card = document.createElement("div");
+      card.className = "menuCard";
+      card.innerHTML = "<h2>Main Menu</h2>";
 
-  // ===== NON-PILE zones: click -> inspector (unless overlay) =====
-  if (!overlay) {
-    area.addEventListener("click", () => {
-      inspector = { zoneKey };
-      render();
-    });
-  }
+      const sandboxBtn = document.createElement("button");
+      sandboxBtn.className = "menuBtn";
+      sandboxBtn.textContent = "Sandbox Mode";
+      sandboxBtn.onclick = () => { appMode = "sandbox"; uiScreen = "mode"; renderApp(); };
 
-  // ===== HAND: render cards directly + fan layout =====
-  const row = document.createElement("div");
-  row.className = "slotRow";
+      const battleBtn = document.createElement("button");
+      battleBtn.className = "menuBtn";
+      battleBtn.textContent = "2P Battle Mode";
+      battleBtn.onclick = () => { appMode = "battle"; uiScreen = "mode"; renderApp(); };
 
-  const ids = zoneArr;
+      const deckBtn = document.createElement("button");
+      deckBtn.className = "menuBtn";
+      deckBtn.textContent = "Deckbuilder Mode";
+      deckBtn.onclick = () => { appMode = "deckbuilder"; uiScreen = "mode"; renderApp(); };
 
-  if (zoneKey === "hand") {
-    for (let i = 0; i < ids.length; i++) {
-      row.appendChild(makeMiniCardEl(ids[i], zoneKey, { overlay }));
-    }
-    layoutHandFan(row, ids);
-    area.appendChild(row);
-    return area;
-  }
-
-  // ===== battlefield rows =====
-  const minSlots = 6;
-  const slotCount = Math.max(minSlots, ids.length + 1);
-
-  for (let i = 0; i < slotCount; i++) {
-    const slot = document.createElement("div");
-    slot.className = "slot";
-
-    const id = ids[i];
-    if (id !== undefined) {
-      const c = makeMiniCardEl(id, zoneKey, { overlay });
-      if (!overlay) attachTapStates(c, id);
-      slot.appendChild(c);
+      card.append(sandboxBtn, battleBtn, deckBtn);
+      root.replaceChildren(card);
     }
 
-    row.appendChild(slot);
-  }
+    function renderBattleLobby(host) {
+      const card = document.createElement("div");
+      card.className = "menuCard";
+      card.innerHTML = "<h3>Battle Room</h3>";
 
-  area.appendChild(row);
-  return area;
-}
+      const createBtn = document.createElement("button");
+      createBtn.className = "menuBtn";
+      createBtn.textContent = "Create room";
+      createBtn.onclick = async () => {
+        const res = await battleClient.createRoom();
+        if (!res?.ok) alert(res?.error || "Failed to create room");
+        renderApp();
+      };
 
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.placeholder = "Join room code";
+      input.value = loadPlayerSave(session.playerId).lastBattleRoomId || "";
+      const joinBtn = document.createElement("button");
+      joinBtn.className = "menuBtn";
+      joinBtn.textContent = "Join room";
+      joinBtn.onclick = async () => {
+        const code = input.value.trim().toUpperCase();
+        if (!code) return;
+        const res = await battleClient.joinRoom(code);
+        if (!res?.ok) alert(res?.error || "Join failed");
+        renderApp();
+      };
 
-function renderZoneTile(zoneKey, label, clickable) {
-  const tile = document.createElement("section");
-  tile.className = "zoneTile";
-  tile.dataset.zoneKey = zoneKey;
+      card.append(createBtn, input, joinBtn);
+      host.appendChild(card);
+    }
 
-  const head = document.createElement("div");
-  head.className = "zoneHead";
+    function renderModeScreen() {
+      subtitle.textContent = `${session.playerName} • ${appMode}`;
+      const wrap = document.createElement("div");
+      wrap.className = "view";
 
-  const left = document.createElement("div");
-  left.className = "zoneName";
-  left.textContent = label;
-
-  const right = document.createElement("div");
-  right.className = "zoneMeta";
-  right.textContent = `${getZoneArray(zoneKey).length} cards`;
-
-  head.appendChild(left);
-  head.appendChild(right);
-
-  const preview = document.createElement("div");
-  preview.className = "previewRow";
-
-  const cards = getZoneArray(zoneKey);
-  const max = 9;
-
-  cards.slice(0, max).forEach((id) => {
-    // Note: these will be draggable because overlay:false.
-    // If you *don’t* want drag from previews, set overlay:true and style them smaller.
-    const p = makeMiniCardEl(id, zoneKey, { overlay: true });
-    preview.appendChild(p);
-  });
-
-  tile.appendChild(head);
-  tile.appendChild(preview);
-
-  if (clickable) {
-    let lastTapAt = 0;
-    let singleTimer = null;
-    const dblMs = 320;
-
-    tile.addEventListener("click", () => {
-      if (dragging || inspectorDragging) return;
-
-      const now = performance.now();
-
-      // double tap
-      if (now - lastTapAt <= dblMs) {
-        if (singleTimer) clearTimeout(singleTimer);
-        singleTimer = null;
-        lastTapAt = 0;
-
-        inspector = null; // close inspector if open
-        removeInspectorOverlay();
-        view = { type: "focus", zoneKey };
-        render();
-        return;
+      if (appMode === "deckbuilder") {
+        const card = document.createElement("div");
+        card.className = "menuCard";
+        card.innerHTML = "<h2>Deckbuilder coming soon</h2>";
+        wrap.appendChild(card);
+      } else if (appMode === "battle") {
+        if (!battleState) renderBattleLobby(wrap);
+        else wrap.appendChild(renderBoard());
+      } else {
+        const frame = document.createElement("iframe");
+        frame.className = "sandboxFrame";
+        frame.src = `/sandbox.html?playerId=${encodeURIComponent(session.playerId || "")}`;
+        frame.title = "Sandbox mode";
+        wrap.appendChild(frame);
       }
 
-      // single tap (defer slightly in case it becomes a double)
-      lastTapAt = now;
-      if (singleTimer) clearTimeout(singleTimer);
-
-      singleTimer = setTimeout(() => {
-        singleTimer = null;
-        inspector = { zoneKey };
-        render();
-      }, dblMs);
-    });
-  }
-
-  return tile;
-}
-  
-function renderFocus(zoneKey) {
-  const container = document.createElement("div");
-  container.className = "focusView";
-
-  const top = document.createElement("div");
-  top.className = "focusTop";
-  container.appendChild(top);
-
-  const board = document.createElement("div");
-  board.className = "board focusBoard";
-
-  ["permanents", "lands", "hand"].forEach((k) => {
-    const area = renderDropArea(k);
-    if (k === zoneKey) area.classList.add("isFocusZone");
-    board.appendChild(area);
-  });
-
-  container.appendChild(board);
-  return container;
-}
-
-  function onCardPointerDown(e) {
-    e.preventDefault();
-
-    const cardEl = e.currentTarget;
-    const cardId = Number(cardEl.dataset.cardId);
-    const fromZoneKey = cardEl.dataset.fromZoneKey;
-
-    // small press-hold before lifting
-    const pointerId = e.pointerId;
-    cardEl.setPointerCapture(pointerId);
-
-    const start = { x: e.clientX, y: e.clientY, t: performance.now() };
-    let lifted = false;
-    let holdTimer = null;
-
-    const cancelAll = () => {
-      clearTimeout(holdTimer);
-      cardEl.releasePointerCapture(pointerId);
-      cardEl.removeEventListener("pointermove", onMove);
-      cardEl.removeEventListener("pointerup", onUp);
-      cardEl.removeEventListener("pointercancel", onCancel);
-    };
-
-    const lift = () => {
-      if (lifted) return;
-      lifted = true;
-
-      const ghost = document.createElement("div");
-      ghost.className = "dragGhost";
-      ghost.textContent = cardId;
-      dragLayer.appendChild(ghost);
-      positionGhost(ghost, e.clientX, e.clientY);
-
-      dragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-      syncDropTargetHighlights(null);
-
-      // little vibration if supported
-      if (navigator.vibrate) navigator.vibrate(10);
-    };
-
-    holdTimer = setTimeout(lift, 140);
-
-    const onMove = (ev) => {
-      ev.preventDefault();
-      const dx = ev.clientX - start.x;
-      const dy = ev.clientY - start.y;
-
-      // if user moves finger enough, lift immediately
-      if (!lifted && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
-        clearTimeout(holdTimer);
-        lift();
-      }
-
-      if (dragging?.ghostEl) {
-        positionGhost(dragging.ghostEl, ev.clientX, ev.clientY);
-        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-        syncDropTargetHighlights(overZoneKey);
-      }
-    };
-
-    const onUp = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
-
-      if (!lifted || !dragging) {
-        cancelAll();
-        return;
-      }
-
-      const dropZoneKey = hitTestZone(ev.clientX, ev.clientY);
-      finalizeDrop(dropZoneKey);
-
-      cancelAll();
-    };
-
-    const onCancel = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
-      if (dragging) finalizeDrop(null);
-      cancelAll();
-    };
-
-    cardEl.addEventListener("pointermove", onMove, { passive: false });
-    cardEl.addEventListener("pointerup", onUp, { passive: false });
-    cardEl.addEventListener("pointercancel", onCancel, { passive: false });
-  }
-
-  function positionGhost(el, x, y) {
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-  }
-
-function hitTestZone(x, y) {
-  const els = document.elementsFromPoint(x, y);
-
-  for (const el of els) {
-    if (!el) continue;
-
-    // direct dropArea
-    if (el.classList?.contains("dropArea") && el.dataset?.zoneKey) {
-      return el.dataset.zoneKey;
+      const panel = renderInspector();
+      root.replaceChildren(wrap);
+      if (panel) root.appendChild(panel);
     }
 
-    // nested inside dropArea (common with fixed bars and inner wrappers)
-    const parent = el.closest?.(".dropArea");
-    if (parent?.dataset?.zoneKey) return parent.dataset.zoneKey;
-  }
-
-  return null;
-}
-  
- function syncDropTargetHighlights(activeZoneKey) {
-  document.querySelectorAll(".dropArea").forEach(area => {
-    const z = area.dataset.zoneKey;
-    area.classList.toggle("active", !!activeZoneKey && z === activeZoneKey);
-  });
-}
-
-
-function attachTapStates(el, cardId) {
-  let tapCount = 0;
-  let timer = null;
-
-  const windowMs = 420; // time window to detect 2 vs 3 taps
-
-  el.addEventListener("click", () => {
-    if (dragging || inspectorDragging) return;
-
-    tapCount++;
-
-    // restart the decision timer on every tap
-    if (timer) clearTimeout(timer);
-
-    timer = setTimeout(() => {
-      const key = String(cardId);
-      state.tapped ||= {};
-      state.tarped ||= {};
-
-      // Resolve tapCount into action
-      if (tapCount >= 3) {
-        // TRIPLE TAP: toggle tarped, clear tapped
-        const next = !state.tarped[key];
-        state.tarped[key] = next;
-        state.tapped[key] = false;
-
-        el.classList.toggle("tarped", next);
-        el.classList.remove("tapped");
-      } else if (tapCount === 2) {
-        // DOUBLE TAP: toggle tapped, clear tarped
-        const next = !state.tapped[key];
-        state.tapped[key] = next;
-        state.tarped[key] = false;
-
-        el.classList.toggle("tapped", next);
-        el.classList.remove("tarped");
-      }
-
-      tapCount = 0;
-      timer = null;
-    }, windowMs);
-  });
-}
-
-
-
-
-  
-function finalizeDrop(toZoneKey) {
-  const d = dragging;
-  if (!d) return;
-
-  // remove ghost
-  if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
-
-  const from = d.fromZoneKey;
-  const cardId = d.cardId;
-
-  // snap-back if invalid drop or same zone
-  if (!toZoneKey || toZoneKey === from) {
-    dragging = null;
-    syncDropTargetHighlights(null);
-    return;
-  }
-
-  dragging = null;
-  syncDropTargetHighlights(null);
-
-  // ✅ IMPORTANT: route through moveCard so deck logic works
-  moveCard(cardId, from, toZoneKey);
-
-  // render (moveCard may open chooser which also calls render)
-  render();
-}
-
-function attachDeckDrawDoubleTap(deckAreaEl) {
-  let lastTapAt = 0;
-  const dblMs = 320;
-
-  deckAreaEl.addEventListener("click", (e) => {
-    // We want deck area click to either inspect (single)
-    // or draw (double). Prevent bubbling to focus handlers.
-    e.stopPropagation();
-
-    if (dragging || inspectorDragging) return;
-
-    const now = performance.now();
-    const isDouble = (now - lastTapAt) <= dblMs;
-
-    lastTapAt = now;
-
-    if (isDouble) {
-      lastTapAt = 0;
-      drawOneFromDeckWithAnimation();
-      return;
+    function renderApp() {
+      topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
+      if (uiScreen === "playerMenu") return renderPlayerMenu();
+      if (uiScreen === "mainMenu") return renderMainMenu();
+      return renderModeScreen();
     }
 
-    // single tap => inspector
-    setTimeout(() => {
-      // if a second tap happened, lastTapAt got reset to 0
-      if (lastTapAt === 0) return;
-      inspector = { zoneKey: "deck" };
-      render();
-    }, dblMs + 10);
-  });
-}
-
-function drawOneFromDeckWithAnimation() {
-  ensureZoneArrays();
-
-  const deck = getZoneArray("deck");
-  if (!deck || deck.length === 0) return;
-
-  // --- snapshot old hand ids + their DOM rects (for shift animation) ---
-  const oldHandIds = [...getZoneArray("hand")];
-  const oldRects = new Map();
-
-  const ownerSel = getMode() === "battle" ? `[data-owner-key="${getActivePlayerKey()}"]` : "";
-
-  oldHandIds.forEach((id) => {
-    const el = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${id}"]`);
-    if (el) oldRects.set(id, el.getBoundingClientRect());
-  });
-
-  // Deck pile rect for the fly-in
-  const pileEl = document.querySelector(".zone-deck .pileCard");
-  const fromRect = pileEl?.getBoundingClientRect?.();
-
-  // --- update state: draw TOP card and insert LEFTMOST in hand ---
-  const cardId = deck[0];
-  deck.shift();
-  getZoneArray("hand").unshift(cardId); // ✅ leftmost, pushes others right
-
-  // Render new state so new hand layout exists in DOM
-  render();
-
-  // Hide real hand cards during animation to avoid “double”
-  const handZone = document.querySelector(`.zone-hand${ownerSel}`);
-  const realHandCards = handZone ? Array.from(handZone.querySelectorAll(".miniCard")) : [];
-  realHandCards.forEach(el => (el.style.visibility = "hidden"));
-
-  // --- build + animate shift ghosts for old cards (they move right) ---
-  const ghosts = [];
-
-  oldHandIds.forEach((id) => {
-    const start = oldRects.get(id);
-    const endEl = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${id}"]`);
-    const end = endEl?.getBoundingClientRect?.();
-
-    if (!start || !end) return;
-
-    const g = document.createElement("div");
-    g.className = "handShiftGhost";
-
-    const src = getCardImgSrc(id, { playerKey: getActivePlayerKey() });
-    if (src) g.style.backgroundImage = `url("${src}")`;
-
-    g.style.left = `${start.left}px`;
-    g.style.top = `${start.top}px`;
-    g.style.width = `${start.width}px`;
-    g.style.height = `${start.height}px`;
-
-    document.body.appendChild(g);
-
-    // Force layout
-    g.getBoundingClientRect();
-
-    const dx = end.left - start.left;
-    const dy = end.top - start.top;
-
-    // Fun little wobble/tilt based on distance
-    const tilt = Math.max(-7, Math.min(7, dx * 0.02));
-
-    g.style.transform = `translate(${dx}px, ${dy}px) rotate(${tilt}deg)`;
-    ghosts.push(g);
-  });
-
-  // --- fly the NEW drawn card from deck -> its new leftmost spot ---
-  requestAnimationFrame(() => {
-    const toEl = document.querySelector(`.zone-hand${ownerSel} .miniCard[data-card-id="${cardId}"]`);
-    if (!toEl) {
-      // cleanup + show cards anyway
-      ghosts.forEach(g => g.remove());
-      realHandCards.forEach(el => (el.style.visibility = ""));
-      return;
+    if (playerRegistry.lastPlayerId) {
+      const last = playerRegistry.players.find((p) => p.id === playerRegistry.lastPlayerId);
+      if (last) setActivePlayer(last);
+      else renderApp();
+    } else {
+      renderApp();
     }
-
-    const toRect = toEl.getBoundingClientRect();
-
-    if (fromRect) {
-      animateCardFlight(cardId, fromRect, toEl, () => {});
-    }
-
-    // After everything finishes, reveal real hand and remove ghosts
-    const TOTAL_MS = 620; // should match CSS durations below (shift + fly)
-    setTimeout(() => {
-      ghosts.forEach(g => g.remove());
-      realHandCards.forEach(el => (el.style.visibility = ""));
-
-      // tiny glow pulse so it's satisfying
-      try {
-        toEl.animate(
-          [
-            { filter: "drop-shadow(0 0 0 rgba(130,180,255,0.0))" },
-            { filter: "drop-shadow(0 0 18px rgba(130,180,255,0.65))" },
-            { filter: "drop-shadow(0 0 0 rgba(130,180,255,0.0))" },
-          ],
-          { duration: 520, easing: "cubic-bezier(.2,.9,.2,1)" }
-        );
-      } catch {}
-    }, TOTAL_MS);
-  });
-}
-
-function animateCardFlight(cardId, fromRect, toEl, done) {
-  const toRect = toEl.getBoundingClientRect();
-
-  const ghost = document.createElement("div");
-  ghost.className = "flyCard";
-
-  // Try to use image if available
-  const src = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
-  if (src) ghost.style.backgroundImage = `url("${src}")`;
-
-  // Start at deck pile center
-  const startX = fromRect.left + fromRect.width / 2;
-  const startY = fromRect.top + fromRect.height / 2;
-
-  // End at target card center
-  const endX = toRect.left + toRect.width / 2;
-  const endY = toRect.top + toRect.height / 2;
-
-  ghost.style.left = `${startX}px`;
-  ghost.style.top = `${startY}px`;
-
-  document.body.appendChild(ghost);
-
-  // Force layout
-  ghost.getBoundingClientRect();
-
-  const dx = endX - startX;
-  const dy = endY - startY;
-
-  // Fly + scale + a bit of extra lift for readability
-  ghost.style.transform = `translate(${dx}px, ${dy - 18}px) scale(1.08) rotate(6deg)`;
-
-  const cleanup = () => {
-    ghost.removeEventListener("transitionend", cleanup);
-    if (ghost.parentNode) ghost.parentNode.removeChild(ghost);
-    if (typeof done === "function") done();
   };
 
-  ghost.addEventListener("transitionend", cleanup);
-}
-
-function openDeckPlacementChooser(cardId, fromZoneKey) {
-  ensureZoneArrays();
-
-  // Remove from its origin immediately (so it feels committed)
-  const fromArr = getZoneArray(fromZoneKey);
-  const idx = fromArr.indexOf(cardId);
-  if (idx >= 0) fromArr.splice(idx, 1);
-
-  // Build overlay
-  const ov = document.createElement("div");
-  ov.id = "deckChoiceOverlay";
-  ov.className = "deckChoiceOverlay";
-
-  const card = document.createElement("div");
-  card.className = "deckChoiceCard";
-  card.dataset.cardId = String(cardId);
-
-  const imgSrc = getCardImgSrc(cardId, { playerKey: getActivePlayerKey() });
-  if (imgSrc) card.style.backgroundImage = `url("${imgSrc}")`;
-
-  const hint = document.createElement("div");
-  hint.className = "deckChoiceHint";
-  hint.textContent = "Swipe → TOP • Swipe ← BOTTOM";
-
-  const btnRow = document.createElement("div");
-  btnRow.className = "deckChoiceButtons";
-
-  const btnBottom = document.createElement("button");
-  btnBottom.className = "deckChoiceBtn bottom";
-  btnBottom.textContent = "Bottom";
-
-  const btnTop = document.createElement("button");
-  btnTop.className = "deckChoiceBtn top";
-  btnTop.textContent = "Top";
-
-  btnRow.appendChild(btnBottom);
-  btnRow.appendChild(btnTop);
-
-  ov.appendChild(card);
-  ov.appendChild(hint);
-  ov.appendChild(btnRow);
-  document.body.appendChild(ov);
-
-  const commit = (where) => {
-    const deck = getZoneArray("deck");
-    if (where === "top") deck.unshift(cardId);
-    else deck.push(cardId);
-
-    ov.remove();
-    render();
-  };
-
-  const cancel = () => {
-    // If they back out, put it back where it came from (end)
-    getZoneArray(fromZoneKey).push(cardId);
-    ov.remove();
-    render();
-  };
-
-  btnTop.addEventListener("click", (e) => { e.stopPropagation(); commit("top"); });
-  btnBottom.addEventListener("click", (e) => { e.stopPropagation(); commit("bottom"); });
-
-  // Click outside cancels
-  ov.addEventListener("click", (e) => {
-    if (e.target === ov) cancel();
-  });
-
-  // Swipe logic
-  let startX = 0, startY = 0, active = false;
-
-  card.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    active = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    try { card.setPointerCapture(e.pointerId); } catch {}
-    card.style.transition = "transform 0ms";
-  }, { passive: false });
-
-  card.addEventListener("pointermove", (e) => {
-    if (!active) return;
-    e.preventDefault();
-
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-
-    // Tinder-ish: mostly horizontal
-    const rot = Math.max(-12, Math.min(12, dx * 0.06));
-    card.style.transform = `translate(${dx}px, ${dy * 0.15}px) rotate(${rot}deg)`;
-  }, { passive: false });
-
-  card.addEventListener("pointerup", (e) => {
-    if (!active) return;
-    active = false;
-    e.preventDefault();
-
-    const dx = e.clientX - startX;
-
-    // Threshold: swipe right => top, left => bottom
-    if (dx > 90) {
-      card.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
-      card.style.transform = "translate(220px, 0) rotate(12deg)";
-      setTimeout(() => commit("top"), 120);
-      return;
-    }
-    if (dx < -90) {
-      card.style.transition = "transform 140ms cubic-bezier(.2,.9,.2,1)";
-      card.style.transform = "translate(-220px, 0) rotate(-12deg)";
-      setTimeout(() => commit("bottom"), 120);
-      return;
-    }
-
-    // Snap back if not far enough
-    card.style.transition = "transform 160ms cubic-bezier(.2,.9,.2,1)";
-    card.style.transform = "translate(0,0) rotate(0deg)";
-  }, { passive: false });
-
-  card.addEventListener("pointercancel", () => {
-    active = false;
-    card.style.transition = "transform 160ms cubic-bezier(.2,.9,.2,1)";
-    card.style.transform = "translate(0,0) rotate(0deg)";
-  });
-}
-
-function renderTopPilesBar() {
-  // create or reuse a stable container
-  let host = document.getElementById("topPiles");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "topPiles";
-    document.body.appendChild(host);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else {
+    boot();
   }
-
-  // only show in focus mode
-  if (view?.type !== "focus") {
-    host.innerHTML = "";
-    host.style.display = "none";
-
-    // keep it out of the topbar in overview
-    if (host.parentNode && host.parentNode !== document.body) {
-      document.body.appendChild(host);
-    }
-    return;
-  }
-
-  // ensure it sits inside the topbar (where subtitle used to be)
-  const topbar = document.querySelector(".topbar");
-  if (topbar && host.parentNode !== topbar) topbar.appendChild(host);
-
-  host.style.display = "flex";
-  host.innerHTML = "";
-
-  const stackArea = renderDropArea("stack");
-  stackArea.classList.add("pileCompactTop");
-
-  const deckArea = renderDropArea("deck");
-  deckArea.classList.add("pileCompactTop");
-
-  const gyArea = renderDropArea("graveyard");
-  gyArea.classList.add("pileCompactTop");
-
-  host.appendChild(stackArea);
-  host.appendChild(deckArea);
-  host.appendChild(gyArea);
-
-  if (getMode() === "battle") {
-    const swapBtn = document.createElement("button");
-    swapBtn.className = "topSwapBtn";
-    const active = getPlayer(getActivePlayerKey());
-    swapBtn.textContent = `View ${active.name === "Player 1" ? "P2" : "P1"}`;
-    swapBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      state.activePlayerKey = getActivePlayerKey() === "p1" ? "p2" : "p1";
-      inspector = null;
-      render();
-    });
-    host.appendChild(swapBtn);
-  }
-}
-
-
- function onPilePointerDown(e) {
-  e.preventDefault();
-
-  // If they press-hold a pile, we DON'T start dragging the pile.
-  // We just stop it from interfering with board gestures.
-  // (Later we could implement “drag pile” to mill etc.)
-  e.stopPropagation();
-}
-
-
-
-
-
-
-
-
-
-
-
-  
-
-// ✅ MUST call render once to mount UI
-render();
-
-
-// ---------------------------
-// End of boot scope
-// ---------------------------
-
-
-// (Your render() and all other functions must be defined above this call.)
-
-
-// NOTE: If your code defines render() later, move render(); to the very bottom
-// right before the end of boot().
-};
-
-
-try {
-if (document.readyState === "loading") {
-document.addEventListener("DOMContentLoaded", boot, { once: true });
-} else {
-boot();
-}
-} catch (err) {
-console.error(err);
-document.body.innerHTML =
-`<pre style="padding:16px;white-space:pre-wrap;color:#fff;background:#b00020">\n` +
-`Boot error: ${String(err?.message || err)}\n` +
-`</pre>`;
-}
 })();
-
-
-/*
-WHAT WAS BROKEN IN YOUR VERSION
-- You had `})();` and THEN functions like ensureZoneArrays() using `state`.
-- That makes `state` out-of-scope => ReferenceError => blank screen.
-
-
-TO APPLY THIS FIX
-1) Keep exactly ONE `})();` at the very bottom of the file.
-2) Move ALL your existing functions + logic (everything after `})();`) inside boot().
-3) Ensure `render();` is called once at the end of boot() after render() is defined.
-*/

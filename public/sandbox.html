@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Cardboard Sandbox</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">Cardboard</div>
+      <div class="subtitle" id="subtitle">Sandbox</div>
+    </header>
+
+    <div class="view">
+      <main id="root"></main>
+    </div>
+
+    <div id="dragLayer" class="dragLayer" aria-hidden="true"></div>
+  </div>
+
+  <script src="./demoState.js"></script>
+  <script>
+    (function(){
+      const qs = new URLSearchParams(location.search);
+      const playerId = qs.get('playerId');
+      if (!playerId) return;
+      try {
+        const raw = localStorage.getItem(`cb_save_${playerId}`);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.sandboxState) {
+          window.DEMO_STATE = parsed.sandboxState;
+        }
+      } catch {}
+      window.__CB_PLAYER_ID = playerId;
+    })();
+  </script>
+  <script src="./cards.js"></script>
+  <script src="./legacySandbox.js"></script>
+</body>
+</html>
