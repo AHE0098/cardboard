@@ -522,6 +522,11 @@ Screen + data architecture:
         if (!battleState) renderBattleLobby(wrap);
         else wrap.appendChild(renderBoard());
       } else {
+        const frame = document.createElement("iframe");
+        frame.className = "sandboxFrame";
+        frame.src = `/sandbox.html?playerId=${encodeURIComponent(session.playerId || "")}`;
+        frame.title = "Sandbox mode";
+        wrap.appendChild(frame);
         wrap.appendChild(renderBoard());
       }
 
