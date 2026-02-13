@@ -271,7 +271,7 @@ body{
   -webkit-overflow-scrolling: touch;
 }
 
-.inspectorOverlay.liftdragging{
+.inspectorOverlay.liftDragging{
   cursor: grabbing;
   touch-action: none;
 }
@@ -1437,5 +1437,39 @@ body.isFocus #topPiles{
   border-radius:999px;
   flex:0 0 auto;
 }
+
+/* =========================
+   Z-INDEX FIX (MOBILE BACK)
+   paste LAST in styles.css
+   ========================= */
+
+/* Make topbar always clickable above overlays */
+.topbar{
+  position: sticky;
+  top: 0;
+  z-index: 20050;
+  background: transparent; /* keep your look */
+}
+
+/* Ensure the back button itself is “tap-safe” */
+.topBackBtn{
+  position: relative;
+  z-index: 20060;
+  touch-action: manipulation;
+}
+
+/* If #topPiles is mounted into topbar in focus, keep it above too */
+body.isFocus #topPiles{
+  position: relative !important;
+  z-index: 20055;
+}
+
+/* Overlays stay below topbar now */
+.inspectorOverlay{ z-index: 12000; }
+.boardOverlay{ z-index: 12010; }
+.deckChoiceOverlay{ z-index: 12020; }
+
+/* Close button still above overlay content, but below topbar */
+.inspectorCloseBtn{ z-index: 12030; }
 
 
