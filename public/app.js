@@ -311,6 +311,12 @@ Screen + data architecture:
       if (s?.tarped?.[cardId]) card.classList.add("tarped");
       card.addEventListener("click", () => { inspector = { zoneKey, cardId }; renderApp(); });
       card.addEventListener("contextmenu", (e) => { e.preventDefault(); toggleMark(cardId, "tapped"); });
+      card.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (zoneKey === "hand") return;
+        toggleMark(cardId, e.shiftKey ? "tarped" : "tapped");
+      });
       card.draggable = canDragFrom(zoneKey);
       card.addEventListener("dragstart", () => { dragging = { cardId, from: zoneKey }; });
       card.addEventListener("dragend", () => { dragging = null; });
@@ -426,20 +432,6 @@ Screen + data architecture:
       wrap.appendChild(piles);
       ["permanents", "lands", "hand"].forEach((z) => wrap.appendChild(renderZone(z)));
 
-      const controls = document.createElement("div");
-      controls.className = "menuCard";
-      const drawBtn = document.createElement("button");
-      drawBtn.className = "menuBtn";
-      drawBtn.textContent = "Draw 1";
-      drawBtn.onclick = drawCard;
-      controls.appendChild(drawBtn);
-      if (appMode === "battle") {
-        const room = document.createElement("div");
-        room.className = "zoneMeta";
-        room.textContent = `Room ${battleRoomId} • You are ${session.role || "-"}`;
-        controls.appendChild(room);
-      }
-      wrap.prepend(controls);
       return wrap;
     }
 
@@ -609,12 +601,22 @@ Screen + data architecture:
         renderApp();
       };
 
-      card.append(createBtn, input, joinBtn);
+      const hint = document.createElement("div");
+      hint.className = "zoneMeta";
+      hint.textContent = "Create a room and share the code with your opponent to join from another device.";
+
+      card.append(createBtn, input, joinBtn, hint);
       host.appendChild(card);
     }
 
     function renderModeScreen() {
-      subtitle.textContent = `${session.playerName} • ${appMode}`;
+      if (appMode === "battle") {
+        subtitle.textContent = battleRoomId
+          ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+          : `${session.playerName} • battle`;
+      } else {
+        subtitle.textContent = `${session.playerName} • ${appMode}`;
+      }
       const wrap = document.createElement("div");
       wrap.className = "view";
 
