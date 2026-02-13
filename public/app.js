@@ -459,7 +459,7 @@ Screen + data architecture:
       const sandboxBtn = document.createElement("button");
       sandboxBtn.className = "menuBtn";
       sandboxBtn.textContent = "Sandbox Mode";
-      sandboxBtn.onclick = () => { inspector = null; appMode = "sandbox"; uiScreen = "mode"; renderApp(); };
+      sandboxBtn.onclick = () => { appMode = "sandbox"; uiScreen = "mode"; renderApp(); };
 
       const battleBtn = document.createElement("button");
       battleBtn.className = "menuBtn";
@@ -522,21 +522,21 @@ Screen + data architecture:
         if (!battleState) renderBattleLobby(wrap);
         else wrap.appendChild(renderBoard());
       } else {
-        inspector = null;
         const frame = document.createElement("iframe");
         frame.className = "sandboxFrame";
         frame.src = `/sandbox.html?playerId=${encodeURIComponent(session.playerId || "")}`;
         frame.title = "Sandbox mode";
         wrap.appendChild(frame);
+        wrap.appendChild(renderBoard());
       }
 
-      const panel = appMode === "sandbox" ? null : renderInspector();
+      const panel = renderInspector();
       root.replaceChildren(wrap);
       if (panel) root.appendChild(panel);
     }
 
     function renderApp() {
-      topBackBtn.style.visibility = (uiScreen === "playerMenu" || (uiScreen === "mode" && appMode === "sandbox")) ? "hidden" : "visible";
+      topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       if (uiScreen === "playerMenu") return renderPlayerMenu();
       if (uiScreen === "mainMenu") return renderMainMenu();
       return renderModeScreen();
