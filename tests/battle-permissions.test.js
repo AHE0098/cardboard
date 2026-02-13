@@ -50,5 +50,31 @@ function mkRoom() {
   });
   assert.equal(res.ok, true, 'p1 can move own battlefield card to shared stack');
 
+
+
+  const toDeckCard = room.state.players.p1.zones.hand[0];
+  res = applyIntent(room, 'p1', {
+    type: 'DECK_PLACE',
+    payload: {
+      cardId: toDeckCard,
+      from: { owner: 'p1', zone: 'hand' },
+      owner: 'p1',
+      where: 'top'
+    }
+  });
+  assert.equal(res.ok, true, 'p1 can place own hand card on top of own deck');
+  assert.equal(room.state.players.p1.zones.deck[0], toDeckCard, 'card should be placed on top');
+
+  res = applyIntent(room, 'p1', {
+    type: 'DECK_PLACE',
+    payload: {
+      cardId: room.state.players.p2.zones.hand[0],
+      from: { owner: 'p2', zone: 'hand' },
+      owner: 'p1',
+      where: 'bottom'
+    }
+  });
+  assert.equal(res.ok, false, 'p1 cannot place opponent private card into own deck');
+
   console.log('battle permissions tests passed');
 })();
