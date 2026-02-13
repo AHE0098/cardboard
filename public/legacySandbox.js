@@ -219,30 +219,6 @@ const ZONES = [
 ];
 
 
-// --- Topbar Back button (between title and subtitle) ---
-const topbar = document.querySelector(".topbar");
-const titleEl = document.querySelector(".title");
-
-
-const topBackBtn = document.createElement("button");
-topBackBtn.className = "topBackBtn";
-topBackBtn.textContent = "Back";
-topBackBtn.addEventListener("click", () => {
-  inspector = null;
-  removeInspectorOverlay();
-  removeBoardOverlay();
-  syncDropTargetHighlights(null);
-  inspectorDragging = null;
-  showDock(false);
-
-  view = { type: "overview" };
-  render();
-}); // ✅ THIS was missing
-
-if (topbar && titleEl) {
-  topbar.insertBefore(topBackBtn, subtitle);
-}
-
 function getCardCostString(cardId) {
   const data = window.CARD_REPO?.[String(cardId)] || {};
   // support both "cost" and "costs"
