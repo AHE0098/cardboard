@@ -81,7 +81,7 @@ function getPlayer(playerKey = getActivePlayerKey()) {
 }
 
 function isSharedZone(zoneKey) {
-  return ["lands", "permanents", "stack"].includes(zoneKey);
+  return ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"].includes(zoneKey);
 }
 
 function getZoneOwnerKey(zoneKey, opts = {}) {
@@ -132,8 +132,8 @@ function setZoneArray(zoneKey, arr, opts = {}) {
 
 
 function ensureZoneArrays() {
-  const soloKeys = ["hand", "lands", "permanents", "deck", "graveyard", "stack"];
-  const sharedKeys = ["lands", "permanents", "stack"];
+  const soloKeys = ["hand", "lands", "permanents", "deck", "graveyard", "stack", "opponentLands", "opponentPermanents"];
+  const sharedKeys = ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"];
   const playerKeys = ["hand", "deck", "graveyard"];
 
   if (!state.mode) state.mode = "solo";
@@ -153,6 +153,7 @@ function ensureZoneArrays() {
     for (const zk of playerKeys) state.players[pk].zones[zk] ||= [];
   });
 }
+
 
 
 function ensureDeckSeeded() {
@@ -208,6 +209,11 @@ let inspectorDragging = null;
 
 
 const ZONES = [
+  // opponent mirrored battlefield rows (top)
+  { key: "opponentPermanents", label: "Opponent Permanents", kind: "row" },
+  { key: "opponentLands", label: "Opponent Lands", kind: "row" },
+
+  // your battlefield + hand (bottom)
   { key: "permanents", label: "Permanents", kind: "row" },
   { key: "lands", label: "Lands", kind: "row" },
   { key: "hand", label: "Hand", kind: "hand" },
@@ -217,6 +223,7 @@ const ZONES = [
   { key: "deck", label: "Deck", kind: "pile" },
   { key: "graveyard", label: "Graveyard", kind: "pile" },
 ];
+
 
 
 function getCardCostString(cardId) {
@@ -343,11 +350,13 @@ function getCardImgSrc(cardId, opts = {}) {
 }
 
  
-function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
+function makeMiniCardEl(cardId, fromZoneKey, { overlay = false, flipped = false } = {}) {
   const c = document.createElement("div");
   c.className = "miniCard";
   c.dataset.cardId = String(cardId);
   c.dataset.fromZoneKey = fromZoneKey;
+
+  if (flipped) c.classList.add("flip180");
 
   // ===== Art layer =====
   const pic = document.createElement("div");
@@ -368,12 +377,12 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
 
   c.appendChild(pic);
 
-  // ===== Mana cost (top-center, wraps, never spills) =====
+  // ===== Mana cost =====
   const costStr = getCardCostString(cardId);
   const costEl = renderManaCostOverlay(costStr, { mode: "mini" });
   if (costEl) c.appendChild(costEl);
 
-  // ===== PT badge (bottom-center) =====
+  // ===== PT badge =====
   const data = window.CARD_REPO?.[String(cardId)];
   if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
     const pt = document.createElement("div");
@@ -392,6 +401,7 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false } = {}) {
 
   return c;
 }
+
   
 function removeInspectorOverlay() {
   const existing = document.getElementById("inspectorOverlay");
@@ -1120,6 +1130,10 @@ function renderDropArea(zoneKey, opts = {}) {
   area.dataset.ownerKey = getZoneOwnerKey(zoneKey);
   area.classList.add(`zone-${zoneKey}`);
 
+  const isOpp = (zoneKey === "opponentLands" || zoneKey === "opponentPermanents");
+  if (isOpp) area.classList.add("isOpponentZone");
+
+  // keep existing special-casing for battle hand owner tag
   if (zoneKey === "hand" && getMode() === "battle") {
     const owner = getActivePlayerKey();
     area.dataset.ownerKey = owner;
@@ -1129,7 +1143,7 @@ function renderDropArea(zoneKey, opts = {}) {
   const zoneArr = getZoneArray(zoneKey);
   const zMeta = ZONES.find(z => z.key === zoneKey) || { label: zoneKey, kind: "row" };
 
-  // ===== PILES (stack / deck / graveyard) =====
+  // ===== PILES =====
   if (zMeta.kind === "pile") {
     area.classList.add("isPile");
 
@@ -1141,15 +1155,13 @@ function renderDropArea(zoneKey, opts = {}) {
     pileCard.dataset.cardId = "__PILE__";
     pileCard.dataset.fromZoneKey = zoneKey;
 
-    // Count badge
     const count = document.createElement("div");
     count.className = "pileCount";
     count.textContent = String(zoneArr.length);
     pileCard.appendChild(count);
 
-    // Special: magical stack intensity (1..10)
     if (zoneKey === "stack") {
-      const intensity = Math.max(0, Math.min(10, zoneArr.length)); // 0..10
+      const intensity = Math.max(0, Math.min(10, zoneArr.length));
       pileCard.classList.add("stackPileCard");
       pileCard.style.setProperty("--stackI", String(intensity));
       pileCard.style.setProperty("--stackOn", zoneArr.length > 0 ? "1" : "0");
@@ -1168,7 +1180,6 @@ function renderDropArea(zoneKey, opts = {}) {
       if (zoneKey === "deck") {
         attachDeckDrawDoubleTap(pileCard);
       } else {
-        // stack + graveyard: single tap => inspector
         pileCard.addEventListener("click", (e) => {
           e.stopPropagation();
           if (dragging || inspectorDragging) return;
@@ -1191,15 +1202,15 @@ function renderDropArea(zoneKey, opts = {}) {
     });
   }
 
-  // ===== HAND: render cards directly + fan layout =====
   const row = document.createElement("div");
   row.className = "slotRow";
 
   const ids = zoneArr;
 
+  // ===== HAND =====
   if (zoneKey === "hand") {
     for (let i = 0; i < ids.length; i++) {
-      row.appendChild(makeMiniCardEl(ids[i], zoneKey, { overlay }));
+      row.appendChild(makeMiniCardEl(ids[i], zoneKey, { overlay, flipped: false }));
     }
     layoutHandFan(row, ids);
     area.appendChild(row);
@@ -1216,7 +1227,7 @@ function renderDropArea(zoneKey, opts = {}) {
 
     const id = ids[i];
     if (id !== undefined) {
-      const c = makeMiniCardEl(id, zoneKey, { overlay });
+      const c = makeMiniCardEl(id, zoneKey, { overlay, flipped: isOpp });
       if (!overlay) attachTapStates(c, id);
       slot.appendChild(c);
     }
@@ -1227,6 +1238,7 @@ function renderDropArea(zoneKey, opts = {}) {
   area.appendChild(row);
   return area;
 }
+
 
 
 function renderZoneTile(zoneKey, label, clickable) {
@@ -1313,6 +1325,19 @@ function renderFocus(zoneKey) {
   const board = document.createElement("div");
   board.className = "board focusBoard";
 
+  // TOP (mirrored opponent battlefield)
+  ["opponentPermanents", "opponentLands"].forEach((k) => {
+    const area = renderDropArea(k);
+    if (k === zoneKey) area.classList.add("isFocusZone");
+    board.appendChild(area);
+  });
+
+  // middle divider (purely structural; no text)
+  const mid = document.createElement("div");
+  mid.className = "midLine";
+  board.appendChild(mid);
+
+  // BOTTOM (your normal zones)
   ["permanents", "lands", "hand"].forEach((k) => {
     const area = renderDropArea(k);
     if (k === zoneKey) area.classList.add("isFocusZone");
@@ -1322,6 +1347,7 @@ function renderFocus(zoneKey) {
   container.appendChild(board);
   return container;
 }
+
 
   function onCardPointerDown(e) {
     e.preventDefault();
