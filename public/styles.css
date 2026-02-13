@@ -897,6 +897,22 @@ body.isFocus #root{
   pointer-events:none;
 }
 
+.pileCard{ position:relative; }
+.pileInnerLabel{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  font-weight:800;
+  letter-spacing:0.6px;
+  font-size:11px;
+  opacity:0.9;
+  text-shadow:0 2px 10px rgba(0,0,0,0.55);
+  pointer-events:none;
+  text-transform:uppercase;
+}
+
+
 /* ===== Fly-to-hand animation ===== */
 .flyCard{
   position: fixed;
@@ -1407,15 +1423,19 @@ body.isFocus #topPiles{
   }
 }
 
-/* Opponent zones: mirrored placement + flipped cards */
-.dropArea.isOpponentZone { transform: rotate(180deg); }
-.dropArea.isOpponentZone .miniCard.flip180 { transform: rotate(180deg); }
+/* Opponent zones: keep container untransformed (prevents layout weirdness),
+   but mirror the row + flip cards 180 by default */
+.dropArea.isOpponentZone .slotRow{ transform: rotate(180deg); transform-origin:center; }
+.dropArea.isOpponentZone .miniCard.flip180{ transform: rotate(180deg); transform-origin:center; }
+
 
 /* Middle divider line in focus board */
 .midLine{
-  height: 2px;
-  margin: 10px 0;
-  background: rgba(255,255,255,0.10);
-  border-radius: 999px;
+  height:2px;
+  margin:6px 0;           /* smaller than before */
+  background:rgba(255,255,255,0.10);
+  border-radius:999px;
+  flex:0 0 auto;
 }
+
 
