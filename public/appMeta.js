@@ -158,6 +158,10 @@
       if (e.key === "Enter") onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
     });
 
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") onJoinRoom(input.value.trim().toUpperCase());
+    });
+
     const hint = document.createElement("div");
     hint.className = "zoneMeta";
     hint.textContent = "Choose your player seat before joining. Rooms stay open until deleted.";

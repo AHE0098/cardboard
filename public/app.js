@@ -58,7 +58,7 @@ Screen + data architecture:
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
       onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
       uid
-    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], deleteRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), deleteAllRooms: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
+    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
     topBackBtn.className = "topBackBtn";
