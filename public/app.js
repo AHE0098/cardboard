@@ -52,6 +52,7 @@ Screen + data architecture:
         battleState = state;
         session.role = role;
         battleViewRole = viewRole;
+        if (state) battleLobbyRoomsRequested = false;
       },
       persistPlayerSaveDebounced,
       onBattleStateChanged: () => renderApp(),
@@ -175,6 +176,7 @@ function onBack() {
       legacyBattleHandle = null;
 
       battleClient.leaveRoom();
+      battleLobbyRoomsRequested = false;
     }
 
     uiScreen = "mainMenu";
