@@ -227,9 +227,9 @@ updateSubtitle();
 
 const ZONES = [
   // opponent mirrored battlefield rows (top)
+   { key: "opponentLands", label: "Opponent Lands", kind: "row" },
   { key: "opponentPermanents", label: "Opponent Permanents", kind: "row" },
-  { key: "opponentLands", label: "Opponent Lands", kind: "row" },
-
+ 
   // your battlefield + hand (bottom)
   { key: "permanents", label: "Permanents", kind: "row" },
   { key: "lands", label: "Lands", kind: "row" },
