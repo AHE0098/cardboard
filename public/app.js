@@ -1326,6 +1326,12 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
+      // If we are NOT in a room, ensure legacy battle is not mounted
+  if (!battleState && legacyBattleHandle) {
+    try { legacyBattleHandle.unmount?.(); } catch {}
+    legacyBattleHandle = null;
+    clearSandboxTopPilesHost();
+  }
     subtitle.textContent = battleRoomId
       ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
       : `${session.playerName} • battle`;
@@ -1379,7 +1385,12 @@ function mountLegacyBattleInApp() {
 
     function renderApp() {
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
-      if (!(uiScreen === "mode" && appMode === "sandbox")) clearSandboxTopPilesHost();
+     const usingLegacyUI =
+  (uiScreen === "mode" && appMode === "sandbox") ||
+  (uiScreen === "mode" && appMode === "battle" && !!battleState); // battleState means we mounted legacy battle UI
+
+if (!usingLegacyUI) clearSandboxTopPilesHost();
+
       if (uiScreen === "playerMenu") return renderPlayerMenu();
       if (uiScreen === "mainMenu") return renderMainMenu();
       return renderModeScreen();
