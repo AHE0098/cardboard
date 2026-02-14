@@ -1197,7 +1197,10 @@ function onBack() {
 }
 
 function mountLegacyBattleInApp() {
-  if (legacyBattleHandle) return;
+  if (legacyBattleHandle) {
+    try { legacyBattleHandle.unmount?.(); } catch {}
+    legacyBattleHandle = null;
+  }
   if (!battleState) return;
 
   // load script once (reuse same legacySandbox.js)
