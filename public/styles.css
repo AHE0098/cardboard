@@ -1472,4 +1472,84 @@ body.isFocus #topPiles{
 /* Close button still above overlay content, but below topbar */
 .inspectorCloseBtn{ z-index: 12030; }
 
+/* =========================
+   OPPONENT ZONES: match OG zones
+   paste LAST in styles.css
+   ========================= */
+
+/* A) Opponent drop areas should fill from TOP (not bottom) */
+.dropArea.isOpponentZone{
+  justify-content: flex-start !important;
+  padding-top: 22px !important;   /* tune: “a little below the border” */
+  padding-bottom: 6px !important;
+  overflow: hidden !important;    /* never grow / never push midline */
+}
+
+/* Make their row stage start from the top */
+.dropArea.isOpponentZone .slotRow{
+  align-items: flex-start !important;
+}
+
+/* B) Opponent PERMANENTS: same as your permanents (no wrap, clip right) */
+.dropArea.zone-opponentPermanents{
+  min-height: 105px !important;   /* match .zone-permanents */
+  overflow: hidden !important;
+}
+
+.dropArea.zone-opponentPermanents .slotRow{
+  display: flex !important;       /* override grid */
+  flex-wrap: nowrap !important;   /* critical: no wrapping */
+  justify-content: flex-start !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  overflow: hidden !important;    /* clip to the right */
+}
+
+.dropArea.zone-opponentPermanents .slot{
+  flex: 0 0 auto !important;
+  width: auto !important;
+  height: auto !important;
+}
+
+/* C) Opponent LANDS: same as your lands (overlap, compact) */
+.dropArea.zone-opponentLands{
+  min-height: 52px !important;    /* match your compact lands override */
+  overflow: hidden !important;
+}
+
+.dropArea.zone-opponentLands .slotRow{
+  display: flex !important;       /* override grid */
+  flex-wrap: nowrap !important;   /* no wrapping */
+  justify-content: flex-start !important;
+  align-items: flex-end !important;
+  gap: 0 !important;              /* overlap-style */
+  overflow: hidden !important;
+}
+
+/* neutralize slot sizing for lands overlap */
+.dropArea.zone-opponentLands .slot{
+  width: auto !important;
+  height: auto !important;
+  display: contents !important;
+}
+
+.dropArea.zone-opponentLands .miniCard{
+  margin-left: -18px !important;
+}
+.dropArea.zone-opponentLands .miniCard.tapped{
+  margin-left: -34px !important;
+}
+.dropArea.zone-opponentLands .miniCard:first-child{
+  margin-left: 0 !important;
+}
+
+/* D) Keep your opponent mirror rotation compatible with flex */
+.dropArea.isOpponentZone .slotRow{
+  transform: rotate(180deg);
+  transform-origin: center;
+}
+.dropArea.isOpponentZone .miniCard.flip180{
+  transform: rotate(180deg);
+  transform-origin: center;
+}
 
