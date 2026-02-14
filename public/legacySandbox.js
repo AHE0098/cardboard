@@ -1,148 +1,164 @@
-/*
-WHAT CHANGED / HOW TO TEST (Battle Mode)
-- Added optional Battle (2P) mode with shared battlefield zones (lands/permanents/stack)
-  and per-player hand/deck/graveyard. Solo mode behavior remains intact.
-- Added player swap control in focus mode for battle perspective switching.
-- Routed zone reads/writes through helpers so drag/drop, inspector, deck draw animation,
-  and deck placement chooser work in both solo + battle.
-
-Quick test:
-1) Open overview and click "Battle (2P)", then double-click Hand to focus.
-2) Use "View P1/P2" to swap perspective; hand/deck/graveyard should switch.
-3) Drag from hand to lands/permanents/stack, then swap player; shared zones persist.
-4) Double-tap deck pile to draw; card should animate into active player's hand.
-*/
-
-// ✅ FIXED STRUCTURE
-// Everything that uses: root / subtitle / dragLayer / state / view / dragging / inspector
-// MUST live inside boot() (or be passed in).
-
-
 (() => {
-const boot = () => {
-// Grab DOM refs *after* DOM exists
-const root = document.getElementById("root");
-const subtitle = document.getElementById("subtitle");
-const dragLayer = document.getElementById("dragLayer");
+  // Mountable sandbox module (no auto-boot).
+  // app.js (or any host) calls: window.LegacySandbox.mount({...})
+  // Returns: { unmount() }
 
+  function mount(opts) {
+    const root = opts?.root;
+    const subtitle = opts?.subtitle;
+    const dragLayer = opts?.dragLayer;
 
-// Fail loudly (prevents “blank page” mystery)
-if (!root) throw new Error("Missing #root");
-if (!subtitle) throw new Error("Missing #subtitle");
-if (!dragLayer) throw new Error("Missing #dragLayer");
+    if (!root) throw new Error("LegacySandbox.mount missing opts.root");
+    if (!subtitle) throw new Error("LegacySandbox.mount missing opts.subtitle");
+    if (!dragLayer) throw new Error("LegacySandbox.mount missing opts.dragLayer");
 
+    // Optional: initial state is injected by host; fallback keeps standalone dev workable.
+    const fallbackState = {
+      playerName: "Player 1",
+      zones: { hand: [200, 201, 202], lands: [101, 102], permanents: [210], deck: [], graveyard: [] },
+      tapped: {},
+      tarped: {},
+    };
 
-// State (safe clone + fallback)
-const fallbackState = {
-playerName: "Player 1",
-zones: { hand: [200, 201, 202], lands: [101, 102], permanents: [210], deck: [], graveyard: [] },
-tapped: {},
-tarped: {},
-};
+    const state = typeof structuredClone === "function"
+      ? structuredClone(opts.initialState || window.DEMO_STATE || fallbackState)
+      : JSON.parse(JSON.stringify(opts.initialState || window.DEMO_STATE || fallbackState));
 
+    // ---- Adapters (host can override for battle mode) ----
+    // These default to the current legacy in-file state.
+    const api = {
+      getMode: opts.getMode || (() => state.mode || "solo"),
+      getActivePlayerKey: opts.getActivePlayerKey || (() => state.activePlayerKey || "p1"),
+      setActivePlayerKey: opts.setActivePlayerKey || ((pk) => { state.activePlayerKey = pk; }),
 
-const state = typeof structuredClone === "function"
-? structuredClone(window.DEMO_STATE || fallbackState)
-: JSON.parse(JSON.stringify(window.DEMO_STATE || fallbackState));
+      getZoneArray: opts.getZoneArray || ((zoneKey, opts2 = {}) => {
+        ensureZoneArrays();
+        if ((state.mode || "solo") === "solo") {
+          state.zones ||= {};
+          state.zones[zoneKey] ||= [];
+          return state.zones[zoneKey];
+        }
+        // battle-like local default (still works standalone)
+        if (isSharedZone(zoneKey)) {
+          state.sharedZones ||= {};
+          state.sharedZones[zoneKey] ||= [];
+          return state.sharedZones[zoneKey];
+        }
+        const p = getPlayer(opts2.playerKey || (state.activePlayerKey || "p1"));
+        p.zones[zoneKey] ||= [];
+        return p.zones[zoneKey];
+      }),
 
-const sandboxPlayerId = window.__CB_PLAYER_ID || null;
-let sandboxSaveTimer = null;
-function persistSandboxForPlayer() {
-  if (!sandboxPlayerId) return;
-  clearTimeout(sandboxSaveTimer);
-  sandboxSaveTimer = setTimeout(() => {
-    try {
-      const key = `cb_save_${sandboxPlayerId}`;
-      const prev = JSON.parse(localStorage.getItem(key) || '{}');
+      setZoneArray: opts.setZoneArray || ((zoneKey, arr, opts2 = {}) => {
+        ensureZoneArrays();
+        if ((state.mode || "solo") === "solo") {
+          state.zones ||= {};
+          state.zones[zoneKey] = arr;
+          return;
+        }
+        if (isSharedZone(zoneKey)) {
+          state.sharedZones ||= {};
+          state.sharedZones[zoneKey] = arr;
+          return;
+        }
+        const p = getPlayer(opts2.playerKey || (state.activePlayerKey || "p1"));
+        p.zones[zoneKey] = arr;
+      }),
 
-      // Persist only gameplay-ish state (not UI/session-ish state)
-      const snapshot = {
-        playerName: state.playerName,
-        zones: state.zones,
-        sharedZones: state.sharedZones,
-        players: state.players,
-        tapped: state.tapped,
-        tarped: state.tarped,
-      };
+      canSeeZone: opts.canSeeZone || (() => true),
+      onPersist: opts.onPersist || (() => {}),
+    };
 
-      localStorage.setItem(key, JSON.stringify({
-        ...prev,
-        lastMode: 'sandbox',
-        sandboxState: snapshot,
-        updatedAt: Date.now()
-      }));
-    } catch {}
-  }, 500);
-}
+    // --- sandbox persistence wiring (optional; host can disable/replace) ---
+    const sandboxPlayerId = opts.sandboxPlayerId ?? window.__CB_PLAYER_ID ?? null;
+    let sandboxSaveTimer = null;
+    function persistSandboxForPlayer() {
+      api.onPersist();
+      if (!sandboxPlayerId) return;
+      clearTimeout(sandboxSaveTimer);
+      sandboxSaveTimer = setTimeout(() => {
+        try {
+          const key = `cb_save_${sandboxPlayerId}`;
+          const prev = JSON.parse(localStorage.getItem(key) || "{}");
+          const snapshot = {
+            playerName: state.playerName,
+            zones: state.zones,
+            sharedZones: state.sharedZones,
+            players: state.players,
+            tapped: state.tapped,
+            tarped: state.tarped,
+            mode: state.mode,
+            activePlayerKey: state.activePlayerKey,
+          };
+          localStorage.setItem(key, JSON.stringify({
+            ...prev,
+            lastMode: "sandbox",
+            sandboxState: snapshot,
+            updatedAt: Date.now(),
+          }));
+        } catch {}
+      }, 500);
+    }
 
-setInterval(persistSandboxForPlayer, 1500);
+    // If host wants to keep the old interval, keep it (but only while mounted)
+    const persistIntervalMs = opts.persistIntervalMs ?? 1500;
+    const intervalId = persistIntervalMs ? setInterval(persistSandboxForPlayer, persistIntervalMs) : null;
 
-function getMode() {
-  return state.mode || "solo";
-}
+    // ============================
+    // EVERYTHING BELOW IS YOUR OLD boot() BODY
+    // ============================
 
-function getActivePlayerKey() {
-  return state.activePlayerKey || "p1";
-}
+    // ✅ declare UI vars BEFORE any code uses them
+    let view = { type: "overview" };
+    let dragging = null;
+    let inspector = null;
+    let inspectorDragging = null;
 
-function getPlayer(playerKey = getActivePlayerKey()) {
-  state.players ||= {};
-  state.players[playerKey] ||= { name: playerKey === "p2" ? "Player 2" : "Player 1", zones: {} };
-  state.players[playerKey].zones ||= {};
-  return state.players[playerKey];
-}
+    // --- helpers rewritten to go through api ---
+    function getMode() { return api.getMode(); }
+    function getActivePlayerKey() { return api.getActivePlayerKey(); }
 
-function isSharedZone(zoneKey) {
-  return ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"].includes(zoneKey);
-}
+    function getPlayer(playerKey = getActivePlayerKey()) {
+      state.players ||= {};
+      state.players[playerKey] ||= { name: playerKey === "p2" ? "Player 2" : "Player 1", zones: {} };
+      state.players[playerKey].zones ||= {};
+      return state.players[playerKey];
+    }
 
-function getZoneOwnerKey(zoneKey, opts = {}) {
-  if (getMode() === "solo") return "solo";
-  if (isSharedZone(zoneKey)) return "shared";
-  return opts.playerKey || getActivePlayerKey();
-}
+    function isSharedZone(zoneKey) {
+      return ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"].includes(zoneKey);
+    }
 
-function getZoneArray(zoneKey, opts = {}) {
-  ensureZoneArrays();
+    function getZoneOwnerKey(zoneKey, opts2 = {}) {
+      if (getMode() === "solo") return "solo";
+      if (isSharedZone(zoneKey)) return "shared";
+      return opts2.playerKey || getActivePlayerKey();
+    }
 
-  if (getMode() === "solo") {
-    state.zones ||= {};
-    state.zones[zoneKey] ||= [];
-    return state.zones[zoneKey];
-  }
+    function getZoneArray(zoneKey, opts2 = {}) {
+      return api.getZoneArray(zoneKey, opts2);
+    }
 
-  if (isSharedZone(zoneKey)) {
-    state.sharedZones ||= {};
-    state.sharedZones[zoneKey] ||= [];
-    return state.sharedZones[zoneKey];
-  }
+    function setZoneArray(zoneKey, arr, opts2 = {}) {
+      api.setZoneArray(zoneKey, arr, opts2);
+      persistSandboxForPlayer();
+    }
 
-  const p = getPlayer(opts.playerKey || getActivePlayerKey());
-  p.zones[zoneKey] ||= [];
-  return p.zones[zoneKey];
-}
+    // ✅ EVERYTHING BELOW this point: paste your legacy code exactly as-is,
+    // except for TWO tiny edits described in Step 3.
 
-function setZoneArray(zoneKey, arr, opts = {}) {
-  if (getMode() === "solo") {
-    state.zones ||= {};
-    state.zones[zoneKey] = arr;
-    return;
-  }
-
-  if (isSharedZone(zoneKey)) {
-    state.sharedZones ||= {};
-    state.sharedZones[zoneKey] = arr;
-    return;
-  }
-
-  const p = getPlayer(opts.playerKey || getActivePlayerKey());
-  p.zones[zoneKey] = arr;
-}
 
 
 // ✅ EVERYTHING BELOW (your existing code) goes inside boot(), so it can see state/root/etc.
 
 
+
+
+
+
+
+
+  
 function ensureZoneArrays() {
   const soloKeys = ["hand", "lands", "permanents", "deck", "graveyard", "stack", "opponentLands", "opponentPermanents"];
   const sharedKeys = ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"];
@@ -1988,43 +2004,34 @@ function renderTopPilesBar() {
 render();
 
 
-// ---------------------------
-// End of boot scope
-// ---------------------------
+    // ============================
+    // END of legacy body
+    // ============================
 
+    // Mount returns an unmount cleanup
+    return {
+      unmount() {
+        try { if (intervalId) clearInterval(intervalId); } catch {}
+        try {
+          const io = document.getElementById("inspectorOverlay");
+          if (io) io.remove();
+          const bo = document.getElementById("boardOverlay");
+          if (bo) bo.remove();
+          const dc = document.getElementById("deckChoiceOverlay");
+          if (dc) dc.remove();
+          // topPiles host might be owned by app.js in your new architecture,
+          // so only remove if you are sure legacy created it:
+          // const tp = document.getElementById("topPiles"); if (tp) tp.remove();
+        } catch {}
+        try { root.replaceChildren(); } catch {}
+      }
+    };
+  }
 
-// (Your render() and all other functions must be defined above this call.)
-
-
-// NOTE: If your code defines render() later, move render(); to the very bottom
-// right before the end of boot().
-};
-
-
-try {
-if (document.readyState === "loading") {
-document.addEventListener("DOMContentLoaded", boot, { once: true });
-} else {
-boot();
-}
-} catch (err) {
-console.error(err);
-document.body.innerHTML =
-`<pre style="padding:16px;white-space:pre-wrap;color:#fff;background:#b00020">\n` +
-`Boot error: ${String(err?.message || err)}\n` +
-`</pre>`;
-}
+  window.LegacySandbox = { mount };
 })();
 
 
-/*
-WHAT WAS BROKEN IN YOUR VERSION
-- You had `})();` and THEN functions like ensureZoneArrays() using `state`.
-- That makes `state` out-of-scope => ReferenceError => blank screen.
 
 
-TO APPLY THIS FIX
-1) Keep exactly ONE `})();` at the very bottom of the file.
-2) Move ALL your existing functions + logic (everything after `})();`) inside boot().
-3) Ensure `render();` is called once at the end of boot() after render() is defined.
-*/
+  
