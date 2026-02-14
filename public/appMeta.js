@@ -33,8 +33,15 @@ function createBattleClient(api) {
         const nextRole = role || derived || currentSession.role;
 
         // keep current viewRole unless it's empty
-        const currentView = api.getBattleViewRole();
-        const nextViewRole = currentView || nextRole || "p1";
+const prevRole = currentSession.role;      // what we thought before this message
+let nextViewRole = api.getBattleViewRole();
+
+// If we don't yet have a role (first join / fresh load), OR view was following old role,
+// then snap view to the newly-determined role.
+if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
+  nextViewRole = nextRole || nextViewRole || "p1";
+}
+
 
         api.setBattleSession({
           roomId: roomId || api.getBattleRoomId(),
