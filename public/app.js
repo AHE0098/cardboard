@@ -39,7 +39,22 @@ Screen + data architecture:
 
     let battleState = null;
     let battleRoomId = "";
-    let battleClient = createBattleClient();
+    let battleClient = window.CardboardMeta?.createBattleClient({
+      getSession: () => session,
+      getBattleState: () => battleState,
+      getBattleRoomId: () => battleRoomId,
+      getBattleViewRole: () => battleViewRole,
+      setBattleSession: ({ roomId, role, state, viewRole }) => {
+        battleRoomId = roomId;
+        battleState = state;
+        session.role = role;
+        battleViewRole = viewRole;
+      },
+      persistPlayerSaveDebounced,
+      onBattleStateChanged: () => renderApp(),
+      onBattleLeaveRoom: () => { deckPlacementChoice = null; },
+      uid
+    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
     topBackBtn.className = "topBackBtn";
@@ -1025,85 +1040,6 @@ Screen + data architecture:
       return wrap;
     }
 
-    async function ensureSocket() {
-      if (window.io) return;
-      await new Promise((resolve, reject) => {
-        const s = document.createElement("script");
-        s.src = "/socket.io/socket.io.js";
-        s.onload = resolve;
-        s.onerror = reject;
-        document.body.appendChild(s);
-      });
-    }
-
-    function createBattleClient() {
-      let socket = null;
-      return {
-        async connect() {
-          if (socket) return socket;
-          await ensureSocket();
-          socket = window.io("/battle");
-          socket.on("room_state", ({ roomId, state, role }) => {
-            battleRoomId = roomId || battleRoomId;
-            if (role) session.role = role;
-            battleViewRole = session.role || battleViewRole;
-            battleState = state;
-            renderApp();
-          });
-          return socket;
-        },
-        async createRoom() {
-          const s = await this.connect();
-          return new Promise((resolve) => {
-            s.emit("create_room", { playerId: session.playerId, playerName: session.playerName }, (res) => {
-              if (res?.ok) {
-                battleRoomId = res.roomId;
-                session.role = res.role;
-                battleState = res.state;
-                battleViewRole = res.role;
-                persistPlayerSaveDebounced();
-              }
-              resolve(res);
-            });
-          });
-        },
-        async joinRoom(roomId) {
-          const s = await this.connect();
-          return new Promise((resolve) => {
-            s.emit("join_room", { roomId, playerId: session.playerId, playerName: session.playerName }, (res) => {
-              if (res?.ok) {
-                battleRoomId = res.roomId;
-                session.role = res.role;
-                battleState = res.state;
-                battleViewRole = res.role;
-                persistPlayerSaveDebounced();
-              }
-              resolve(res);
-            });
-          });
-        },
-        sendIntent(type, payload) {
-          if (!socket || !battleRoomId || !battleState) return;
-          socket.emit("intent", {
-            type,
-            roomId: battleRoomId,
-            playerId: session.playerId,
-            clientActionId: uid(),
-            baseVersion: battleState.version || 0,
-            payload
-          });
-        },
-        leaveRoom() {
-          if (socket && battleRoomId) socket.emit("leave_room", { roomId: battleRoomId });
-          battleRoomId = "";
-          battleState = null;
-          session.role = null;
-          battleViewRole = "p1";
-          deckPlacementChoice = null;
-        }
-      };
-    }
-
     function renderPlayerMenu() {
       subtitle.textContent = "Choose player";
       const card = document.createElement("div");
@@ -1179,40 +1115,22 @@ Screen + data architecture:
     }
 
     function renderBattleLobby(host) {
-      const card = document.createElement("div");
-      card.className = "menuCard";
-      card.innerHTML = "<h3>Battle Room</h3>";
-
-      const createBtn = document.createElement("button");
-      createBtn.className = "menuBtn";
-      createBtn.textContent = "Create room";
-      createBtn.onclick = async () => {
-        const res = await battleClient.createRoom();
-        if (!res?.ok) alert(res?.error || "Failed to create room");
-        renderApp();
-      };
-
-      const input = document.createElement("input");
-      input.className = "menuInput";
-      input.placeholder = "Join room code";
-      input.value = loadPlayerSave(session.playerId).lastBattleRoomId || "";
-
-      const joinBtn = document.createElement("button");
-      joinBtn.className = "menuBtn";
-      joinBtn.textContent = "Join room";
-      joinBtn.onclick = async () => {
-        const code = input.value.trim().toUpperCase();
-        if (!code) return;
-        const res = await battleClient.joinRoom(code);
-        if (!res?.ok) alert(res?.error || "Join failed");
-        renderApp();
-      };
-
-      const hint = document.createElement("div");
-      hint.className = "zoneMeta";
-      hint.textContent = "Create a room and share the code with your opponent to join from another device.";
-      card.append(createBtn, input, joinBtn, hint);
-      host.appendChild(card);
+      if (!window.CardboardMeta?.renderBattleLobby) return;
+      window.CardboardMeta.renderBattleLobby({
+        host,
+        lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
+        onCreateRoom: async () => {
+          const res = await battleClient.createRoom();
+          if (!res?.ok) alert(res?.error || "Failed to create room");
+          renderApp();
+        },
+        onJoinRoom: async (code) => {
+          if (!code) return;
+          const res = await battleClient.joinRoom(code);
+          if (!res?.ok) alert(res?.error || "Join failed");
+          renderApp();
+        }
+      });
     }
 
     function renderModeScreen() {
