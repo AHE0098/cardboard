@@ -1323,10 +1323,23 @@ function mountLegacyBattleInApp() {
           if (!res?.ok) alert(res?.error || "Failed to create room");
           renderApp();
         },
-        onJoinRoom: async (code) => {
+        onJoinRoom: async (code, preferredRole) => {
           if (!code) return;
-          const res = await battleClient.joinRoom(code);
+          const res = await battleClient.joinRoom(code, preferredRole);
           if (!res?.ok) alert(res?.error || "Join failed");
+          renderApp();
+        },
+        onDeleteRoom: async (code) => {
+          if (!code) return;
+          const res = await battleClient.deleteRoom(code);
+          if (!res?.ok) alert(res?.error || "Delete failed");
+          await battleClient.refreshRoomsList?.();
+          renderApp();
+        },
+        onDeleteAllRooms: async () => {
+          const res = await battleClient.deleteAllRooms();
+          if (!res?.ok) alert(res?.error || "Delete all failed");
+          await battleClient.refreshRoomsList?.();
           renderApp();
         }
       });
@@ -1334,6 +1347,7 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
+    if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
       // If we are NOT in a room, ensure legacy battle is not mounted
   if (!battleState && legacyBattleHandle) {
     try { legacyBattleHandle.unmount?.(); } catch {}
