@@ -42,7 +42,6 @@ Screen + data architecture:
     let battleState = null;
     let battleRoomId = "";
     let openRooms = [];
-    let battleLobbyRoomsRequested = false;
     let battleClient = window.CardboardMeta?.createBattleClient({
       getSession: () => session,
       getBattleState: () => battleState,
@@ -57,10 +56,10 @@ Screen + data architecture:
       },
       persistPlayerSaveDebounced,
       onBattleStateChanged: () => renderApp(),
-      onBattleLeaveRoom: () => { deckPlacementChoice = null; battleLobbyRoomsRequested = false; },
+      onBattleLeaveRoom: () => { deckPlacementChoice = null; },
       onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
       uid
-    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], deleteRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), deleteAllRooms: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
+    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
     topBackBtn.className = "topBackBtn";
@@ -1350,10 +1349,7 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
-    if (!battleState && !battleLobbyRoomsRequested) {
-      battleLobbyRoomsRequested = true;
-      battleClient.refreshRoomsList?.();
-    }
+    if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
       // If we are NOT in a room, ensure legacy battle is not mounted
   if (!battleState && legacyBattleHandle) {
     try { legacyBattleHandle.unmount?.(); } catch {}
