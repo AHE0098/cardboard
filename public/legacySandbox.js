@@ -213,11 +213,6 @@ function ensureDeckSeeded() {
   });
 }
 
-// ✅ declare UI vars BEFORE any code uses them
-let view = { type: "overview" };
-let dragging = null;
-let inspector = null;
-let inspectorDragging = null;
 
 // ✅ init once (ONLY ONCE)
 ensureZoneArrays();
