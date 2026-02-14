@@ -41,6 +41,7 @@ Screen + data architecture:
 
     let battleState = null;
     let battleRoomId = "";
+    let openRooms = [];
     let battleClient = window.CardboardMeta?.createBattleClient({
       getSession: () => session,
       getBattleState: () => battleState,
@@ -55,8 +56,9 @@ Screen + data architecture:
       persistPlayerSaveDebounced,
       onBattleStateChanged: () => renderApp(),
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
+      onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
       uid
-    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
+    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
     topBackBtn.className = "topBackBtn";
@@ -1310,8 +1312,14 @@ function mountLegacyBattleInApp() {
       window.CardboardMeta.renderBattleLobby({
         host,
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
-        onCreateRoom: async () => {
-          const res = await battleClient.createRoom();
+        openRooms,
+        onRefreshRooms: async () => {
+          await battleClient.refreshRoomsList?.();
+          openRooms = battleClient.getOpenRooms?.() || openRooms;
+          renderApp();
+        },
+        onCreateRoom: async (requestedRoomCode) => {
+          const res = await battleClient.createRoom(requestedRoomCode);
           if (!res?.ok) alert(res?.error || "Failed to create room");
           renderApp();
         },
@@ -1333,7 +1341,7 @@ function mountLegacyBattleInApp() {
     clearSandboxTopPilesHost();
   }
     subtitle.textContent = battleRoomId
-      ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+      ? `${session.playerName} • battle • Game ${battleRoomId} • ${session.role || "-"}`
       : `${session.playerName} • battle`;
   } else {
     subtitle.textContent = `${session.playerName} • ${appMode}`;
