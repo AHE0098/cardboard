@@ -31,6 +31,7 @@ Screen + data architecture:
     let battleViewRole = "p1";
     let deckPlacementChoice = null;
     let legacySandboxHandle = null;
+    let legacyBattleHandle = null;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -156,22 +157,33 @@ Screen + data architecture:
       setActivePlayer(p);
     }
 
-    function onBack() {
-      if (uiScreen === "mode") {
-       if (appMode === "sandbox") {
-  persistPlayerSaveDebounced();
-  clearSandboxTopPilesHost();
-  try { legacySandboxHandle?.unmount?.(); } catch {}
-  legacySandboxHandle = null;
-}
-        if (appMode === "battle") battleClient.leaveRoom();
-        uiScreen = "mainMenu";
-        appMode = null;
-      } else if (uiScreen === "mainMenu") {
-        uiScreen = "playerMenu";
-      }
-      renderApp();
+function onBack() {
+  if (uiScreen === "mode") {
+    if (appMode === "sandbox") {
+      persistPlayerSaveDebounced();
+      clearSandboxTopPilesHost();
+      try { legacySandboxHandle?.unmount?.(); } catch {}
+      legacySandboxHandle = null;
     }
+
+    if (appMode === "battle") {
+      // If battle is using legacy sandbox UI, unmount it too
+      clearSandboxTopPilesHost();
+      try { legacyBattleHandle?.unmount?.(); } catch {}
+      legacyBattleHandle = null;
+
+      battleClient.leaveRoom();
+    }
+
+    uiScreen = "mainMenu";
+    appMode = null;
+  } else if (uiScreen === "mainMenu") {
+    uiScreen = "playerMenu";
+  }
+
+  renderApp();
+}
+
 
     function cardName(cardId) {
       return window.CARD_REPO?.[String(cardId)]?.name || `Card ${cardId}`;
@@ -1180,6 +1192,118 @@ Screen + data architecture:
   document.body.appendChild(script);
 }
 
+function mountLegacyBattleInApp() {
+  if (legacyBattleHandle) return;
+  if (!battleState) return;
+
+  // load script once (reuse same legacySandbox.js)
+  const ensureScript = () => new Promise((resolve, reject) => {
+    if (window.LegacySandbox?.mount) return resolve();
+    const existing = document.querySelector('script[data-in-app-legacy="1"]');
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = `./legacySandbox.js?t=${Date.now()}`;
+    s.dataset.inAppLegacy = "1";
+    s.onload = resolve;
+    s.onerror = reject;
+    document.body.appendChild(s);
+  });
+
+  const roleOther = (r) => (r === "p1" ? "p2" : "p1");
+
+  ensureScript().then(() => {
+    const dragLayer = document.getElementById("dragLayer");
+    if (!dragLayer) throw new Error("Missing #dragLayer for battle mount");
+
+    // Adapter: map legacy zoneKey -> your battleState zones
+    const getArr = (zoneKey, opts2 = {}) => {
+      const viewed = battleViewRole || session.role || "p1";
+      const owner = opts2.playerKey || viewed;
+
+      if (zoneKey === "stack") return battleState.sharedZones?.stack || [];
+
+      if (zoneKey === "opponentLands") {
+        return battleState.players?.[roleOther(viewed)]?.zones?.lands || [];
+      }
+      if (zoneKey === "opponentPermanents") {
+        return battleState.players?.[roleOther(viewed)]?.zones?.permanents || [];
+      }
+
+      if (zoneKey === "lands" || zoneKey === "permanents") {
+        // battlefield for the viewed role (bottom)
+        return battleState.players?.[viewed]?.zones?.[zoneKey] || [];
+      }
+
+      // private zones: by owner (defaults to viewed)
+      return battleState.players?.[owner]?.zones?.[zoneKey] || [];
+    };
+
+    const setArr = (zoneKey, arr, opts2 = {}) => {
+      const viewed = battleViewRole || session.role || "p1";
+      const owner = opts2.playerKey || viewed;
+
+      if (zoneKey === "stack") {
+        battleState.sharedZones ||= {};
+        battleState.sharedZones.stack = arr;
+        return;
+      }
+
+      if (zoneKey === "opponentLands") {
+        battleState.players[roleOther(viewed)].zones.lands = arr;
+        return;
+      }
+      if (zoneKey === "opponentPermanents") {
+        battleState.players[roleOther(viewed)].zones.permanents = arr;
+        return;
+      }
+
+      if (zoneKey === "lands" || zoneKey === "permanents") {
+        battleState.players[viewed].zones[zoneKey] = arr;
+        return;
+      }
+
+      battleState.players[owner].zones[zoneKey] = arr;
+    };
+
+    legacyBattleHandle = window.LegacySandbox.mount({
+      root,
+      subtitle,
+      dragLayer,
+
+      // IMPORTANT: battle data model is owned by app.js, not legacy
+      initialState: battleState,
+
+      // Tell legacy it’s in battle mode + which perspective is active
+      getMode: () => "battle",
+      getActivePlayerKey: () => (battleViewRole || session.role || "p1"),
+      setActivePlayerKey: (pk) => { battleViewRole = pk; renderApp(); },
+
+      // Core bindings
+      getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
+      setZoneArray: (zoneKey, arr, opts2) => { setArr(zoneKey, arr, opts2); renderApp(); },
+
+      // Visibility rules (match your current canSeeZone)
+      canSeeZone: (zoneKey) => {
+        // legacy will ask broadly; keep it simple:
+        // battlefield + stack visible, private zones only for viewed role
+        const viewed = battleViewRole || session.role || "p1";
+        if (zoneKey === "hand" || zoneKey === "deck" || zoneKey === "graveyard") return true; // since viewed is always the one shown
+        return true;
+      },
+
+      // Disable legacy’s localStorage saving loop for battle
+      persistIntervalMs: 0
+    });
+  }).catch((err) => {
+    console.error("Failed to mount legacy battle", err);
+  });
+}
+    
+
 
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
@@ -1200,36 +1324,58 @@ Screen + data architecture:
       });
     }
 
-    function renderModeScreen() {
-      if (appMode === "battle") {
-        subtitle.textContent = battleRoomId
-          ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
-          : `${session.playerName} • battle`;
-      } else {
-        subtitle.textContent = `${session.playerName} • ${appMode}`;
-      }
+  function renderModeScreen() {
+  if (appMode === "battle") {
+    subtitle.textContent = battleRoomId
+      ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+      : `${session.playerName} • battle`;
+  } else {
+    subtitle.textContent = `${session.playerName} • ${appMode}`;
+  }
 
-      const wrap = document.createElement("div");
-      wrap.className = "view";
+  const wrap = document.createElement("div");
+  wrap.className = "view";
 
-      if (appMode === "deckbuilder") {
-        const card = document.createElement("div");
-        card.className = "menuCard";
-        card.innerHTML = "<h2>Deckbuilder coming soon</h2>";
-        wrap.appendChild(card);
-      } else if (appMode === "battle") {
-        if (!battleState) renderBattleLobby(wrap);
-        else wrap.appendChild(renderBoard());
-      } else {
-        mountLegacySandboxInApp();
-      }
+  if (appMode === "deckbuilder") {
+    const card = document.createElement("div");
+    card.className = "menuCard";
+    card.innerHTML = "<h2>Deckbuilder coming soon</h2>";
+    wrap.appendChild(card);
 
-      const panel = appMode === "sandbox" ? null : renderInspector();
-      const deckPanel = appMode === "sandbox" ? null : renderDeckPlacementChooser();
+    // Normal app-mode screen render
+    const panel = renderInspector();
+    const deckPanel = renderDeckPlacementChooser();
+    root.replaceChildren(wrap);
+    if (panel) root.appendChild(panel);
+    if (deckPanel) root.appendChild(deckPanel);
+    return;
+  }
+
+  if (appMode === "battle") {
+    // If we don't have a room state yet, show lobby inside app UI
+    if (!battleState) {
+      renderBattleLobby(wrap);
+
+      const panel = renderInspector();
+      const deckPanel = renderDeckPlacementChooser();
       root.replaceChildren(wrap);
       if (panel) root.appendChild(panel);
       if (deckPanel) root.appendChild(deckPanel);
+      return;
     }
+
+    // We HAVE battleState: use the legacy sandbox UI as the battle UI.
+    // Mounting legacy will render directly into `root`, so we should NOT append renderBoard().
+    root.replaceChildren(wrap); // clears any lobby/menu remnants
+    mountLegacyBattleInApp();
+    return;
+  }
+
+  // sandbox
+  root.replaceChildren(wrap);
+  mountLegacySandboxInApp();
+}
+
 
     function renderApp() {
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
