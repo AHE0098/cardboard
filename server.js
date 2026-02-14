@@ -8,6 +8,29 @@ const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
 const BATTLEFIELD_ZONES = ["lands", "permanents"];
 const SHARED_ZONES = ["stack"];
 const rooms = new Map();
+const socketPresence = new Map(); // socket.id -> { roomId, role }
+
+
+function normalizeRoomId(raw) {
+  const s = String(raw || "").trim().toUpperCase();
+  // keep it simple & safe
+  if (!/^[A-Z0-9]{4,10}$/.test(s)) return null;
+  return s;
+}
+
+// "Open game" = room exists and p2 is not seated yet
+function getOpenRoomsList() {
+  return Array.from(rooms.values())
+    .filter((r) => !r?.state?.players?.p2?.id) // p2 is empty
+    .map((r) => ({
+      roomId: r.roomId,
+      createdAt: r.createdAt || 0,
+      p1: !!r.state?.players?.p1?.id,
+      p2: !!r.state?.players?.p2?.id
+    }))
+    .sort((a, b) => (b.createdAt - a.createdAt));
+}
+
 
 function code() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -27,10 +50,15 @@ function makePlayer(id = null, name = "") {
   return { id, name, zones: { hand, deck, graveyard: [], lands: [], permanents: [] } };
 }
 
-function makeRoom(creator) {
-  const roomId = code();
+function makeRoom(creator, opts = {}) {
+  const requested = normalizeRoomId(opts.requestedRoomId);
+  const roomId = requested || code();
+
+  if (rooms.has(roomId)) return null;
+
   const room = {
     roomId,
+    createdAt: Date.now(),
     state: {
       sharedZones: { stack: [] },
       players: {
@@ -42,9 +70,11 @@ function makeRoom(creator) {
       version: 1
     }
   };
+
   rooms.set(roomId, room);
   return room;
 }
+
 
 function getRole(room, playerId) {
   if (room.state.players.p1.id === playerId) return "p1";
@@ -167,13 +197,57 @@ function createServer() {
 
   const battle = io.of("/battle");
   battle.on("connection", (socket) => {
-    socket.on("create_room", ({ playerId, playerName }, ack) => {
-      const room = makeRoom({ playerId, playerName });
+    const broadcastRoomsList = () => {
+      battle.emit("rooms_list", { rooms: getOpenRoomsList() });
+    };
+
+    const detachFromRoomIfPresent = () => {
+      const pres = socketPresence.get(socket.id);
+      if (!pres) return;
+
+      const room = rooms.get(pres.roomId);
+      if (room) {
+        if (pres.role === "p2") {
+          // free p2 seat, keep room open
+          room.state.players.p2 = makePlayer(null, "Waiting...");
+          room.state.version += 1;
+          battle.to(room.roomId).emit("room_state", { roomId: room.roomId, state: room.state });
+        } else if (pres.role === "p1") {
+          // host left => close room (simplest)
+          rooms.delete(room.roomId);
+          battle.to(room.roomId).emit("room_closed", { roomId: room.roomId });
+        }
+      }
+
+      socket.leave(pres.roomId);
+      socketPresence.delete(socket.id);
+      broadcastRoomsList();
+    };
+
+    // Push initial open rooms list on connect (nice UX)
+    socket.emit("rooms_list", { rooms: getOpenRoomsList() });
+
+    // Allow lobby to request refresh (optional ack)
+    socket.on("rooms_list_request", (_, ack) => {
+      const payload = { rooms: getOpenRoomsList() };
+      socket.emit("rooms_list", payload);
+      ack?.({ ok: true, ...payload });
+    });
+
+    // Create a room, optionally with a requested code (from the same input as join)
+    socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
+      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
+      if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
+
       socket.join(room.roomId);
+      socketPresence.set(socket.id, { roomId: room.roomId, role: "p1" });
+
       ack?.({ ok: true, roomId: room.roomId, role: "p1", state: room.state });
+      broadcastRoomsList();
     });
 
     socket.on("join_room", ({ roomId, playerId, playerName }, ack) => {
+      roomId = String(roomId || "").trim().toUpperCase();
       const room = rooms.get(roomId);
       if (!room) return ack?.({ ok: false, error: "Room not found" });
 
@@ -188,20 +262,32 @@ function createServer() {
       }
 
       socket.join(roomId);
+      socketPresence.set(socket.id, { roomId, role });
+
       battle.to(roomId).emit("room_state", { roomId, state: room.state });
       ack?.({ ok: true, roomId, role, state: room.state });
+
+      broadcastRoomsList();
     });
 
-    socket.on("leave_room", ({ roomId }) => socket.leave(roomId));
+    socket.on("leave_room", () => {
+      detachFromRoomIfPresent();
+    });
+
+    socket.on("disconnect", () => {
+      detachFromRoomIfPresent();
+    });
 
     socket.on("intent", (intent) => {
       const room = rooms.get(intent.roomId);
       if (!room) return;
+
       const role = getRole(room, intent.playerId);
       if (!role) {
         socket.emit("intent_rejected", { error: "Not in room", state: room.state });
         return;
       }
+
       if ((intent.baseVersion || 0) !== room.state.version) {
         socket.emit("intent_rejected", { error: "Version mismatch", state: room.state });
         socket.emit("room_state", { roomId: room.roomId, state: room.state, role });
@@ -221,6 +307,7 @@ function createServer() {
 
   return { app, server };
 }
+
 
 if (require.main === module) {
   const { server } = createServer();
