@@ -41,6 +41,8 @@ Screen + data architecture:
 
     let battleState = null;
     let battleRoomId = "";
+    let openRooms = [];
+    let battleLobbyRoomsRequested = false;
     let battleClient = window.CardboardMeta?.createBattleClient({
       getSession: () => session,
       getBattleState: () => battleState,
@@ -51,12 +53,14 @@ Screen + data architecture:
         battleState = state;
         session.role = role;
         battleViewRole = viewRole;
+        if (state) battleLobbyRoomsRequested = false;
       },
       persistPlayerSaveDebounced,
       onBattleStateChanged: () => renderApp(),
-      onBattleLeaveRoom: () => { deckPlacementChoice = null; },
+      onBattleLeaveRoom: () => { deckPlacementChoice = null; battleLobbyRoomsRequested = false; },
+      onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
       uid
-    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
+    }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], deleteRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), deleteAllRooms: async () => ({ ok: false, error: "Missing CardboardMeta" }), sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
     topBackBtn.className = "topBackBtn";
@@ -173,6 +177,7 @@ function onBack() {
       legacyBattleHandle = null;
 
       battleClient.leaveRoom();
+      battleLobbyRoomsRequested = false;
     }
 
     uiScreen = "mainMenu";
@@ -1310,15 +1315,34 @@ function mountLegacyBattleInApp() {
       window.CardboardMeta.renderBattleLobby({
         host,
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
-        onCreateRoom: async () => {
-          const res = await battleClient.createRoom();
+        openRooms,
+        onRefreshRooms: async () => {
+          await battleClient.refreshRoomsList?.();
+          openRooms = battleClient.getOpenRooms?.() || openRooms;
+          renderApp();
+        },
+        onCreateRoom: async (requestedRoomCode) => {
+          const res = await battleClient.createRoom(requestedRoomCode);
           if (!res?.ok) alert(res?.error || "Failed to create room");
           renderApp();
         },
-        onJoinRoom: async (code) => {
+        onJoinRoom: async (code, preferredRole) => {
           if (!code) return;
-          const res = await battleClient.joinRoom(code);
+          const res = await battleClient.joinRoom(code, preferredRole);
           if (!res?.ok) alert(res?.error || "Join failed");
+          renderApp();
+        },
+        onDeleteRoom: async (code) => {
+          if (!code) return;
+          const res = await battleClient.deleteRoom(code);
+          if (!res?.ok) alert(res?.error || "Delete failed");
+          await battleClient.refreshRoomsList?.();
+          renderApp();
+        },
+        onDeleteAllRooms: async () => {
+          const res = await battleClient.deleteAllRooms();
+          if (!res?.ok) alert(res?.error || "Delete all failed");
+          await battleClient.refreshRoomsList?.();
           renderApp();
         }
       });
@@ -1326,6 +1350,10 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
+    if (!battleState && !battleLobbyRoomsRequested) {
+      battleLobbyRoomsRequested = true;
+      battleClient.refreshRoomsList?.();
+    }
       // If we are NOT in a room, ensure legacy battle is not mounted
   if (!battleState && legacyBattleHandle) {
     try { legacyBattleHandle.unmount?.(); } catch {}
@@ -1333,7 +1361,7 @@ function mountLegacyBattleInApp() {
     clearSandboxTopPilesHost();
   }
     subtitle.textContent = battleRoomId
-      ? `${session.playerName} • battle • Room ${battleRoomId} • ${session.role || "-"}`
+      ? `${session.playerName} • battle • Game ${battleRoomId} • ${session.role || "-"}`
       : `${session.playerName} • battle`;
   } else {
     subtitle.textContent = `${session.playerName} • ${appMode}`;
