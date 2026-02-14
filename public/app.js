@@ -1397,11 +1397,18 @@ function mountLegacyBattleInApp() {
       return;
     }
 
-    // We HAVE battleState: use the legacy sandbox UI as the battle UI.
-    // Mounting legacy will render directly into `root`, so we should NOT append renderBoard().
-    root.replaceChildren(wrap); // clears any lobby/menu remnants
-    mountLegacyBattleInApp();
-    return;
+// We HAVE battleState: render battle UI (network-wired)
+root.replaceChildren(wrap);
+
+wrap.appendChild(renderBoard());
+
+const panel = renderInspector();
+const deckPanel = renderDeckPlacementChooser();
+if (panel) root.appendChild(panel);
+if (deckPanel) root.appendChild(deckPanel);
+
+return;
+
   }
 
   // sandbox
