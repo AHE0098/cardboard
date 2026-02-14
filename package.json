@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/battle-permissions.test.js"
+    "test": "node tests/battle-permissions.test.js && node tests/room-lifecycle.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",
