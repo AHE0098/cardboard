@@ -243,7 +243,7 @@ Screen + data architecture:
       zoneKey = resolved.zone;
       ownerRole = resolved.owner;
       if (appMode !== "battle") return true;
-      if (isPrivateZone(zoneKey)) return ownerRole === session.role;
+      if (isPrivateZone(zoneKey)) return ownerRole === getViewedRole();
       return isSharedZone(zoneKey) || isBattlefieldZone(zoneKey);
     }
 
@@ -1024,19 +1024,40 @@ Screen + data architecture:
         return wrap;
       }
 
-      const myRole = session.role || "p1";
-      const otherRole = myRole === "p1" ? "p2" : "p1";
+      const viewedRole = getViewedRole();
+      const otherRole = viewedRole === "p1" ? "p2" : "p1";
       const wrap = document.createElement("div");
       wrap.className = "board battleBoard";
 
+      const topTitle = document.createElement("div");
+      topTitle.className = "zoneMeta";
+      topTitle.textContent = `${otherRole.toUpperCase()} side`;
+      wrap.appendChild(topTitle);
+
+      wrap.appendChild(renderBattlefieldTrack(otherRole, otherRole.toUpperCase(), { mirrored: true }));
+
+      const midLine = document.createElement("div");
+      midLine.className = "midLine";
+      wrap.appendChild(midLine);
+
+      const bottomTitle = document.createElement("div");
+      bottomTitle.className = "zoneMeta";
+      bottomTitle.textContent = `${viewedRole.toUpperCase()} side`;
+      wrap.appendChild(bottomTitle);
+
+      wrap.appendChild(renderBattlefieldTrack(viewedRole, viewedRole.toUpperCase()));
+
+      wrap.appendChild(renderZone("hand", viewedRole));
+
       const topPrivate = document.createElement("div");
       topPrivate.className = "battleTopPrivate";
-      topPrivate.append(renderZone("deck", myRole, { compactPile: true }), renderZone("graveyard", myRole, { compactPile: true }), renderZone("stack", myRole, { compactPile: true }));
-      wrap.append(topPrivate, renderZone("hand", myRole));
+      topPrivate.append(
+        renderZone("deck", viewedRole, { compactPile: true }),
+        renderZone("graveyard", viewedRole, { compactPile: true }),
+        renderZone("stack", viewedRole, { compactPile: true })
+      );
+      wrap.appendChild(topPrivate);
 
-      wrap.appendChild(renderBattlefieldTrack(myRole, myRole.toUpperCase()));
-      wrap.appendChild(renderZone("opponentPermanents", myRole, { mirrored: true }));
-      wrap.appendChild(renderZone("opponentLands", myRole, { mirrored: true }));
       return wrap;
     }
 
