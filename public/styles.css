@@ -1553,3 +1553,39 @@ body.isFocus #topPiles{
   transform-origin: center;
 }
 
+/* =========================
+   LOCK battlefield row heights (even when empty)
+   paste LAST in styles.css
+   ========================= */
+
+/* Choose your “row heights” */
+:root{
+  --rowH-perm: 105px;
+  --rowH-land: 52px;
+}
+
+/* Lock YOUR zones */
+.dropArea.zone-permanents{
+  height: var(--rowH-perm) !important;
+  min-height: var(--rowH-perm) !important;
+  max-height: var(--rowH-perm) !important;
+}
+.dropArea.zone-lands{
+  height: var(--rowH-land) !important;
+  min-height: var(--rowH-land) !important;
+  max-height: var(--rowH-land) !important;
+}
+
+/* Lock OPPONENT zones */
+.dropArea.zone-opponentPermanents{
+  height: var(--rowH-perm) !important;
+  min-height: var(--rowH-perm) !important;
+  max-height: var(--rowH-perm) !important;
+}
+.dropArea.zone-opponentLands{
+  height: var(--rowH-land) !important;
+  min-height: var(--rowH-land) !important;
+  max-height: var(--rowH-land) !important;
+}
+
+
