@@ -1263,11 +1263,9 @@ if (zMeta.kind === "pile") {
 
     const id = ids[i];
     if (id !== undefined) {
-const c = makeMiniCardEl(id, zoneKey, { overlay, flipped: isOpp });
+const c = makeMiniCardEl(id, zoneKey, { overlay, flipped: false });
 if (!overlay) {
   attachTapStates(c, id);
-  // ensure taps still work even in opponent-rotated rows
-  c.style.pointerEvents = "auto";
 }
 
       slot.appendChild(c);
