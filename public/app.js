@@ -30,6 +30,7 @@ Screen + data architecture:
     let inspector = null;
     let battleViewRole = "p1";
     let deckPlacementChoice = null;
+    let legacySandboxHandle = null;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -157,7 +158,12 @@ Screen + data architecture:
 
     function onBack() {
       if (uiScreen === "mode") {
-        if (appMode === "sandbox") { persistPlayerSaveDebounced(); clearSandboxTopPilesHost(); }
+       if (appMode === "sandbox") {
+  persistPlayerSaveDebounced();
+  clearSandboxTopPilesHost();
+  try { legacySandboxHandle?.unmount?.(); } catch {}
+  legacySandboxHandle = null;
+}
         if (appMode === "battle") battleClient.leaveRoom();
         uiScreen = "mainMenu";
         appMode = null;
@@ -1124,16 +1130,56 @@ Screen + data architecture:
       if (host) host.remove();
     }
 
-    function mountLegacySandboxInApp() {
-      window.DEMO_STATE = sandboxState;
-      window.__CB_PLAYER_ID = session.playerId || null;
-      const existing = document.querySelector('script[data-in-app-sandbox="1"]');
-      if (existing) existing.remove();
-      const script = document.createElement("script");
-      script.src = `./legacySandbox.js?t=${Date.now()}`;
-      script.dataset.inAppSandbox = "1";
-      document.body.appendChild(script);
+   function mountLegacySandboxInApp() {
+  // If we already mounted once in this session, don't mount again
+  // (renderModeScreen can run multiple times)
+  if (legacySandboxHandle) return;
+
+  // Prefer passing initialState directly instead of relying on window.DEMO_STATE
+  const initialState = sandboxState;
+
+  // Remove any previously injected legacy script (hot reload safe)
+  const existing = document.querySelector('script[data-in-app-sandbox="1"]');
+  if (existing) existing.remove();
+
+  const script = document.createElement("script");
+  script.src = `./legacySandbox.js?t=${Date.now()}`;
+  script.dataset.inAppSandbox = "1";
+
+  script.onload = () => {
+    if (!window.LegacySandbox?.mount) {
+      console.error("legacySandbox loaded but window.LegacySandbox.mount is missing");
+      return;
     }
+
+    // Mount into the SAME root/subtitle/topbar/back button that app.js already owns
+    legacySandboxHandle = window.LegacySandbox.mount({
+      root,
+      subtitle,
+      dragLayer: document.getElementById("dragLayer"), // make sure you have it in HTML
+      initialState,
+      sandboxPlayerId: session.playerId || null,
+
+      // optional: let legacy read mode/player if you want
+      getMode: () => "solo",
+      getActivePlayerKey: () => "p1",
+
+      // make sure app-level persistence stays the source of truth
+      onPersist: () => {
+        // pull state out of legacy if you want; if legacy mutates `initialState` object directly,
+        // sandboxState is already updated. If not, you can add a getter later.
+        persistPlayerSaveDebounced();
+      }
+    });
+  };
+
+  script.onerror = () => {
+    console.error("Failed to load legacySandbox.js");
+  };
+
+  document.body.appendChild(script);
+}
+
 
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
