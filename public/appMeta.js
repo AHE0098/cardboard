@@ -10,112 +10,150 @@
     });
   }
 
-  function createBattleClient(api) {
-    let socket = null;
-    let openRooms = [];
+function createBattleClient(api) {
+  let socket = null;
+  let openRooms = [];
 
-    const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
+  const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
 
-    return {
-      async connect() {
-        if (socket) return socket;
-        await ensureSocket();
-        socket = window.io("/battle");
-        socket.on("room_state", ({ roomId, state, role }) => {
-          const currentSession = api.getSession();
-          const nextRole = role || currentSession.role;
-          api.setBattleSession({ roomId: roomId || api.getBattleRoomId(), role: nextRole, state, viewRole: nextRole || api.getBattleViewRole() });
+  return {
+    async connect() {
+      if (socket) return socket;
+      await ensureSocket();
+      socket = window.io("/battle");
+
+      socket.on("room_state", ({ roomId, state, role }) => {
+        const currentSession = api.getSession();
+        const pid = currentSession.playerId;
+
+        let derived = null;
+        if (state?.players?.p1?.id === pid) derived = "p1";
+        else if (state?.players?.p2?.id === pid) derived = "p2";
+
+        const nextRole = role || derived || currentSession.role;
+
+        // keep current viewRole unless it's empty
+        const currentView = api.getBattleViewRole();
+        const nextViewRole = currentView || nextRole || "p1";
+
+        api.setBattleSession({
+          roomId: roomId || api.getBattleRoomId(),
+          role: nextRole,
+          state,
+          viewRole: nextViewRole
+        });
+
+        api.onBattleStateChanged();
+      });
+
+      socket.on("room_closed", ({ roomId }) => {
+        if (roomId && roomId === api.getBattleRoomId()) {
+          api.setBattleSession({ roomId: "", role: null, state: null, viewRole: "p1" });
+          api.onBattleLeaveRoom();
           api.onBattleStateChanged();
-        });
-        socket.on("room_closed", ({ roomId }) => {
-          if (roomId && roomId === api.getBattleRoomId()) {
-            api.setBattleSession({ roomId: "", role: null, state: null, viewRole: "p1" });
-            api.onBattleLeaveRoom();
-            api.onBattleStateChanged();
-          }
-        });
-        socket.on("rooms_list", ({ rooms }) => {
-          openRooms = Array.isArray(rooms) ? rooms : [];
-          api.onRoomsListChanged?.(openRooms);
-        });
-        return socket;
-      },
-      async refreshRoomsList() {
-        const s = await this.connect();
-        s.emit("rooms_list_request", {});
-        return openRooms;
-      },
-      getOpenRooms() {
-        return [...openRooms];
-      },
-      async createRoom(roomId = "") {
-        const s = await this.connect();
-        return new Promise((resolve) => {
-          const currentSession = api.getSession();
-          s.emit("create_room", {
+        }
+      });
+
+      socket.on("rooms_list", ({ rooms }) => {
+        openRooms = Array.isArray(rooms) ? rooms : [];
+        api.onRoomsListChanged?.(openRooms);
+      });
+
+      return socket;
+    },
+
+    async refreshRoomsList() {
+      const s = await this.connect();
+      s.emit("rooms_list_request", {});
+      return openRooms;
+    },
+
+    getOpenRooms() {
+      return [...openRooms];
+    },
+
+    async createRoom(roomId = "") {
+      const s = await this.connect();
+      return new Promise((resolve) => {
+        const currentSession = api.getSession();
+        s.emit(
+          "create_room",
+          {
             playerId: currentSession.playerId,
             playerName: currentSession.playerName,
             roomId: String(roomId || "").trim().toUpperCase()
-          }, (res) => {
+          },
+          (res) => {
             if (res?.ok) {
               api.setBattleSession({ roomId: res.roomId, role: res.role, state: res.state, viewRole: res.role });
               api.persistPlayerSaveDebounced();
             }
             resolve(res);
-          });
-        });
-      },
-      async joinRoom(roomId, preferredRole = null) {
-        const s = await this.connect();
-        return new Promise((resolve) => {
-          const currentSession = api.getSession();
-          s.emit("join_room", {
+          }
+        );
+      });
+    },
+
+    async joinRoom(roomId, preferredRole = null) {
+      const s = await this.connect();
+      return new Promise((resolve) => {
+        const currentSession = api.getSession();
+        s.emit(
+          "join_room",
+          {
             roomId,
             preferredRole: normalizeRole(preferredRole),
             playerId: currentSession.playerId,
             playerName: currentSession.playerName
-          }, (res) => {
+          },
+          (res) => {
             if (res?.ok) {
               api.setBattleSession({ roomId: res.roomId, role: res.role, state: res.state, viewRole: res.role });
               api.persistPlayerSaveDebounced();
             }
             resolve(res);
-          });
-        });
-      },
-      async deleteRoom(roomId) {
-        const s = await this.connect();
-        const normalized = String(roomId || "").trim().toUpperCase();
-        return new Promise((resolve) => {
-          s.emit("delete_room", { roomId: normalized }, resolve);
-        });
-      },
-      async deleteAllRooms() {
-        const s = await this.connect();
-        return new Promise((resolve) => {
-          s.emit("delete_all_rooms", {}, resolve);
-        });
-      },
-      sendIntent(type, payload) {
-        if (!socket || !api.getBattleRoomId() || !api.getBattleState()) return;
-        const currentSession = api.getSession();
-        const currentBattle = api.getBattleState();
-        socket.emit("intent", {
-          type,
-          roomId: api.getBattleRoomId(),
-          playerId: currentSession.playerId,
-          clientActionId: api.uid(),
-          baseVersion: currentBattle.version || 0,
-          payload
-        });
-      },
-      leaveRoom() {
-        if (socket && api.getBattleRoomId()) socket.emit("leave_room", { roomId: api.getBattleRoomId() });
-        api.setBattleSession({ roomId: "", role: null, state: null, viewRole: "p1" });
-        api.onBattleLeaveRoom();
-      }
-    };
-  }
+          }
+        );
+      });
+    },
+
+    async deleteRoom(roomId) {
+      const s = await this.connect();
+      const normalized = String(roomId || "").trim().toUpperCase();
+      return new Promise((resolve) => {
+        s.emit("delete_room", { roomId: normalized }, resolve);
+      });
+    },
+
+    async deleteAllRooms() {
+      const s = await this.connect();
+      return new Promise((resolve) => {
+        s.emit("delete_all_rooms", {}, resolve);
+      });
+    },
+
+    sendIntent(type, payload) {
+      if (!socket || !api.getBattleRoomId() || !api.getBattleState()) return;
+      const currentSession = api.getSession();
+      const currentBattle = api.getBattleState();
+      socket.emit("intent", {
+        type,
+        roomId: api.getBattleRoomId(),
+        playerId: currentSession.playerId,
+        clientActionId: api.uid(),
+        baseVersion: currentBattle.version || 0,
+        payload
+      });
+    },
+
+    leaveRoom() {
+      if (socket && api.getBattleRoomId()) socket.emit("leave_room", { roomId: api.getBattleRoomId() });
+      api.setBattleSession({ roomId: "", role: null, state: null, viewRole: "p1" });
+      api.onBattleLeaveRoom();
+    }
+  };
+}
+
 
   function renderBattleLobby({ host, lastBattleRoomId, openRooms = [], onCreateRoom, onJoinRoom, onRefreshRooms, onDeleteRoom, onDeleteAllRooms }) {
     const card = document.createElement("div");
