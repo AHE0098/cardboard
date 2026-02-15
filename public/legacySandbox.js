@@ -1542,11 +1542,14 @@ function renderFocus(zoneKey) {
       const dx = ev.clientX - start.x;
       const dy = ev.clientY - start.y;
 
-      // if user moves finger enough, lift immediately
-      if (!lifted && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
-        clearTimeout(holdTimer);
-        lift();
-      }
+// If they move, we assume it's NOT a tap anymore — but we also
+// do NOT auto-lift into drag (mobile jitter kills double-tap).
+// Drag starts only via long-press (holdTimer).
+if (!lifted && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+  clearTimeout(holdTimer); // cancel potential long-press drag
+  return;                  // let the gesture end naturally
+}
+
 
       if (dragging?.ghostEl) {
         ev.preventDefault();
