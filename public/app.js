@@ -32,6 +32,7 @@ Screen + data architecture:
     let deckPlacementChoice = null;
     let legacySandboxHandle = null;
     let legacyBattleHandle = null;
+    let battleLobbyRoomsRequested = false;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
