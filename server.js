@@ -233,6 +233,8 @@ function createServer() {
 
     // Create a room, optionally with a requested code (from the same input as join)
     socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
+      detachFromRoomIfPresent();
+
       const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
       if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
 
@@ -244,6 +246,8 @@ function createServer() {
     });
 
     socket.on("join_room", ({ roomId, playerId, playerName, preferredRole }, ack) => {
+      detachFromRoomIfPresent();
+
       roomId = String(roomId || "").trim().toUpperCase();
       const room = rooms.get(roomId);
       if (!room) return ack?.({ ok: false, error: "Room not found" });
