@@ -55,7 +55,12 @@ Screen + data architecture:
         if (state) battleLobbyRoomsRequested = false;
       },
       persistPlayerSaveDebounced,
-      onBattleStateChanged: () => renderApp(),
+     onBattleStateChanged: () => {
+  // If legacy battle UI is mounted, just ask it to repaint
+  if (legacyBattleHandle?.invalidate) legacyBattleHandle.invalidate();
+  else renderApp();
+},
+
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
       onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
       uid
@@ -67,6 +72,301 @@ Screen + data architecture:
     document.querySelector(".topbar")?.insertBefore(topBackBtn, subtitle);
     topBackBtn.addEventListener("click", onBack);
 
+// ============================
+// ACTION REDUCER (shared)
+// ============================
+function ensureBattleStateShape(s) {
+  s.sharedZones ||= {};
+  s.sharedZones.stack ||= [];
+  s.players ||= {};
+  ["p1", "p2"].forEach((pk) => {
+    s.players[pk] ||= { id: pk, name: pk === "p2" ? "Player 2" : "Player 1", zones: {} };
+    s.players[pk].zones ||= {};
+    ["hand", "deck", "graveyard", "lands", "permanents"].forEach((z) => {
+      s.players[pk].zones[z] ||= [];
+    });
+  });
+  s.tapped ||= {};
+  s.tarped ||= {};
+  if (!Number.isFinite(s.version)) s.version = 0;
+  return s;
+}
+
+function ensureSandboxStateShape(s) {
+  s.zones ||= {};
+  ["hand", "deck", "graveyard", "lands", "permanents", "stack"].forEach((z) => (s.zones[z] ||= []));
+  s.tapped ||= {};
+  s.tarped ||= {};
+  return s;
+}
+
+function getZoneRef(state, owner, zone) {
+  if (owner === "solo") {
+    ensureSandboxStateShape(state);
+    return state.zones[zone] || (state.zones[zone] = []);
+  }
+  if (owner === "shared") {
+    ensureBattleStateShape(state);
+    state.sharedZones[zone] ||= [];
+    return state.sharedZones[zone];
+  }
+  // p1/p2
+  ensureBattleStateShape(state);
+  state.players[owner] ||= { id: owner, name: owner, zones: {} };
+  state.players[owner].zones ||= {};
+  state.players[owner].zones[zone] ||= [];
+  return state.players[owner].zones[zone];
+}
+
+function removeOnce(arr, cardId) {
+  const idx = arr.indexOf(cardId);
+  if (idx >= 0) arr.splice(idx, 1);
+  return idx >= 0;
+}
+
+// Pure-ish: mutates `state` in place (by design for perf/simple integration)
+function applyActionToState(state, action) {
+  if (!action || !action.type) return;
+
+  switch (action.type) {
+    case "MOVE_CARD": {
+      const fromArr = getZoneRef(state, action.from.owner, action.from.zone);
+      const toArr = getZoneRef(state, action.to.owner, action.to.zone);
+
+      if (!removeOnce(fromArr, action.cardId)) return;
+
+      // stack "top" = end of array in your UI
+      if (action.to.zone === "stack") toArr.push(action.cardId);
+      else toArr.push(action.cardId);
+
+      return;
+    }
+
+    case "DRAW_CARD": {
+      // owner draws from their deck to their hand (leftmost = unshift)
+      const deck = getZoneRef(state, action.owner, "deck");
+      if (!deck.length) return;
+      const cardId = deck[0];
+      deck.shift();
+
+      const hand = getZoneRef(state, action.owner, "hand");
+      hand.unshift(cardId);
+      return;
+    }
+
+    case "TOGGLE_TAP": {
+      const key = String(action.cardId);
+      state.tapped ||= {};
+      state.tarped ||= {};
+
+      if (action.kind === "tarped") {
+        const next = !state.tarped[key];
+        state.tarped[key] = next;
+        if (next) state.tapped[key] = false;
+        return;
+      }
+
+      // tapped
+      const next = !state.tapped[key];
+      state.tapped[key] = next;
+      if (next) state.tarped[key] = false;
+      return;
+    }
+
+    case "DECK_PLACE": {
+      // Remove card from `from`, then place into deck of `owner`
+      const fromArr = getZoneRef(state, action.from.owner, action.from.zone);
+      if (!removeOnce(fromArr, action.cardId)) return;
+
+      const deck = getZoneRef(state, action.owner, "deck");
+      if (action.where === "top") deck.unshift(action.cardId);
+      else deck.push(action.cardId);
+      return;
+    }
+
+    case "REORDER_ZONE": {
+      const arr = getZoneRef(state, action.owner, action.zone);
+      // minimal validation: only accept if same multiset length
+      if (!Array.isArray(action.ids)) return;
+      if (action.ids.length !== arr.length) return;
+      // optional stronger check: same elements (O(n^2) ok for tiny lists)
+      const a = [...arr].sort((x, y) => x - y);
+      const b = [...action.ids].sort((x, y) => x - y);
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return;
+
+      // commit
+      arr.length = 0;
+      action.ids.forEach((id) => arr.push(id));
+      return;
+    }
+
+    default:
+      return;
+  }
+}
+
+// ============================
+// LOCAL ADAPTER (sandbox)
+// ============================
+function createLocalAdapter({ getState, setState, persist, invalidateUI }) {
+  return {
+    dispatch(action) {
+      const s = getState();
+      applyActionToState(s, action);
+      setState(s);
+      if (typeof persist === "function") persist();
+      if (typeof invalidateUI === "function") invalidateUI();
+    }
+  };
+}
+
+    // ============================
+// NETWORK ADAPTER (battle)
+// ============================
+function createNetworkAdapter({
+  getBattleState,
+  setBattleState,
+  invalidateUI,
+  sendIntent,           // (payload) => void
+  getBaseVersion,       // () => number
+  optimistic = true,
+}) {
+  return {
+    dispatch(action) {
+      if (!action || !action.type) return;
+
+      // Optional optimistic apply (keeps your animations + UX snappy)
+      if (optimistic) {
+        const s = getBattleState();
+        applyActionToState(s, action);
+        setBattleState(s);
+        if (typeof invalidateUI === "function") invalidateUI();
+      }
+
+      // Server-authoritative intent
+      const baseVersion = Number(getBaseVersion?.() ?? getBattleState()?.version ?? 0);
+      try {
+        sendIntent({ action, baseVersion });
+      } catch (err) {
+        // If send fails, do nothing; next room_state will reconcile.
+        // If you want stronger rollback, you can request full sync here.
+        console.warn("sendIntent failed", err);
+      }
+    }
+  };
+}
+
+function makeLegacyBattleZoneAccessors({ getBattleState, getViewRole }) {
+  const other = (pk) => (pk === "p1" ? "p2" : "p1");
+
+  return {
+    getMode: () => "battle",
+    getActivePlayerKey: () => getViewRole(), // legacySandbox uses this as "viewing"
+    setActivePlayerKey: (pk) => { /* host owns viewRole; set elsewhere */ },
+
+    getZoneArray: (zoneKey) => {
+      const s = ensureBattleStateShape(getBattleState());
+      const view = getViewRole();
+      const opp = other(view);
+
+      if (zoneKey === "stack") return s.sharedZones.stack;
+
+      if (zoneKey === "opponentLands") return s.players[opp].zones.lands;
+      if (zoneKey === "opponentPermanents") return s.players[opp].zones.permanents;
+
+      if (zoneKey === "hand") return s.players[view].zones.hand;
+      if (zoneKey === "deck") return s.players[view].zones.deck;
+      if (zoneKey === "graveyard") return s.players[view].zones.graveyard;
+
+      if (zoneKey === "lands") return s.players[view].zones.lands;
+      if (zoneKey === "permanents") return s.players[view].zones.permanents;
+
+      // fallback (avoid crashes)
+      s.players[view].zones[zoneKey] ||= [];
+      return s.players[view].zones[zoneKey];
+    },
+
+    // In battle, legacySandbox should NOT write arrays directly.
+    // We'll still provide setZoneArray for safety, but keep it no-op or debug.
+    setZoneArray: () => { /* no-op in battle; use dispatch */ },
+  };
+}
+
+// somewhere in app.js module scope:
+let legacyInstance = null;
+
+// Sandbox mount
+function mountLegacySandboxInApp({ root, subtitle, dragLayer, getSandboxState, setSandboxState, persistSandbox }) {
+  if (legacyInstance) legacyInstance.unmount();
+
+  const localAdapter = createLocalAdapter({
+    getState: getSandboxState,
+    setState: setSandboxState,
+    persist: persistSandbox,
+    invalidateUI: () => legacyInstance?.invalidate?.(),
+  });
+
+  legacyInstance = window.LegacySandbox.mount({
+    root, subtitle, dragLayer,
+    initialState: getSandboxState(),
+    getMode: () => "solo",
+    getZoneArray: (zoneKey) => {
+      const s = ensureSandboxStateShape(getSandboxState());
+      s.zones[zoneKey] ||= [];
+      return s.zones[zoneKey];
+    },
+    setZoneArray: (zoneKey, arr) => {
+      const s = ensureSandboxStateShape(getSandboxState());
+      s.zones[zoneKey] = arr;
+      setSandboxState(s);
+      persistSandbox?.();
+    },
+    dispatch: localAdapter.dispatch,
+  });
+
+  legacyInstance.invalidate?.();
+}
+
+// Battle mount
+function mountLegacyBattleInApp({
+  root, subtitle, dragLayer,
+  getBattleState, setBattleState,
+  getViewRole, // "p1"|"p2"
+  appMeta,     // socket wrapper
+}) {
+  if (legacyInstance) legacyInstance.unmount();
+
+  const access = makeLegacyBattleZoneAccessors({ getBattleState, getViewRole });
+
+  const netAdapter = createNetworkAdapter({
+    getBattleState,
+    setBattleState,
+    invalidateUI: () => legacyInstance?.invalidate?.(),
+    sendIntent: (payload) => appMeta.sendIntent(payload),
+    getBaseVersion: () => (getBattleState()?.version ?? 0),
+    optimistic: true,
+  });
+
+  legacyInstance = window.LegacySandbox.mount({
+    root, subtitle, dragLayer,
+    initialState: getBattleState(),
+    ...access,
+    dispatch: netAdapter.dispatch,
+    // IMPORTANT: do not persist sandbox here
+    persistIntervalMs: 0,
+  });
+
+  legacyInstance.invalidate?.();
+}
+
+// When server broadcasts room_state, update battleState + re-render legacy
+function onRoomStateFromServer(roomState, setBattleState) {
+  const next = ensureBattleStateShape(roomState);
+  setBattleState(next);
+  legacyInstance?.invalidate?.();
+}
+    
+    
     function uid() {
       return (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
     }
@@ -1197,10 +1497,8 @@ function onBack() {
 }
 
 function mountLegacyBattleInApp() {
-  if (legacyBattleHandle) {
-    try { legacyBattleHandle.unmount?.(); } catch {}
-    legacyBattleHandle = null;
-  }
+  // prevent double-mount
+  if (legacyBattleHandle) return;
   if (!battleState) return;
 
   // load script once (reuse same legacySandbox.js)
@@ -1226,7 +1524,9 @@ function mountLegacyBattleInApp() {
     const dragLayer = document.getElementById("dragLayer");
     if (!dragLayer) throw new Error("Missing #dragLayer for battle mount");
 
-    // Adapter: map legacy zoneKey -> your battleState zones
+    // ----------------------------
+    // Zone adapters (read-only)
+    // ----------------------------
     const getArr = (zoneKey, opts2 = {}) => {
       const viewed = battleViewRole || session.role || "p1";
       const owner = opts2.playerKey || viewed;
@@ -1241,74 +1541,108 @@ function mountLegacyBattleInApp() {
       }
 
       if (zoneKey === "lands" || zoneKey === "permanents") {
-        // battlefield for the viewed role (bottom)
         return battleState.players?.[viewed]?.zones?.[zoneKey] || [];
       }
 
-      // private zones: by owner (defaults to viewed)
       return battleState.players?.[owner]?.zones?.[zoneKey] || [];
     };
 
-    const setArr = (zoneKey, arr, opts2 = {}) => {
-      const viewed = battleViewRole || session.role || "p1";
-      const owner = opts2.playerKey || viewed;
+    // NOTE: in battle, legacy should not mutate directly — use dispatch/intents.
+    const setArr = () => {};
 
-      if (zoneKey === "stack") {
-        battleState.sharedZones ||= {};
-        battleState.sharedZones.stack = arr;
+    // ----------------------------
+    // Dispatch -> battle intents
+    // ----------------------------
+    const dispatch = (action) => {
+      if (!action || !action.type) return;
+
+      // OPTIONAL optimistic apply (keeps UI snappy)
+      // This mutates local battleState so you see the change instantly.
+      try {
+        applyActionToState(battleState, action);
+      } catch {}
+
+      // Repaint legacy right away
+      legacyBattleHandle?.invalidate?.();
+
+      // Translate to your existing intent schema
+      if (action.type === "MOVE_CARD") {
+        battleClient.sendIntent("MOVE_CARD", {
+          cardId: action.cardId,
+          from: action.from,
+          to: action.to
+        });
         return;
       }
 
-      if (zoneKey === "opponentLands") {
-        battleState.players[roleOther(viewed)].zones.lands = arr;
-        return;
-      }
-      if (zoneKey === "opponentPermanents") {
-        battleState.players[roleOther(viewed)].zones.permanents = arr;
-        return;
-      }
-
-      if (zoneKey === "lands" || zoneKey === "permanents") {
-        battleState.players[viewed].zones[zoneKey] = arr;
+      if (action.type === "DRAW_CARD") {
+        battleClient.sendIntent("DRAW_CARD", {
+          count: 1,
+          owner: action.owner
+        });
         return;
       }
 
-      battleState.players[owner].zones[zoneKey] = arr;
+      if (action.type === "TOGGLE_TAP") {
+        battleClient.sendIntent("TOGGLE_TAP", {
+          cardId: action.cardId,
+          kind: action.kind
+        });
+        return;
+      }
+
+      if (action.type === "DECK_PLACE") {
+        battleClient.sendIntent("DECK_PLACE", {
+          cardId: action.cardId,
+          from: action.from,
+          owner: action.owner,
+          where: action.where
+        });
+        return;
+      }
+
+      if (action.type === "REORDER_ZONE") {
+        battleClient.sendIntent("REORDER_ZONE", {
+          owner: action.owner,
+          zone: action.zone,
+          ids: action.ids
+        });
+        return;
+      }
     };
 
+    // ----------------------------
+    // Mount legacy battle UI
+    // ----------------------------
     legacyBattleHandle = window.LegacySandbox.mount({
       root,
       subtitle,
       dragLayer,
 
-      // IMPORTANT: battle data model is owned by app.js, not legacy
       initialState: battleState,
 
-      // Tell legacy it’s in battle mode + which perspective is active
       getMode: () => "battle",
       getActivePlayerKey: () => (battleViewRole || session.role || "p1"),
-      setActivePlayerKey: (pk) => { battleViewRole = pk; renderApp(); },
-
-      // Core bindings
-      getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
-      setZoneArray: (zoneKey, arr, opts2) => { setArr(zoneKey, arr, opts2); renderApp(); },
-
-      // Visibility rules (match your current canSeeZone)
-      canSeeZone: (zoneKey) => {
-        // legacy will ask broadly; keep it simple:
-        // battlefield + stack visible, private zones only for viewed role
-        const viewed = battleViewRole || session.role || "p1";
-        if (zoneKey === "hand" || zoneKey === "deck" || zoneKey === "graveyard") return true; // since viewed is always the one shown
-        return true;
+      setActivePlayerKey: (pk) => {
+        battleViewRole = pk;
+        legacyBattleHandle?.invalidate?.();
       },
 
-      // Disable legacy’s localStorage saving loop for battle
+      getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
+      setZoneArray: setArr,
+
+      dispatch,
+
+      // Disable legacy persistence loop for battle
       persistIntervalMs: 0
     });
+
+    legacyBattleHandle.invalidate?.();
   }).catch((err) => {
     console.error("Failed to mount legacy battle", err);
   });
 }
+
     
 
 
@@ -1397,17 +1731,14 @@ function mountLegacyBattleInApp() {
       return;
     }
 
-// We HAVE battleState: render battle UI (network-wired)
+// We HAVE battleState: use the legacy battle UI (it owns the rendering loop)
 root.replaceChildren(wrap);
 
-wrap.appendChild(renderBoard());
-
-const panel = renderInspector();
-const deckPanel = renderDeckPlacementChooser();
-if (panel) root.appendChild(panel);
-if (deckPanel) root.appendChild(deckPanel);
+// Make sure legacy battle is mounted (it will render into root itself)
+mountLegacyBattleInApp();
 
 return;
+
 
   }
 
