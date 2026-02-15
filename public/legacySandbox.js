@@ -1536,7 +1536,7 @@ function renderFocus(zoneKey) {
       if (navigator.vibrate) navigator.vibrate(10);
     };
 
-    holdTimer = setTimeout(lift, 140);
+    holdTimer = setTimeout(lift, 320);
 
     const onMove = (ev) => {
       const dx = ev.clientX - start.x;
@@ -1637,11 +1637,10 @@ function attachTapStates(el, cardId) {
     timer = setTimeout(() => {
       const key = String(cardId);
 
-      // Dispatch path (authoritative / shared schema)
+      // Dispatch path
       if (dispatch) {
         if (tapCount >= 3) {
           emitAction({ type: "TOGGLE_TAP", cardId, kind: "tarped" });
-          // UI optimism: reflect immediately, then render() will reconcile anyway
           el.classList.toggle("tarped");
           el.classList.remove("tapped");
         } else if (tapCount === 2) {
@@ -1655,7 +1654,7 @@ function attachTapStates(el, cardId) {
         return;
       }
 
-      // ===== legacy local behavior =====
+      // Local legacy behavior
       state.tapped ||= {};
       state.tarped ||= {};
 
@@ -1686,17 +1685,21 @@ function attachTapStates(el, cardId) {
 
   el.addEventListener("pointerup", (e) => {
     if (!pointerStart) return;
+
     const dx = e.clientX - pointerStart.x;
     const dy = e.clientY - pointerStart.y;
     pointerStart = null;
 
+    // ignore if they actually moved (drag intent)
     if (Math.hypot(dx, dy) > tapMovePx) return;
+
     registerTap();
   });
 
-  // Fallback for browsers that synthesize click without reliable pointer events.
-  el.addEventListener("click", registerTap);
+  // ✅ IMPORTANT: no click fallback here.
+  // It causes double-counting on many browsers because click is synthesized after pointerup.
 }
+
 
 
 
