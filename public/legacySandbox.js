@@ -1478,8 +1478,7 @@ function renderFocus(zoneKey) {
 
 
   function onCardPointerDown(e) {
-    e.preventDefault();
-
+  
     const cardEl = e.currentTarget;
     const cardId = Number(cardEl.dataset.cardId);
     const fromZoneKey = cardEl.dataset.fromZoneKey;
