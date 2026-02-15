@@ -1311,24 +1311,33 @@ function onBack() {
     }
 
     // Mount into the SAME root/subtitle/topbar/back button that app.js already owns
-    legacySandboxHandle = window.LegacySandbox.mount({
-      root,
-      subtitle,
-      dragLayer: document.getElementById("dragLayer"), // make sure you have it in HTML
-      initialState,
-      sandboxPlayerId: session.playerId || null,
+   legacySandboxHandle = window.LegacySandbox.mount({
+  root,
+  subtitle,
+  dragLayer: document.getElementById("dragLayer"),
+  initialState,
+  sandboxPlayerId: session.playerId || null,
 
-      // optional: let legacy read mode/player if you want
-      getMode: () => "solo",
-      getActivePlayerKey: () => "p1",
+  getMode: () => "solo",
+  getActivePlayerKey: () => "p1",
 
-      // make sure app-level persistence stays the source of truth
-      onPersist: () => {
-        // pull state out of legacy if you want; if legacy mutates `initialState` object directly,
-        // sandboxState is already updated. If not, you can add a getter later.
-        persistPlayerSaveDebounced();
-      }
-    });
+  // ✅ allow legacy UI to apply actions (tap, move, draw, reorder, etc.)
+  dispatch: (action) => {
+    if (!action || !action.type) return;
+
+    // Apply to the SAME object legacy is rendering from
+    try { applyActionToState(sandboxState, action); } catch (e) { console.warn(e); }
+
+    // Persist + repaint
+    persistPlayerSaveDebounced();
+    legacySandboxHandle?.invalidate?.();
+  },
+
+  onPersist: () => {
+    persistPlayerSaveDebounced();
+  }
+});
+
   };
 
   script.onerror = () => {
