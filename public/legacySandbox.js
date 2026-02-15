@@ -39,10 +39,18 @@
           return state.zones[zoneKey];
         }
         // battle-like local default (still works standalone)
-        if (isSharedZone(zoneKey)) {
+        if (zoneKey === "stack") {
           state.sharedZones ||= {};
           state.sharedZones[zoneKey] ||= [];
           return state.sharedZones[zoneKey];
+        }
+        if (zoneKey === "opponentLands" || zoneKey === "opponentPermanents") {
+          const viewing = opts2.playerKey || (state.activePlayerKey || "p1");
+          const opponent = otherPlayerKey(viewing);
+          const p = getPlayer(opponent);
+          const realZone = zoneKey === "opponentLands" ? "lands" : "permanents";
+          p.zones[realZone] ||= [];
+          return p.zones[realZone];
         }
         const p = getPlayer(opts2.playerKey || (state.activePlayerKey || "p1"));
         p.zones[zoneKey] ||= [];
@@ -56,9 +64,17 @@
           state.zones[zoneKey] = arr;
           return;
         }
-        if (isSharedZone(zoneKey)) {
+        if (zoneKey === "stack") {
           state.sharedZones ||= {};
           state.sharedZones[zoneKey] = arr;
+          return;
+        }
+        if (zoneKey === "opponentLands" || zoneKey === "opponentPermanents") {
+          const viewing = opts2.playerKey || (state.activePlayerKey || "p1");
+          const opponent = otherPlayerKey(viewing);
+          const p = getPlayer(opponent);
+          const realZone = zoneKey === "opponentLands" ? "lands" : "permanents";
+          p.zones[realZone] = arr;
           return;
         }
         const p = getPlayer(opts2.playerKey || (state.activePlayerKey || "p1"));
@@ -169,12 +185,15 @@
     }
 
     function isSharedZone(zoneKey) {
-      return ["lands", "permanents", "stack", "opponentLands", "opponentPermanents"].includes(zoneKey);
+      return zoneKey === "stack";
     }
 
     function getZoneOwnerKey(zoneKey, opts2 = {}) {
       if (getMode() === "solo") return "solo";
       if (isSharedZone(zoneKey)) return "shared";
+      if (zoneKey === "opponentLands" || zoneKey === "opponentPermanents") {
+        return otherPlayerKey(opts2.playerKey || getActivePlayerKey());
+      }
       return opts2.playerKey || getActivePlayerKey();
     }
 
@@ -997,7 +1016,6 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
   };
 
   cardEl.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
 
     const pointerId = e.pointerId;
     try { cardEl.setPointerCapture(pointerId); } catch {}
@@ -1052,7 +1070,6 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
     holdTimer = setTimeout(lift, 2200);
 
     const onMove = (ev) => {
-      ev.preventDefault();
       lastClientX = ev.clientX;
 
       const dx = ev.clientX - start.x;
@@ -1080,6 +1097,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
 
       // Lift-mode ghost drag to zones
       if (inspectorDragging?.ghostEl) {
+        ev.preventDefault();
         positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
         const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
         syncDropTargetHighlights(overZoneKey);
@@ -1486,7 +1504,7 @@ function renderFocus(zoneKey) {
 
     // small press-hold before lifting
     const pointerId = e.pointerId;
-    cardEl.setPointerCapture(pointerId);
+    try { cardEl.setPointerCapture(pointerId); } catch {}
 
     const start = { x: e.clientX, y: e.clientY, t: performance.now() };
     let lifted = false;
@@ -1494,7 +1512,7 @@ function renderFocus(zoneKey) {
 
     const cancelAll = () => {
       clearTimeout(holdTimer);
-      cardEl.releasePointerCapture(pointerId);
+      try { cardEl.releasePointerCapture(pointerId); } catch {}
       cardEl.removeEventListener("pointermove", onMove);
       cardEl.removeEventListener("pointerup", onUp);
       cardEl.removeEventListener("pointercancel", onCancel);
@@ -1521,7 +1539,6 @@ function renderFocus(zoneKey) {
     holdTimer = setTimeout(lift, 140);
 
     const onMove = (ev) => {
-      ev.preventDefault();
       const dx = ev.clientX - start.x;
       const dy = ev.clientY - start.y;
 
@@ -1532,6 +1549,7 @@ function renderFocus(zoneKey) {
       }
 
       if (dragging?.ghostEl) {
+        ev.preventDefault();
         positionGhost(dragging.ghostEl, ev.clientX, ev.clientY);
         const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
         syncDropTargetHighlights(overZoneKey);
@@ -1578,6 +1596,7 @@ function hitTestZone(x, y) {
 
   for (const el of els) {
     if (!el) continue;
+    if (el.id === "dragLayer" || el.classList?.contains("dragGhost")) continue;
 
     // direct dropArea
     if (el.classList?.contains("dropArea") && el.dataset?.zoneKey) {
