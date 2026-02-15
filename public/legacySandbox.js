@@ -484,10 +484,12 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false, flipped = false 
   if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
   if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
 
-  if (!overlay) {
-    c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
-    c.addEventListener("click", (e) => e.stopPropagation());
-  }
+if (!overlay) {
+  c.style.touchAction = "none"; // ✅ CRITICAL: prevents browser scroll/zoom from killing pointer events
+  c.addEventListener("pointerdown", onCardPointerDown, { passive: false });
+  c.addEventListener("click", (e) => e.stopPropagation());
+}
+
 
   return c;
 }
@@ -1216,6 +1218,7 @@ function renderInspector(zoneKey) {
       const card = document.createElement("div");
       card.className = "inspectorCard";
       card.dataset.cardId = String(id);
+      card.style.touchAction = "none";
 
       // Art
       const img = document.createElement("img");
@@ -1542,13 +1545,15 @@ function renderFocus(zoneKey) {
       const dx = ev.clientX - start.x;
       const dy = ev.clientY - start.y;
 
-// If they move, we assume it's NOT a tap anymore — but we also
-// do NOT auto-lift into drag (mobile jitter kills double-tap).
-// Drag starts only via long-press (holdTimer).
-if (!lifted && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
-  clearTimeout(holdTimer); // cancel potential long-press drag
-  return;                  // let the gesture end naturally
+// ✅ Do NOT auto-lift into drag just because of tiny movement (mobile jitter).
+// But also do NOT cancel hold unless the user is clearly scrolling.
+if (!lifted) {
+  const movedFar = (Math.abs(dx) > 22 || Math.abs(dy) > 22);
+  if (movedFar) {
+    clearTimeout(holdTimer); // they’re likely scrolling, not trying to drag a card
+  }
 }
+
 
 
       if (dragging?.ghostEl) {
