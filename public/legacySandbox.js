@@ -117,14 +117,28 @@
       return { owner: forcedOwner || viewing, zone: zoneKey };
     }
 
-    function emitAction(action, fallbackFn) {
-      if (dispatch) {
-        dispatch(action);
-        return true;
-      }
-      if (typeof fallbackFn === "function") fallbackFn();
-      return false;
+   function emitAction(action, fallbackFn) {
+  if (dispatch) {
+    // Dispatch may be "authoritative" (host updates state) OR broken/not wired yet.
+    // We do optimistic fallback so the sandbox still works.
+    try { dispatch(action); } catch {}
+
+    if (typeof fallbackFn === "function") {
+      fallbackFn();            // ✅ local apply as fallback
+      persistSandboxForPlayer();
+      render();
     }
+    return true;
+  }
+
+  if (typeof fallbackFn === "function") {
+    fallbackFn();
+    persistSandboxForPlayer();
+    render();
+  }
+  return false;
+}
+
 
     
     
@@ -726,21 +740,38 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
     return;
   }
 
-  // Dispatch path: MOVE_CARD with explicit owners/zones
   if (dispatch) {
-    const from = resolveOwnerZone(fromZoneKey);
-    const to = resolveOwnerZone(toZoneKey);
+  const from = resolveOwnerZone(fromZoneKey);
+  const to = resolveOwnerZone(toZoneKey);
 
-    // Special: stack is shared; schema wants owner+zone in to/from objects
-    emitAction({
+  emitAction(
+    {
       type: "MOVE_CARD",
       cardId,
       from: { owner: from.owner, zone: from.zone },
       to: { owner: to.owner, zone: to.zone },
-    });
+    },
+    () => {
+      // ✅ local fallback mutation (same as legacy path)
+      const fromArr = getZoneArray(fromZoneKey);
+      const toArr = getZoneArray(toZoneKey);
+      const idx = fromArr.indexOf(cardId);
+      if (idx < 0) return;
 
-    return;
-  }
+      if (toZoneKey === "stack") {
+        fromArr.splice(idx, 1);
+        toArr.push(cardId);
+        return;
+      }
+
+      fromArr.splice(idx, 1);
+      toArr.push(cardId);
+    }
+  );
+
+  return;
+}
+
 
   // ===== legacy local mutation behavior =====
   const fromArr = getZoneArray(fromZoneKey);
@@ -1645,22 +1676,38 @@ function attachTapStates(el, cardId) {
     timer = setTimeout(() => {
       const key = String(cardId);
 
-      // Dispatch path
       if (dispatch) {
-        if (tapCount >= 3) {
-          emitAction({ type: "TOGGLE_TAP", cardId, kind: "tarped" });
-          el.classList.toggle("tarped");
-          el.classList.remove("tapped");
-        } else if (tapCount === 2) {
-          emitAction({ type: "TOGGLE_TAP", cardId, kind: "tapped" });
-          el.classList.toggle("tapped");
-          el.classList.remove("tarped");
-        }
+  const key = String(cardId);
 
-        tapCount = 0;
-        timer = null;
-        return;
+  if (tapCount >= 3) {
+    emitAction(
+      { type: "TOGGLE_TAP", cardId, kind: "tarped" },
+      () => {
+        state.tapped ||= {};
+        state.tarped ||= {};
+        const next = !state.tarped[key];
+        state.tarped[key] = next;
+        state.tapped[key] = false;
       }
+    );
+  } else if (tapCount === 2) {
+    emitAction(
+      { type: "TOGGLE_TAP", cardId, kind: "tapped" },
+      () => {
+        state.tapped ||= {};
+        state.tarped ||= {};
+        const next = !state.tapped[key];
+        state.tapped[key] = next;
+        state.tarped[key] = false;
+      }
+    );
+  }
+
+  tapCount = 0;
+  timer = null;
+  return;
+}
+
 
       // Local legacy behavior
       state.tapped ||= {};
@@ -1797,13 +1844,23 @@ function drawOneFromDeckWithAnimation() {
   // --- update state: draw TOP card and insert LEFTMOST in hand ---
   const cardId = deck[0];
 
-  if (dispatch) {
-    const owner = resolveOwnerZone("deck").owner; // viewing player in battle, "solo" in solo
-    emitAction({ type: "DRAW_CARD", owner });
-  } else {
-    deck.shift();
-    getZoneArray("hand").unshift(cardId); // ✅ leftmost, pushes others right
-  }
+ if (dispatch) {
+  const owner = resolveOwnerZone("deck").owner;
+  emitAction(
+    { type: "DRAW_CARD", owner },
+    () => {
+      const d = getZoneArray("deck", { playerKey: owner === "p1" || owner === "p2" ? owner : undefined });
+      const h = getZoneArray("hand", { playerKey: owner === "p1" || owner === "p2" ? owner : undefined });
+      if (!d.length) return;
+      const drawn = d.shift();
+      h.unshift(drawn);
+    }
+  );
+} else {
+  deck.shift();
+  getZoneArray("hand").unshift(cardId);
+}
+
 
   // Render new state so new hand layout exists in DOM
   render();
@@ -2129,14 +2186,11 @@ function renderTopPilesBar() {
 }
 
 
- function onPilePointerDown(e) {
-  e.preventDefault();
-
-  // If they press-hold a pile, we DON'T start dragging the pile.
-  // We just stop it from interfering with board gestures.
-  // (Later we could implement “drag pile” to mill etc.)
+function onPilePointerDown(e) {
+  // ✅ Do NOT preventDefault; it can stop click synthesis on mobile
   e.stopPropagation();
 }
+
 
 
 
