@@ -1520,6 +1520,10 @@ function mountLegacyBattleInApp() {
 
       getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
       setZoneArray: setArr,
+      getMarks: () => ({
+        tapped: battleState?.tapped || {},
+        tarped: battleState?.tarped || {}
+      }),
 
       dispatch,
 
@@ -1536,40 +1540,76 @@ function mountLegacyBattleInApp() {
     
 
 
+    let battleLobbyBusy = false;
+
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
       window.CardboardMeta.renderBattleLobby({
         host,
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
         openRooms,
+        isBusy: battleLobbyBusy,
         onRefreshRooms: async () => {
-          await battleClient.refreshRoomsList?.();
-          openRooms = battleClient.getOpenRooms?.() || openRooms;
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            await battleClient.refreshRoomsList?.();
+            openRooms = battleClient.getOpenRooms?.() || openRooms;
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onCreateRoom: async (requestedRoomCode) => {
-          const res = await battleClient.createRoom(requestedRoomCode);
-          if (!res?.ok) alert(res?.error || "Failed to create room");
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.createRoom(requestedRoomCode);
+            if (!res?.ok) alert(res?.error || "Failed to create room");
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onJoinRoom: async (code, preferredRole) => {
-          if (!code) return;
-          const res = await battleClient.joinRoom(code, preferredRole);
-          if (!res?.ok) alert(res?.error || "Join failed");
+          if (!code || battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.joinRoom(code, preferredRole);
+            if (!res?.ok) alert(res?.error || "Join failed");
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onDeleteRoom: async (code) => {
-          if (!code) return;
-          const res = await battleClient.deleteRoom(code);
-          if (!res?.ok) alert(res?.error || "Delete failed");
-          await battleClient.refreshRoomsList?.();
+          if (!code || battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.deleteRoom(code);
+            if (!res?.ok) alert(res?.error || "Delete failed");
+            await battleClient.refreshRoomsList?.();
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onDeleteAllRooms: async () => {
-          const res = await battleClient.deleteAllRooms();
-          if (!res?.ok) alert(res?.error || "Delete all failed");
-          await battleClient.refreshRoomsList?.();
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.deleteAllRooms();
+            if (!res?.ok) alert(res?.error || "Delete all failed");
+            await battleClient.refreshRoomsList?.();
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         }
       });
     }

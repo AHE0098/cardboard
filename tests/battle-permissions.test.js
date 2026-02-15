@@ -52,6 +52,35 @@ function mkRoom() {
 
 
 
+
+  const p2BattleCard = room.state.players.p2.zones.hand[0];
+  res = applyIntent(room, 'p2', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: p2BattleCard,
+      from: { owner: 'p2', zone: 'hand' },
+      to: { owner: 'p2', zone: 'lands' }
+    }
+  });
+  assert.equal(res.ok, true, 'p2 should move own card to battlefield for interaction tests');
+
+  res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: p2BattleCard,
+      from: { owner: 'p2', zone: 'lands' },
+      to: { owner: 'p1', zone: 'permanents' }
+    }
+  });
+  assert.equal(res.ok, true, 'p1 can move opponent battlefield card between battlefield zones');
+
+  res = applyIntent(room, 'p1', {
+    type: 'TOGGLE_TAP',
+    payload: { cardId: p2BattleCard, kind: 'tapped' }
+  });
+  assert.equal(res.ok, true, 'p1 can toggle opponent battlefield card');
+
+
   const toDeckCard = room.state.players.p1.zones.hand[0];
   res = applyIntent(room, 'p1', {
     type: 'DECK_PLACE',

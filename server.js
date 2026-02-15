@@ -50,6 +50,22 @@ function makePlayer(id = null, name = "") {
   return { id, name, zones: { hand, deck, graveyard: [], lands: [], permanents: [] } };
 }
 
+function ensurePlayerZones(player) {
+  const zones = player.zones || {};
+  zones.hand ||= [];
+  zones.deck ||= [];
+  zones.graveyard ||= [];
+  zones.lands ||= [];
+  zones.permanents ||= [];
+  player.zones = zones;
+  return player;
+}
+
+function clearSeat(room, role, waitingName) {
+  const existing = ensurePlayerZones(room.state.players[role] || makePlayer(null, waitingName));
+  room.state.players[role] = { ...existing, id: null, name: waitingName };
+}
+
 function makeRoom(creator, opts = {}) {
   const requested = normalizeRoomId(opts.requestedRoomId);
   const roomId = requested || code();
@@ -106,15 +122,19 @@ function validateZoneAccess(role, move) {
 
   if (!zoneExists(move.from.zone) || !zoneExists(move.to.zone)) return "Illegal zone";
 
-  if (!fromShared && move.from.owner !== role) return "Cannot move opponent card";
-  if (!toShared && move.to.owner !== role) return "Cannot move to opponent zone";
-
   const fromPrivate = PRIVATE_ZONES.includes(move.from.zone);
   const toPrivate = PRIVATE_ZONES.includes(move.to.zone);
+
+  // Private zones remain owner-only.
+  if (fromPrivate && move.from.owner !== role) return "Cannot move opponent card";
+  if (toPrivate && move.to.owner !== role) return "Cannot move to opponent zone";
+
+  // Keep cross-owner private moves blocked.
   if ((fromPrivate || toPrivate) && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
     return "Cross-owner private move blocked";
   }
 
+  // Battlefield/shared moves are intentionally free-for-all in 2P mode.
   return null;
 }
 
@@ -140,11 +160,16 @@ function applyIntent(room, role, intent) {
     if (!deck.length) return { ok: false, error: "Deck empty" };
     s.players[owner].zones.hand.unshift(deck.shift());
   } else if (type === "TOGGLE_TAP") {
-    const targetZone = Object.keys(s.players[role].zones).find((zone) => s.players[role].zones[zone].includes(payload.cardId));
-    const sharedHasCard = s.sharedZones.stack.includes(payload.cardId);
-    if (!targetZone && !sharedHasCard) return { ok: false, error: "Cannot toggle unowned card" };
+    const presentInAnyZone = ["p1", "p2"].some((pk) =>
+      Object.values(s.players[pk].zones).some((arr) => arr.includes(payload.cardId))
+    ) || s.sharedZones.stack.includes(payload.cardId);
+    if (!presentInAnyZone) return { ok: false, error: "Card not found" };
+
     const map = payload.kind === "tarped" ? s.tarped : s.tapped;
-    map[payload.cardId] = !map[payload.cardId];
+    const key = String(payload.cardId);
+    const next = !map[key] && !map[payload.cardId];
+    map[key] = next;
+    map[payload.cardId] = next;
   } else if (type === "MOVE_CARD") {
     const cardId = payload.cardId;
     const from = payload.from || {};
@@ -201,19 +226,17 @@ function createServer() {
       battle.emit("rooms_list", { rooms: getOpenRoomsList() });
     };
 
-    const detachFromRoomIfPresent = () => {
+    const detachFromRoomIfPresent = ({ releaseSeat = true } = {}) => {
       const pres = socketPresence.get(socket.id);
       if (!pres) return;
 
       const room = rooms.get(pres.roomId);
-      if (room) {
-        if (pres.role === "p2" || pres.role === "p1") {
-          // free seat, keep room open until explicitly deleted
-          const waitingName = pres.role === "p1" ? "Waiting for Player 1..." : "Waiting...";
-          room.state.players[pres.role] = makePlayer(null, waitingName);
-          room.state.version += 1;
-          battle.to(room.roomId).emit("room_state", { roomId: room.roomId, state: room.state });
-        }
+      if (room && releaseSeat && (pres.role === "p2" || pres.role === "p1")) {
+        // free seat but preserve board state so reconnects/replacements remain stable
+        const waitingName = pres.role === "p1" ? "Waiting for Player 1..." : "Waiting...";
+        clearSeat(room, pres.role, waitingName);
+        room.state.version += 1;
+        battle.to(room.roomId).emit("room_state", { roomId: room.roomId, state: room.state });
       }
 
       socket.leave(pres.roomId);
@@ -233,6 +256,8 @@ function createServer() {
 
     // Create a room, optionally with a requested code (from the same input as join)
     socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
+      detachFromRoomIfPresent();
+
       const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
       if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
 
@@ -244,6 +269,8 @@ function createServer() {
     });
 
     socket.on("join_room", ({ roomId, playerId, playerName, preferredRole }, ack) => {
+      detachFromRoomIfPresent();
+
       roomId = String(roomId || "").trim().toUpperCase();
       const room = rooms.get(roomId);
       if (!room) return ack?.({ ok: false, error: "Room not found" });
@@ -251,14 +278,30 @@ function createServer() {
       let role = getRole(room, playerId);
       if (!role) {
         const preferred = preferredRole === "p1" || preferredRole === "p2" ? preferredRole : null;
-        if (preferred && !room.state.players[preferred].id) {
-          room.state.players[preferred] = makePlayer(playerId, playerName);
+
+        if (preferred) {
+          if (room.state.players[preferred].id) {
+            return ack?.({ ok: false, error: `Seat ${preferred.toUpperCase()} is already taken` });
+          }
+          room.state.players[preferred] = ensurePlayerZones({
+            ...room.state.players[preferred],
+            id: playerId,
+            name: playerName || room.state.players[preferred].name
+          });
           role = preferred;
         } else if (!room.state.players.p2.id) {
-          room.state.players.p2 = makePlayer(playerId, playerName);
+          room.state.players.p2 = ensurePlayerZones({
+            ...room.state.players.p2,
+            id: playerId,
+            name: playerName || room.state.players.p2.name
+          });
           role = "p2";
         } else if (!room.state.players.p1.id) {
-          room.state.players.p1 = makePlayer(playerId, playerName);
+          room.state.players.p1 = ensurePlayerZones({
+            ...room.state.players.p1,
+            id: playerId,
+            name: playerName || room.state.players.p1.name
+          });
           role = "p1";
         } else {
           return ack?.({ ok: false, error: "Room full" });
@@ -298,7 +341,7 @@ function createServer() {
     });
 
     socket.on("disconnect", () => {
-      detachFromRoomIfPresent();
+      detachFromRoomIfPresent({ releaseSeat: false });
     });
 
     socket.on("intent", (intent) => {
