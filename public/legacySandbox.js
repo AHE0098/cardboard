@@ -1037,6 +1037,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
       ghost.textContent = cardId;
+      ghost.style.pointerEvents = "none";
       dragLayer.appendChild(ghost);
       positionGhost(ghost, e.clientX, e.clientY);
 
@@ -1506,6 +1507,7 @@ function renderFocus(zoneKey) {
       const ghost = document.createElement("div");
       ghost.className = "dragGhost";
       ghost.textContent = cardId;
+      ghost.style.pointerEvents = "none";
       dragLayer.appendChild(ghost);
       positionGhost(ghost, e.clientX, e.clientY);
 
