@@ -82,6 +82,7 @@
       }),
 
       canSeeZone: opts.canSeeZone || (() => true),
+      getMarks: opts.getMarks || (() => ({ tapped: state.tapped || {}, tarped: state.tarped || {} })),
       onPersist: opts.onPersist || (() => {}),
     };
 
@@ -190,6 +191,13 @@
     // --- helpers rewritten to go through api ---
     function getMode() { return api.getMode(); }
     function getActivePlayerKey() { return api.getActivePlayerKey(); }
+    function getMarkMaps() {
+      const marks = api.getMarks?.() || {};
+      return {
+        tapped: marks.tapped || {},
+        tarped: marks.tarped || {}
+      };
+    }
 
     function getPlayer(playerKey = getActivePlayerKey()) {
       state.players ||= {};
@@ -495,8 +503,9 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false, flipped = false 
     c.appendChild(pt);
   }
 
-  if (state.tapped?.[String(cardId)]) c.classList.add("tapped");
-  if (state.tarped?.[String(cardId)]) c.classList.add("tarped");
+  const marks = getMarkMaps();
+  if (marks.tapped?.[String(cardId)]) c.classList.add("tapped");
+  if (marks.tarped?.[String(cardId)]) c.classList.add("tarped");
 
 if (!overlay) {
   c.style.touchAction = "none"; // ✅ CRITICAL: prevents browser scroll/zoom from killing pointer events
@@ -1282,8 +1291,9 @@ function renderInspector(zoneKey) {
       // allow tap/tarp from inspector too (not in hand)
       if (zoneKey !== "hand") attachTapStates(card, id);
 
-      if (state.tapped?.[String(id)]) card.classList.add("tapped");
-      if (state.tarped?.[String(id)]) card.classList.add("tarped");
+      const marks = getMarkMaps();
+      if (marks.tapped?.[String(id)]) card.classList.add("tapped");
+      if (marks.tarped?.[String(id)]) card.classList.add("tarped");
 
       track.appendChild(card);
     });
@@ -1683,22 +1693,20 @@ function attachTapStates(el, cardId) {
     emitAction(
       { type: "TOGGLE_TAP", cardId, kind: "tarped" },
       () => {
-        state.tapped ||= {};
-        state.tarped ||= {};
-        const next = !state.tarped[key];
-        state.tarped[key] = next;
-        state.tapped[key] = false;
+        const marks = getMarkMaps();
+        const next = !marks.tarped[key];
+        marks.tarped[key] = next;
+        marks.tapped[key] = false;
       }
     );
   } else if (tapCount === 2) {
     emitAction(
       { type: "TOGGLE_TAP", cardId, kind: "tapped" },
       () => {
-        state.tapped ||= {};
-        state.tarped ||= {};
-        const next = !state.tapped[key];
-        state.tapped[key] = next;
-        state.tarped[key] = false;
+        const marks = getMarkMaps();
+        const next = !marks.tapped[key];
+        marks.tapped[key] = next;
+        marks.tarped[key] = false;
       }
     );
   }
@@ -1710,20 +1718,19 @@ function attachTapStates(el, cardId) {
 
 
       // Local legacy behavior
-      state.tapped ||= {};
-      state.tarped ||= {};
+      const marks = getMarkMaps();
 
       if (tapCount >= 3) {
-        const next = !state.tarped[key];
-        state.tarped[key] = next;
-        state.tapped[key] = false;
+        const next = !marks.tarped[key];
+        marks.tarped[key] = next;
+        marks.tapped[key] = false;
 
         el.classList.toggle("tarped", next);
         el.classList.remove("tapped");
       } else if (tapCount === 2) {
-        const next = !state.tapped[key];
-        state.tapped[key] = next;
-        state.tarped[key] = false;
+        const next = !marks.tapped[key];
+        marks.tapped[key] = next;
+        marks.tarped[key] = false;
 
         el.classList.toggle("tapped", next);
         el.classList.remove("tarped");

@@ -122,15 +122,19 @@ function validateZoneAccess(role, move) {
 
   if (!zoneExists(move.from.zone) || !zoneExists(move.to.zone)) return "Illegal zone";
 
-  if (!fromShared && move.from.owner !== role) return "Cannot move opponent card";
-  if (!toShared && move.to.owner !== role) return "Cannot move to opponent zone";
-
   const fromPrivate = PRIVATE_ZONES.includes(move.from.zone);
   const toPrivate = PRIVATE_ZONES.includes(move.to.zone);
+
+  // Private zones remain owner-only.
+  if (fromPrivate && move.from.owner !== role) return "Cannot move opponent card";
+  if (toPrivate && move.to.owner !== role) return "Cannot move to opponent zone";
+
+  // Keep cross-owner private moves blocked.
   if ((fromPrivate || toPrivate) && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
     return "Cross-owner private move blocked";
   }
 
+  // Battlefield/shared moves are intentionally free-for-all in 2P mode.
   return null;
 }
 
@@ -156,11 +160,16 @@ function applyIntent(room, role, intent) {
     if (!deck.length) return { ok: false, error: "Deck empty" };
     s.players[owner].zones.hand.unshift(deck.shift());
   } else if (type === "TOGGLE_TAP") {
-    const targetZone = Object.keys(s.players[role].zones).find((zone) => s.players[role].zones[zone].includes(payload.cardId));
-    const sharedHasCard = s.sharedZones.stack.includes(payload.cardId);
-    if (!targetZone && !sharedHasCard) return { ok: false, error: "Cannot toggle unowned card" };
+    const presentInAnyZone = ["p1", "p2"].some((pk) =>
+      Object.values(s.players[pk].zones).some((arr) => arr.includes(payload.cardId))
+    ) || s.sharedZones.stack.includes(payload.cardId);
+    if (!presentInAnyZone) return { ok: false, error: "Card not found" };
+
     const map = payload.kind === "tarped" ? s.tarped : s.tapped;
-    map[payload.cardId] = !map[payload.cardId];
+    const key = String(payload.cardId);
+    const next = !map[key] && !map[payload.cardId];
+    map[key] = next;
+    map[payload.cardId] = next;
   } else if (type === "MOVE_CARD") {
     const cardId = payload.cardId;
     const from = payload.from || {};

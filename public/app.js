@@ -1520,6 +1520,10 @@ function mountLegacyBattleInApp() {
 
       getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
       setZoneArray: setArr,
+      getMarks: () => ({
+        tapped: battleState?.tapped || {},
+        tarped: battleState?.tarped || {}
+      }),
 
       dispatch,
 
