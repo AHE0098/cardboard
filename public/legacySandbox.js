@@ -1067,7 +1067,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
       if (navigator.vibrate) navigator.vibrate(10);
     };
 
-    holdTimer = setTimeout(lift, 2200);
+    holdTimer = setTimeout(lift, 260);
 
     const onMove = (ev) => {
       lastClientX = ev.clientX;
@@ -1622,10 +1622,12 @@ function hitTestZone(x, y) {
 function attachTapStates(el, cardId) {
   let tapCount = 0;
   let timer = null;
+  let pointerStart = null;
 
   const windowMs = 420; // time window to detect 2 vs 3 taps
+  const tapMovePx = 10;
 
-  el.addEventListener("click", () => {
+  const registerTap = () => {
     if (dragging || inspectorDragging) return;
 
     tapCount++;
@@ -1676,7 +1678,24 @@ function attachTapStates(el, cardId) {
       tapCount = 0;
       timer = null;
     }, windowMs);
+  };
+
+  el.addEventListener("pointerdown", (e) => {
+    pointerStart = { x: e.clientX, y: e.clientY };
   });
+
+  el.addEventListener("pointerup", (e) => {
+    if (!pointerStart) return;
+    const dx = e.clientX - pointerStart.x;
+    const dy = e.clientY - pointerStart.y;
+    pointerStart = null;
+
+    if (Math.hypot(dx, dy) > tapMovePx) return;
+    registerTap();
+  });
+
+  // Fallback for browsers that synthesize click without reliable pointer events.
+  el.addEventListener("click", registerTap);
 }
 
 
