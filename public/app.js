@@ -155,24 +155,32 @@ function applyActionToState(state, action) {
       return;
     }
 
-    case "TOGGLE_TAP": {
-      const key = String(action.cardId);
-      state.tapped ||= {};
-      state.tarped ||= {};
+case "TOGGLE_TAP": {
+  const strKey = String(action.cardId);
+  const numKey = Number(action.cardId);
 
-      if (action.kind === "tarped") {
-        const next = !state.tarped[key];
-        state.tarped[key] = next;
-        if (next) state.tapped[key] = false;
-        return;
-      }
+  state.tapped ||= {};
+  state.tarped ||= {};
 
-      // tapped
-      const next = !state.tapped[key];
-      state.tapped[key] = next;
-      if (next) state.tarped[key] = false;
-      return;
-    }
+  const setBoth = (obj, val) => {
+    obj[strKey] = val;
+    if (Number.isFinite(numKey)) obj[numKey] = val;
+  };
+
+  if (action.kind === "tarped") {
+    const next = !state.tarped[strKey] && !state.tarped[numKey];
+    setBoth(state.tarped, next);
+    if (next) setBoth(state.tapped, false);
+    return;
+  }
+
+  const next = !state.tapped[strKey] && !state.tapped[numKey];
+  setBoth(state.tapped, next);
+  if (next) setBoth(state.tarped, false);
+  return;
+}
+
+
 
     case "DECK_PLACE": {
       // Remove card from `from`, then place into deck of `owner`
