@@ -48,13 +48,29 @@ Screen + data architecture:
       getBattleState: () => battleState,
       getBattleRoomId: () => battleRoomId,
       getBattleViewRole: () => battleViewRole,
-      setBattleSession: ({ roomId, role, state, viewRole }) => {
-        battleRoomId = roomId;
-        battleState = state;
-        session.role = role;
-        battleViewRole = viewRole;
-        if (state) battleLobbyRoomsRequested = false;
-      },
+    setBattleSession: ({ roomId, role, state, viewRole }) => {
+  battleRoomId = roomId;
+
+  // IMPORTANT: keep object reference stable so legacy UI updates correctly
+  if (state) {
+    if (battleState && typeof battleState === "object") {
+      // wipe existing keys
+      Object.keys(battleState).forEach((k) => { delete battleState[k]; });
+      // copy new snapshot in
+      Object.assign(battleState, state);
+    } else {
+      battleState = state;
+    }
+    ensureBattleStateShape(battleState);
+    battleLobbyRoomsRequested = false;
+  } else {
+    battleState = null;
+  }
+
+  session.role = role;
+  battleViewRole = viewRole;
+},
+
       persistPlayerSaveDebounced,
      onBattleStateChanged: () => {
   // If legacy battle UI is mounted, just ask it to repaint
@@ -474,28 +490,43 @@ function onBack() {
       return `/cards/image${cardId}.png`;
     }
 
-    function canDragFrom(zoneKey, ownerRole = session.role) {
-      if (zoneKey === "opponentPermanents" || zoneKey === "opponentLands") return false;
-      if (appMode !== "battle") return true;
-      if (zoneKey === "deck") return false;
-      if (!canSeeZone(zoneKey, ownerRole)) return false;
-      if (!isSharedZone(zoneKey) && ownerRole !== session.role) return false;
-      return true;
-    }
+   function canDragFrom(zoneKey, ownerRole = session.role) {
+  // In solo: everything works as before
+  if (appMode !== "battle") return true;
 
-    function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
-      if (appMode !== "battle") return true;
-      if (toZone === "opponentPermanents" || toZone === "opponentLands") return false;
-      if (fromZone === "opponentPermanents" || fromZone === "opponentLands") return false;
-      if (!ALL_ZONES.includes(fromZone) || !ALL_ZONES.includes(toZone)) return false;
-      const fromShared = isSharedZone(fromZone);
-      const toShared = isSharedZone(toZone);
-      if (!fromShared && fromOwner !== session.role) return false;
-      if (toZone === "deck") return !toShared && toOwner === session.role;
-      if (!toShared && toOwner !== session.role) return false;
-      if (isPrivateZone(fromZone) && isPrivateZone(toZone)) return fromOwner === toOwner;
-      return true;
-    }
+  // Never drag FROM deck (we draw instead)
+  if (zoneKey === "deck") return false;
+
+  // Must be visible
+  if (!canSeeZone(zoneKey, ownerRole)) return false;
+
+  // Private zones stay private (only your own hand/deck/graveyard)
+  if (isPrivateZone(zoneKey)) return ownerRole === session.role;
+
+  // Battlefield + shared zones: allow for ANY owner
+  // (lands/permanents/opponentLands/opponentPermanents/stack etc.)
+  return true;
+}
+
+
+  function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
+  if (appMode !== "battle") return true;
+
+  if (!ALL_ZONES.includes(fromZone) || !ALL_ZONES.includes(toZone)) return false;
+
+  // Cannot drop TO deck unless it's your own deck (and deck placement chooser handles it)
+  if (toZone === "deck") return toOwner === session.role;
+
+  // Private zones: only interact if you are the owner of the destination
+  if (isPrivateZone(toZone)) return toOwner === session.role;
+
+  // If you're moving FROM a private zone, you must own it
+  if (isPrivateZone(fromZone) && fromOwner !== session.role) return false;
+
+  // Otherwise: battlefield + shared zones are free-for-all (by design request)
+  return true;
+}
+
 
     function toggleMark(cardId, kind) {
       const s = modeState();
