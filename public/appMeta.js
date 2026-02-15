@@ -222,26 +222,19 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     const createBtn = document.createElement("button");
     createBtn.className = "menuBtn";
     createBtn.textContent = "Create room";
-    createBtn.onclick = () => onCreateRoom(normalizeRoomCode(input.value));
+    createBtn.onclick = () => onCreateRoom(input.value.trim().toUpperCase());
     createBtn.disabled = !!isBusy;
 
     const joinBtn = document.createElement("button");
     joinBtn.className = "menuBtn";
     joinBtn.textContent = "Join room";
-    joinBtn.onclick = () => {
-      const roomCode = normalizeRoomCode(input.value);
-      const room = findOpenRoom(roomCode);
-      const safeRole = pickAvailableRole(room, roleSelect.value);
-      if (!roomCode || !safeRole) return;
-      roleSelect.value = safeRole;
-      onJoinRoom(roomCode, safeRole);
-    };
+    joinBtn.onclick = () => onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
     joinBtn.disabled = !!isBusy;
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "menuBtn";
     deleteBtn.textContent = "Delete this game";
-    deleteBtn.onclick = () => onDeleteRoom?.(normalizeRoomCode(input.value));
+    deleteBtn.onclick = () => onDeleteRoom?.(input.value.trim().toUpperCase());
     deleteBtn.disabled = !!isBusy;
 
     const deleteAllBtn = document.createElement("button");
@@ -313,8 +306,6 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     }
 
     listCard.append(listTitle, refreshBtn, list);
-
-    syncRoleSelect();
 
     if (isBusy) {
       const busy = document.createElement("div");
