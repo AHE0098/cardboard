@@ -162,7 +162,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
 }
 
 
-  function renderBattleLobby({ host, lastBattleRoomId, openRooms = [], onCreateRoom, onJoinRoom, onRefreshRooms, onDeleteRoom, onDeleteAllRooms }) {
+  function renderBattleLobby({ host, lastBattleRoomId, openRooms = [], isBusy = false, onCreateRoom, onJoinRoom, onRefreshRooms, onDeleteRoom, onDeleteAllRooms }) {
     const card = document.createElement("div");
     card.className = "menuCard";
     card.innerHTML = "<h3>Battle Room</h3>";
@@ -183,21 +183,25 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     createBtn.className = "menuBtn";
     createBtn.textContent = "Create room";
     createBtn.onclick = () => onCreateRoom(input.value.trim().toUpperCase());
+    createBtn.disabled = !!isBusy;
 
     const joinBtn = document.createElement("button");
     joinBtn.className = "menuBtn";
     joinBtn.textContent = "Join room";
     joinBtn.onclick = () => onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
+    joinBtn.disabled = !!isBusy;
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "menuBtn";
     deleteBtn.textContent = "Delete this game";
     deleteBtn.onclick = () => onDeleteRoom?.(input.value.trim().toUpperCase());
+    deleteBtn.disabled = !!isBusy;
 
     const deleteAllBtn = document.createElement("button");
     deleteAllBtn.className = "menuBtn";
     deleteAllBtn.textContent = "Delete all games";
     deleteAllBtn.onclick = () => onDeleteAllRooms?.();
+    deleteAllBtn.disabled = !!isBusy;
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
@@ -220,6 +224,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     refreshBtn.style.marginTop = "8px";
     refreshBtn.textContent = "Refresh open games";
     refreshBtn.onclick = () => onRefreshRooms?.();
+    refreshBtn.disabled = !!isBusy;
 
     const list = document.createElement("div");
     list.style.marginTop = "8px";
@@ -239,13 +244,13 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
         const joinP1 = document.createElement("button");
         joinP1.className = "menuBtn";
         joinP1.textContent = `Join ${room.roomId} as P1`;
-        joinP1.disabled = !!room.p1;
+        joinP1.disabled = !!room.p1 || !!isBusy;
         joinP1.onclick = () => onJoinRoom(room.roomId, "p1");
 
         const joinP2 = document.createElement("button");
         joinP2.className = "menuBtn";
         joinP2.textContent = `Join ${room.roomId} as P2`;
-        joinP2.disabled = !!room.p2;
+        joinP2.disabled = !!room.p2 || !!isBusy;
         joinP2.onclick = () => onJoinRoom(room.roomId, "p2");
 
         row.append(title, joinP1, joinP2);
@@ -254,6 +259,14 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     }
 
     listCard.append(listTitle, refreshBtn, list);
+
+    if (isBusy) {
+      const busy = document.createElement("div");
+      busy.className = "zoneMeta";
+      busy.style.marginTop = "8px";
+      busy.textContent = "Working… please wait";
+      card.appendChild(busy);
+    }
 
     card.append(input, roleSelect, createBtn, joinBtn, deleteBtn, deleteAllBtn, hint, listCard);
     host.appendChild(card);
