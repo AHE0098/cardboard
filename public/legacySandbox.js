@@ -2126,7 +2126,12 @@ render();
     // ============================
 
     // Mount returns an unmount cleanup
-    return {
+      return {
+      invalidate() {
+        // Host can call this after authoritative room_state updates
+        try { updateSubtitle(); } catch {}
+        try { render(); } catch {}
+      },
       unmount() {
         try { if (intervalId) clearInterval(intervalId); } catch {}
         try {
@@ -2136,9 +2141,6 @@ render();
           if (bo) bo.remove();
           const dc = document.getElementById("deckChoiceOverlay");
           if (dc) dc.remove();
-          // topPiles host might be owned by app.js in your new architecture,
-          // so only remove if you are sure legacy created it:
-          // const tp = document.getElementById("topPiles"); if (tp) tp.remove();
         } catch {}
         try { root.replaceChildren(); } catch {}
       }
