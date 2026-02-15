@@ -1539,13 +1539,16 @@ function renderFocus(zoneKey) {
     };
 
     const onUp = (ev) => {
-      ev.preventDefault();
       clearTimeout(holdTimer);
 
       if (!lifted || !dragging) {
+        // Keep native click synthesis for tap/double-tap interactions
+        // when no drag action was started.
         cancelAll();
         return;
       }
+
+      ev.preventDefault();
 
       const dropZoneKey = hitTestZone(ev.clientX, ev.clientY);
       finalizeDrop(dropZoneKey);
