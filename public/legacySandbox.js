@@ -69,6 +69,49 @@
       onPersist: opts.onPersist || (() => {}),
     };
 
+    // ============================
+    // DISPATCH SUPPORT (Option A)
+    // ============================
+    const dispatch = typeof opts.dispatch === "function" ? opts.dispatch : null;
+
+    function otherPlayerKey(pk) {
+      return pk === "p1" ? "p2" : "p1";
+    }
+
+    // Map UI zoneKeys to canonical action zones + owners.
+    // Owners: "solo" | "shared" | "p1" | "p2"
+    function resolveOwnerZone(zoneKey, opts2 = {}) {
+      const mode = getMode();
+      const viewing = getActivePlayerKey();
+      const other = otherPlayerKey(viewing);
+
+      // Canonicalize opponent mirror zones -> real zone + other owner
+      if (zoneKey === "opponentLands") return { owner: mode === "solo" ? "solo" : other, zone: "lands" };
+      if (zoneKey === "opponentPermanents") return { owner: mode === "solo" ? "solo" : other, zone: "permanents" };
+
+      // Shared stack
+      if (zoneKey === "stack") return { owner: mode === "solo" ? "solo" : "shared", zone: "stack" };
+
+      // In solo, everything is owned by "solo"
+      if (mode === "solo") return { owner: "solo", zone: zoneKey };
+
+      // Battle-like: default to currently viewed player for non-shared zones
+      // (hand/deck/graveyard/lands/permanents)
+      const forcedOwner = opts2.owner; // optional override if host wants
+      return { owner: forcedOwner || viewing, zone: zoneKey };
+    }
+
+    function emitAction(action, fallbackFn) {
+      if (dispatch) {
+        dispatch(action);
+        return true;
+      }
+      if (typeof fallbackFn === "function") fallbackFn();
+      return false;
+    }
+
+    
+    
     // --- sandbox persistence wiring (optional; host can disable/replace) ---
     const sandboxPlayerId = opts.sandboxPlayerId ?? window.__CB_PLAYER_ID ?? null;
     let sandboxSaveTimer = null;
@@ -645,30 +688,57 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
 
   ensureZoneArrays();
 
+  // If moving INTO deck, we need chooser (top/bottom).
+  // In dispatch mode: do NOT mutate now; chooser will dispatch DECK_PLACE on commit.
+  if (toZoneKey === "deck" && fromZoneKey !== "deck") {
+    if (dispatch) {
+      openDeckPlacementChooser(cardId, fromZoneKey);
+      return;
+    }
+
+    // legacy local behavior
+    const fromArr = getZoneArray(fromZoneKey);
+    const idx = fromArr.indexOf(cardId);
+    if (idx < 0) return;
+    fromArr.splice(idx, 1);
+    openDeckPlacementChooser(cardId, fromZoneKey);
+    return;
+  }
+
+  // Dispatch path: MOVE_CARD with explicit owners/zones
+  if (dispatch) {
+    const from = resolveOwnerZone(fromZoneKey);
+    const to = resolveOwnerZone(toZoneKey);
+
+    // Special: stack is shared; schema wants owner+zone in to/from objects
+    emitAction({
+      type: "MOVE_CARD",
+      cardId,
+      from: { owner: from.owner, zone: from.zone },
+      to: { owner: to.owner, zone: to.zone },
+    });
+
+    return;
+  }
+
+  // ===== legacy local mutation behavior =====
   const fromArr = getZoneArray(fromZoneKey);
   const toArr = getZoneArray(toZoneKey);
 
   const idx = fromArr.indexOf(cardId);
   if (idx < 0) return;
 
-  // Special: moving INTO deck triggers placement chooser
-  if (toZoneKey === "deck" && fromZoneKey !== "deck") {
-    fromArr.splice(idx, 1);
-    openDeckPlacementChooser(cardId, fromZoneKey);
-    return;
-  }
-
-  fromArr.splice(idx, 1);
-
   // Special: stack always receives cards "on top"
   if (toZoneKey === "stack") {
+    fromArr.splice(idx, 1);
     toArr.push(cardId); // top = end of array
     return;
   }
 
-  // default placement
+  fromArr.splice(idx, 1);
   toArr.push(cardId);
 }
+
   
 
 function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
@@ -817,12 +887,20 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
     }
 
     // commit new order to state
+        // commit new order to state
     if (trackEl) {
       const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
         .map(el => Number(el.dataset.cardId))
         .filter(n => Number.isFinite(n));
-      setZoneArray(fromZoneKey, ids, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
+
+      if (dispatch) {
+        const r = resolveOwnerZone(fromZoneKey);
+        emitAction({ type: "REORDER_ZONE", owner: r.owner, zone: r.zone, ids });
+      } else {
+        setZoneArray(fromZoneKey, ids, { playerKey: ownerKey === "shared" ? undefined : ownerKey });
+      }
     }
+
 
     // optional: center the card that was dragged
     if (CENTER_ON_DROP && draggingEl) {
@@ -1529,17 +1607,34 @@ function attachTapStates(el, cardId) {
 
     tapCount++;
 
-    // restart the decision timer on every tap
     if (timer) clearTimeout(timer);
 
     timer = setTimeout(() => {
       const key = String(cardId);
+
+      // Dispatch path (authoritative / shared schema)
+      if (dispatch) {
+        if (tapCount >= 3) {
+          emitAction({ type: "TOGGLE_TAP", cardId, kind: "tarped" });
+          // UI optimism: reflect immediately, then render() will reconcile anyway
+          el.classList.toggle("tarped");
+          el.classList.remove("tapped");
+        } else if (tapCount === 2) {
+          emitAction({ type: "TOGGLE_TAP", cardId, kind: "tapped" });
+          el.classList.toggle("tapped");
+          el.classList.remove("tarped");
+        }
+
+        tapCount = 0;
+        timer = null;
+        return;
+      }
+
+      // ===== legacy local behavior =====
       state.tapped ||= {};
       state.tarped ||= {};
 
-      // Resolve tapCount into action
       if (tapCount >= 3) {
-        // TRIPLE TAP: toggle tarped, clear tapped
         const next = !state.tarped[key];
         state.tarped[key] = next;
         state.tapped[key] = false;
@@ -1547,7 +1642,6 @@ function attachTapStates(el, cardId) {
         el.classList.toggle("tarped", next);
         el.classList.remove("tapped");
       } else if (tapCount === 2) {
-        // DOUBLE TAP: toggle tapped, clear tarped
         const next = !state.tapped[key];
         state.tapped[key] = next;
         state.tarped[key] = false;
@@ -1561,6 +1655,7 @@ function attachTapStates(el, cardId) {
     }, windowMs);
   });
 }
+
 
 
 
@@ -1648,11 +1743,18 @@ function drawOneFromDeckWithAnimation() {
 
   // --- update state: draw TOP card and insert LEFTMOST in hand ---
   const cardId = deck[0];
-  deck.shift();
-  getZoneArray("hand").unshift(cardId); // ✅ leftmost, pushes others right
+
+  if (dispatch) {
+    const owner = resolveOwnerZone("deck").owner; // viewing player in battle, "solo" in solo
+    emitAction({ type: "DRAW_CARD", owner });
+  } else {
+    deck.shift();
+    getZoneArray("hand").unshift(cardId); // ✅ leftmost, pushes others right
+  }
 
   // Render new state so new hand layout exists in DOM
   render();
+
 
   // Hide real hand cards during animation to avoid “double”
   const handZone = document.querySelector(`.zone-hand${ownerSel}`);
@@ -1776,10 +1878,14 @@ function animateCardFlight(cardId, fromRect, toEl, done) {
 function openDeckPlacementChooser(cardId, fromZoneKey) {
   ensureZoneArrays();
 
-  // Remove from its origin immediately (so it feels committed)
-  const fromArr = getZoneArray(fromZoneKey);
-  const idx = fromArr.indexOf(cardId);
-  if (idx >= 0) fromArr.splice(idx, 1);
+   // Remove from origin immediately ONLY in legacy local mode.
+  // In dispatch mode, we keep state unchanged until commit() emits DECK_PLACE.
+  if (!dispatch) {
+    const fromArr = getZoneArray(fromZoneKey);
+    const idx = fromArr.indexOf(cardId);
+    if (idx >= 0) fromArr.splice(idx, 1);
+  }
+
 
   // Build overlay
   const ov = document.createElement("div");
@@ -1816,21 +1922,37 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   ov.appendChild(btnRow);
   document.body.appendChild(ov);
 
-  const commit = (where) => {
-    const deck = getZoneArray("deck");
-    if (where === "top") deck.unshift(cardId);
-    else deck.push(cardId);
+   const commit = (where) => {
+    if (dispatch) {
+      const fromR = resolveOwnerZone(fromZoneKey);
+      const deckR = resolveOwnerZone("deck"); // owner of the deck we are placing into
+
+      emitAction({
+        type: "DECK_PLACE",
+        cardId,
+        from: { owner: fromR.owner, zone: fromR.zone },
+        owner: deckR.owner,
+        where: where === "top" ? "top" : "bottom",
+      });
+    } else {
+      const deck = getZoneArray("deck");
+      if (where === "top") deck.unshift(cardId);
+      else deck.push(cardId);
+    }
 
     ov.remove();
     render();
   };
 
   const cancel = () => {
-    // If they back out, put it back where it came from (end)
-    getZoneArray(fromZoneKey).push(cardId);
+    if (!dispatch) {
+      // If they back out, put it back where it came from (end)
+      getZoneArray(fromZoneKey).push(cardId);
+    }
     ov.remove();
     render();
   };
+
 
   btnTop.addEventListener("click", (e) => { e.stopPropagation(); commit("top"); });
   btnBottom.addEventListener("click", (e) => { e.stopPropagation(); commit("bottom"); });
