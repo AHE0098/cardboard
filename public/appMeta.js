@@ -179,6 +179,46 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       <option value="p1">Join as Player 1</option>
     `;
 
+    const normalizeRoomCode = (value) => String(value || "").trim().toUpperCase();
+    const findOpenRoom = (code) => openRooms.find((r) => r.roomId === normalizeRoomCode(code));
+
+    const pickAvailableRole = (room, preferred) => {
+      if (!room) return preferred;
+      const wantP1 = preferred === "p1";
+      const wantP2 = preferred === "p2";
+      if (wantP1) {
+        if (!room.p1) return "p1";
+        if (!room.p2) return "p2";
+        return null;
+      }
+      if (wantP2) {
+        if (!room.p2) return "p2";
+        if (!room.p1) return "p1";
+        return null;
+      }
+      if (!room.p2) return "p2";
+      if (!room.p1) return "p1";
+      return null;
+    };
+
+    const syncRoleSelect = () => {
+      const room = findOpenRoom(input.value);
+      const p1Opt = roleSelect.querySelector('option[value="p1"]');
+      const p2Opt = roleSelect.querySelector('option[value="p2"]');
+      if (!p1Opt || !p2Opt) return;
+
+      if (!room) {
+        p1Opt.disabled = false;
+        p2Opt.disabled = false;
+        return;
+      }
+
+      p1Opt.disabled = !!room.p1;
+      p2Opt.disabled = !!room.p2;
+      const nextRole = pickAvailableRole(room, roleSelect.value);
+      if (nextRole) roleSelect.value = nextRole;
+    };
+
     const createBtn = document.createElement("button");
     createBtn.className = "menuBtn";
     createBtn.textContent = "Create room";
@@ -204,8 +244,15 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     deleteAllBtn.disabled = !!isBusy;
 
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
+      if (e.key !== "Enter") return;
+      const roomCode = normalizeRoomCode(input.value);
+      const room = findOpenRoom(roomCode);
+      const safeRole = pickAvailableRole(room, roleSelect.value);
+      if (!roomCode || !safeRole) return;
+      roleSelect.value = safeRole;
+      onJoinRoom(roomCode, safeRole);
     });
+    input.addEventListener("input", syncRoleSelect);
 
     const hint = document.createElement("div");
     hint.className = "zoneMeta";
