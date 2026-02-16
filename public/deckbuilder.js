@@ -23,18 +23,38 @@
     return Math.max(lo, Math.min(hi, n));
   }
 
-  function getDeckbuilderCardPool(allCards) {
-    return (Array.isArray(allCards) ? allCards : [])
-      .map((card) => ({
-        id: Number(card?.id),
-        name: String(card?.name || `Card ${card?.id ?? "?"}`),
-        cost: Number(card?.cost),
-        power: Number(card?.power),
-        toughness: Number(card?.toughness),
-        value: Number(card?.value ?? 0)
-      }))
-      .filter((card) => /^\d+$/.test(String(card.id)) && /^\d+$/.test(String(card.cost)) && Number.isFinite(card.power) && Number.isFinite(card.toughness) && Number.isFinite(card.value));
-  }
+ function getDeckbuilderCardPool(allCards) {
+  // Accept either array or object-map like window.CARD_REPO
+  const entries = Array.isArray(allCards)
+    ? allCards.map((c) => [c?.id, c])
+    : (allCards && typeof allCards === "object")
+      ? Object.entries(allCards)
+      : [];
+
+  // Convert "cost" safely to a number
+  const toNum = (x, fallback = 0) => {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  return entries
+    .map(([idRaw, card]) => ({
+      id: String(idRaw), // keep string IDs (supports "2000_1")
+      name: String(card?.name || `Card ${idRaw ?? "?"}`),
+      cost: toNum(card?.cost, 0),
+      power: toNum(card?.power, 0),
+      toughness: toNum(card?.toughness, 0),
+      value: toNum(card?.value, 0)
+    }))
+    .filter((c) =>
+      c.id &&               // must exist
+      Number.isFinite(c.cost) &&
+      Number.isFinite(c.power) &&
+      Number.isFinite(c.toughness) &&
+      Number.isFinite(c.value)
+    );
+}
+
 
   function hashSeed(input) {
     const str = String(input || "1337");
