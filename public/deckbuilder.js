@@ -277,7 +277,15 @@
   function buildDeck(settingsInput, allCards) {
     const startedAt = (typeof performance !== "undefined" ? performance.now() : Date.now());
     const safe = normalizeSettings(settingsInput);
-    const inspected = analyzeCardPool(allCards);
+    const cardsSource =
+  allCards ??
+  window.CARD_REPO ??
+  window.CARD_DB ??
+  window.CARDS ??
+  null;
+
+const inspected = analyzeCardPool(cardsSource);
+
     const pool = inspected.pool.filter((c) => c.type !== "land");
     const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
     const selectedSet = new Set(safe.colorsSelected.filter((c) => c !== "C"));
@@ -622,7 +630,15 @@
 
   function renderDeckbuilder(rootNode, state, deps = {}) {
     const workingState = normalizeState(state);
-    const pool = getDeckbuilderCardPool(deps.allCards);
+    const cardsSource =
+  deps.allCards ??
+  window.CARD_REPO ??
+  window.CARD_DB ??
+  window.CARDS ??
+  null;
+
+const pool = getDeckbuilderCardPool(cardsSource);
+
     const poolById = Object.fromEntries(pool.filter((c) => c.type !== "land").map((c) => [c.id, c]));
     if (Array.isArray(deps.savedDecks)) workingState.savedDecks = deps.savedDecks;
     if (typeof deps.lastSelectedDeckId === "string") workingState.lastSelectedDeckId = deps.lastSelectedDeckId;
