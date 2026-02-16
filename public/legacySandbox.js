@@ -1517,7 +1517,7 @@ function renderFocus(zoneKey) {
   board.className = "board focusBoard";
 
   // TOP (mirrored opponent battlefield)
-  ["opponentPermanents", "opponentLands"].forEach((k) => {
+  ["opponentLands", "opponentPermanents"].forEach((k) => {
     const area = renderDropArea(k);
     if (k === zoneKey) area.classList.add("isFocusZone");
     board.appendChild(area);

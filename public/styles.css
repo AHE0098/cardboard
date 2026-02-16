@@ -1539,6 +1539,18 @@ body.isFocus #topPiles{
 .dropArea.zone-opponentLands .miniCard.tapped{
   margin-left: -34px !important;
 }
+
+/* Opponent row is already rotated 180 via .slotRow, so card transforms here are inverse-corrected
+   to produce absolute orientations on screen:
+   - double tap => 90deg
+   - triple tap => 180deg
+   - untapped/untarped => opponent default (180deg) */
+.dropArea.isOpponentZone .miniCard.tapped{
+  transform: rotate(-90deg) translateY(-6px) !important;
+}
+.dropArea.isOpponentZone .miniCard.tarped{
+  transform: rotate(0deg) !important;
+}
 .dropArea.zone-opponentLands .miniCard:first-child{
   margin-left: 0 !important;
 }

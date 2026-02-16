@@ -34,6 +34,17 @@ function mkRoom() {
   });
   assert.equal(res.ok, false, 'p1 cannot move opponent private card');
 
+
+  res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: room.state.players.p1.zones.hand[0],
+      from: { owner: 'p1', zone: 'hand' },
+      to: { owner: 'p2', zone: 'permanents' }
+    }
+  });
+  assert.equal(res.ok, true, 'p1 can play from own hand directly to opponent battlefield zones');
+
   res = applyIntent(room, 'p1', {
     type: 'DRAW_CARD',
     payload: { owner: 'p2' }
