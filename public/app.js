@@ -34,7 +34,6 @@ Screen + data architecture:
     const PSTAR_B = 0.05;
     const PSTAR_MIN = 0.20;
     const PSTAR_MAX = 0.60;
-    const LAND_CARD_IDS = [101, 102, 103, 104, 105, 106];
 
     let uiScreen = "playerMenu";
     let appMode = null;
@@ -53,9 +52,7 @@ Screen + data architecture:
     let saveTimer = null;
 
     let sandboxState = createSandboxState();
-    let deckbuilderState = { settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve" }, lastDeck: null, selectedSavedDeckId: "", previewCard: null };
-    let savedDecks = [];
-    let battleDeckSelections = { p1: "", p2: "" };
+    let deckbuilderState = { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null };
 
     let battleState = null;
     let battleRoomId = "";
@@ -355,8 +352,6 @@ case "TOGGLE_TAP": {
           lastMode: appMode || prev.lastMode || "sandbox",
           sandboxState,
           deckbuilderState,
-          savedDecks,
-          lastSelectedDeckId: deckbuilderState.selectedSavedDeckId || prev.lastSelectedDeckId || "",
           lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
           updatedAt: Date.now()
         };
@@ -372,19 +367,9 @@ case "TOGGLE_TAP": {
       savePlayerRegistry();
       const save = loadPlayerSave(player.id);
       sandboxState = save.sandboxState ? clone(save.sandboxState) : createSandboxState();
-      savedDecks = Array.isArray(save.savedDecks) ? save.savedDecks : [];
       deckbuilderState = save.deckbuilderState
-        ? {
-          settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve", ...(save.deckbuilderState.settings || {}) },
-          lastDeck: save.deckbuilderState.lastDeck || null,
-          selectedSavedDeckId: save.deckbuilderState.selectedSavedDeckId || save.lastSelectedDeckId || "",
-          previewCard: null
-        }
-        : { settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve" }, lastDeck: null, selectedSavedDeckId: save.lastSelectedDeckId || "", previewCard: null };
-      battleDeckSelections = {
-        p1: deckbuilderState.selectedSavedDeckId || "",
-        p2: deckbuilderState.selectedSavedDeckId || ""
-      };
+        ? { settings: { ...DECKBUILDER_DEFAULTS, ...(save.deckbuilderState.settings || {}) }, lastDeck: save.deckbuilderState.lastDeck || null }
+        : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null };
       appMode = null;
       uiScreen = "mainMenu";
       renderApp();
@@ -514,108 +499,6 @@ function onBack() {
     function getCardCostString(cardId) {
       const data = window.CARD_REPO?.[String(cardId)] || {};
       return (data.costs ?? data.cost ?? "").toString().trim();
-    }
-
-    function getSavedDeckById(deckId) {
-      if (!deckId) return null;
-      return savedDecks.find((d) => d.deckId === deckId) || null;
-    }
-
-    function shuffleInPlace(arr, rng) {
-      for (let i = arr.length - 1; i > 0; i -= 1) {
-        const j = Math.floor(rng() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-      return arr;
-    }
-
-    function toSavedDeckCards(deck, seed = Date.now()) {
-      const nonlands = Array.isArray(deck?.nonlandIds) ? deck.nonlandIds.map((id) => Number(id)).filter(Number.isFinite) : [];
-      const lands = Math.max(0, Number(deck?.lands || 0));
-      const landCards = Array.from({ length: lands }, (_, i) => LAND_CARD_IDS[(i + Math.abs(Number(seed) || 0)) % LAND_CARD_IDS.length]);
-      return shuffleInPlace([...nonlands, ...landCards], makeRng(`save|${seed}|${nonlands.length}|${lands}`));
-    }
-
-    function fromSavedDeckCards(cards = []) {
-      const landSet = new Set(LAND_CARD_IDS.map(String));
-      const lands = cards.filter((id) => landSet.has(String(id))).length;
-      const nonlandIds = cards.filter((id) => !landSet.has(String(id))).map((id) => String(id));
-      return { nonlandIds, lands };
-    }
-
-    function upsertSavedDeck(entry) {
-      const idx = savedDecks.findIndex((d) => d.deckId === entry.deckId);
-      if (idx >= 0) savedDecks[idx] = entry;
-      else savedDecks.unshift(entry);
-      deckbuilderState.selectedSavedDeckId = entry.deckId;
-      persistPlayerSaveDebounced();
-    }
-
-    function renderMiniCard(cardId, cardData, opts = {}) {
-      const tile = document.createElement("button");
-      tile.className = `dbMiniCard ${opts.isLand ? "isLand" : ""}`;
-      tile.type = "button";
-      const cost = opts.isLand ? "LAND" : String(cardData?.cost ?? "");
-      const pt = opts.isLand ? "" : `${cardData?.power ?? ""}|${cardData?.toughness ?? ""}`;
-      tile.innerHTML = `<span class="dbMiniCost">${cost}</span><span class="dbMiniName">${cardData?.name || `Card ${cardId}`}</span>${pt ? `<span class="dbMiniPT">${pt}</span>` : ""}`;
-      tile.onclick = () => {
-        deckbuilderState.previewCard = {
-          id: String(cardId),
-          name: cardData?.name || `Card ${cardId}`,
-          color: cardData?.color || "",
-          cost: opts.isLand ? "LAND" : (cardData?.cost ?? ""),
-          power: opts.isLand ? "-" : cardData?.power,
-          toughness: opts.isLand ? "-" : cardData?.toughness,
-          value: opts.isLand ? 0 : (cardData?.value ?? 0),
-          type: opts.isLand ? "land" : "creature"
-        };
-        renderApp();
-      };
-      return tile;
-    }
-
-    function renderDeckOverview(deck, poolById, opts = {}) {
-      const view = opts.view === "grid" ? "grid" : "curve";
-      const rootEl = document.createElement("div");
-      rootEl.className = "dbOverview";
-      const cards = [];
-      (deck?.nonlandIds || []).forEach((id) => {
-        const card = poolById[String(id)];
-        if (card) cards.push({ id: String(id), card, isLand: false });
-      });
-      for (let i = 0; i < (deck?.lands || 0); i += 1) {
-        cards.push({ id: `LAND_${i + 1}`, card: { name: "Basic Land", cost: "", power: "", toughness: "", value: 0 }, isLand: true });
-      }
-
-      if (view === "grid") {
-        const grid = document.createElement("div");
-        grid.className = "dbMiniGrid";
-        cards.forEach((item) => grid.appendChild(renderMiniCard(item.id, item.card, { isLand: item.isLand })));
-        rootEl.appendChild(grid);
-        return rootEl;
-      }
-
-      const buckets = { "0": [], "1": [], "2": [], "3": [], "4": [], "5": [], "6+": [] };
-      cards.forEach((item) => {
-        if (item.isLand) {
-          buckets["0"].push(item);
-          return;
-        }
-        const k = item.card.cost >= 6 ? "6+" : String(item.card.cost);
-        buckets[k] ||= [];
-        buckets[k].push(item);
-      });
-      ["0", "1", "2", "3", "4", "5", "6+"].forEach((k) => {
-        const group = document.createElement("div");
-        group.className = "dbOverviewGroup";
-        group.innerHTML = `<h4>Cost ${k} (${buckets[k].length})</h4>`;
-        const row = document.createElement("div");
-        row.className = "dbMiniGrid";
-        buckets[k].forEach((item) => row.appendChild(renderMiniCard(item.id, item.card, { isLand: item.isLand })));
-        group.appendChild(row);
-        rootEl.appendChild(group);
-      });
-      return rootEl;
     }
 
     // How to test (Deckbuilder v1):
@@ -866,37 +749,11 @@ function onBack() {
       buildBtn.textContent = "Build Deck";
       buildBtn.onclick = () => {
         state.lastDeck = buildDeck(state.settings);
-        state.previewCard = null;
         persistPlayerSaveDebounced();
         renderApp();
       };
 
-      const saveBtn = document.createElement("button");
-      saveBtn.className = "menuBtn";
-      saveBtn.textContent = "Save Deck";
-      saveBtn.onclick = () => {
-        if (!state.lastDeck) return alert("Build a deck first.");
-        const existing = getSavedDeckById(state.selectedSavedDeckId);
-        const suggested = existing?.name || `Deck ${new Date().toLocaleString()}`;
-        const name = (prompt("Deck name", suggested) || "").trim();
-        if (!name) return;
-        const now = Date.now();
-        const deckId = existing?.deckId || `dk_${new Date(now).toISOString()}_${uid().slice(0, 4)}`;
-        const cards = toSavedDeckCards(state.lastDeck, state.settings.seed);
-        const stats = state.lastDeck.stats || computeDeckStats(state.lastDeck, poolById);
-        upsertSavedDeck({
-          deckId,
-          name,
-          createdAt: existing?.createdAt || now,
-          updatedAt: now,
-          settingsSnapshot: { ...state.settings },
-          deck: { cards, lands: state.lastDeck.lands || 0, size: cards.length },
-          stats
-        });
-        renderApp();
-      };
-
-      controls.append(includeRow, seedInput, buildBtn, saveBtn);
+      controls.append(includeRow, seedInput, buildBtn);
       wrap.appendChild(controls);
 
       const out = document.createElement("div");
@@ -943,108 +800,8 @@ function onBack() {
           <h3>Deck List by Cost</h3>
           <div class="dbCosts">${groupHtml}</div>
         `;
-
-        const viewRow = document.createElement("div");
-        viewRow.className = "dbInline";
-        const curveBtn = document.createElement("button");
-        curveBtn.className = "menuBtn";
-        curveBtn.textContent = "Curve View";
-        const gridBtn = document.createElement("button");
-        gridBtn.className = "menuBtn";
-        gridBtn.textContent = "Grid View";
-        const setView = (v) => {
-          state.settings.overviewView = v;
-          persistPlayerSaveDebounced();
-          renderApp();
-        };
-        curveBtn.onclick = () => setView("curve");
-        gridBtn.onclick = () => setView("grid");
-        curveBtn.disabled = state.settings.overviewView === "curve";
-        gridBtn.disabled = state.settings.overviewView === "grid";
-        viewRow.append(curveBtn, gridBtn);
-
-        out.appendChild(viewRow);
-        const overviewTitle = document.createElement("h3");
-        overviewTitle.textContent = "Deck Overview";
-        out.appendChild(overviewTitle);
-        out.appendChild(renderDeckOverview(deck, poolById, { view: state.settings.overviewView || "curve" }));
       }
       wrap.appendChild(out);
-
-      const savedCard = document.createElement("div");
-      savedCard.className = "menuCard";
-      savedCard.innerHTML = "<h3>Saved Decks</h3>";
-      if (!savedDecks.length) {
-        const empty = document.createElement("div");
-        empty.className = "zoneMeta";
-        empty.textContent = "No saved decks yet.";
-        savedCard.appendChild(empty);
-      } else {
-        savedDecks.forEach((entry) => {
-          const row = document.createElement("div");
-          row.className = "dbSavedRow";
-          const stats = entry.stats || {};
-          row.innerHTML = `<div><b>${entry.name}</b><div class="zoneMeta">Size ${entry.deck?.size || entry.deck?.cards?.length || 0} • Lands ${entry.deck?.lands || 0} • Score ${(stats.deckScore ?? 0).toFixed ? stats.deckScore.toFixed(3) : Number(stats.deckScore || 0).toFixed(3)}</div></div>`;
-
-          const actions = document.createElement("div");
-          actions.className = "dbSavedActions";
-          const loadBtn = document.createElement("button");
-          loadBtn.className = "menuBtn";
-          loadBtn.textContent = "Load";
-          loadBtn.onclick = () => {
-            const parsed = fromSavedDeckCards(entry.deck?.cards || []);
-            const parsedStats = computeDeckStats(parsed, poolById);
-            state.lastDeck = { ...parsed, settings: { ...state.settings }, stats: parsedStats, builtAt: Date.now() };
-            state.selectedSavedDeckId = entry.deckId;
-            persistPlayerSaveDebounced();
-            renderApp();
-          };
-          const delBtn = document.createElement("button");
-          delBtn.className = "menuBtn";
-          delBtn.textContent = "Delete";
-          delBtn.onclick = () => {
-            if (!confirm(`Delete deck "${entry.name}"?`)) return;
-            savedDecks = savedDecks.filter((d) => d.deckId !== entry.deckId);
-            if (state.selectedSavedDeckId === entry.deckId) state.selectedSavedDeckId = "";
-            persistPlayerSaveDebounced();
-            renderApp();
-          };
-          actions.append(loadBtn, delBtn);
-          row.appendChild(actions);
-          savedCard.appendChild(row);
-        });
-      }
-      wrap.appendChild(savedCard);
-
-      if (state.previewCard) {
-        const ov = document.createElement("div");
-        ov.className = "cbOverlay";
-        const panel = document.createElement("div");
-        panel.className = "cbPanel";
-        const c = state.previewCard;
-        panel.innerHTML = `
-          <h3>${c.name}</h3>
-          <div class="zoneMeta">ID: ${c.id}</div>
-          <div class="zoneMeta">Type: ${c.type}</div>
-          <div class="zoneMeta">Cost: ${c.cost}</div>
-          <div class="zoneMeta">PT: ${c.power}|${c.toughness}</div>
-          <div class="zoneMeta">Value: ${c.value}</div>
-          <button class="menuBtn">Close</button>
-        `;
-        panel.querySelector("button")?.addEventListener("click", () => {
-          state.previewCard = null;
-          renderApp();
-        });
-        ov.addEventListener("click", (e) => {
-          if (e.target === ov) {
-            state.previewCard = null;
-            renderApp();
-          }
-        });
-        ov.appendChild(panel);
-        wrap.appendChild(ov);
-      }
-
       rootNode.replaceChildren(wrap);
     }
 
