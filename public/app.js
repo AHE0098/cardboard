@@ -33,6 +33,7 @@ Screen + data architecture:
     let legacySandboxHandle = null;
     let legacyBattleHandle = null;
     let battleLobbyRoomsRequested = false;
+    const DEBUG_BATTLE = true;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -48,35 +49,78 @@ Screen + data architecture:
       getBattleState: () => battleState,
       getBattleRoomId: () => battleRoomId,
       getBattleViewRole: () => battleViewRole,
-    setBattleSession: ({ roomId, role, state, viewRole }) => {
-  battleRoomId = roomId;
+      setBattleSession: ({ roomId, role, state, viewRole }) => {
+        try {
+          if (DEBUG_BATTLE) {
+            console.info("[battle] setBattleSession:start", {
+              roomId,
+              role,
+              viewRole,
+              hasState: !!state,
+              version: state?.version,
+              p1: state?.players?.p1?.id || null,
+              p2: state?.players?.p2?.id || null
+            });
+          }
 
-  // IMPORTANT: keep object reference stable so legacy UI updates correctly
-  if (state) {
-    if (battleState && typeof battleState === "object") {
-      // wipe existing keys
-      Object.keys(battleState).forEach((k) => { delete battleState[k]; });
-      // copy new snapshot in
-      Object.assign(battleState, state);
-    } else {
-      battleState = state;
-    }
-    ensureBattleStateShape(battleState);
-    battleLobbyRoomsRequested = false;
-  } else {
-    battleState = null;
-  }
+          battleRoomId = roomId;
 
-  session.role = role;
-  battleViewRole = viewRole;
-},
+          if (state && typeof state === "object") {
+            if (battleState && typeof battleState === "object") {
+              Object.keys(battleState).forEach((k) => { delete battleState[k]; });
+              Object.assign(battleState, state);
+            } else {
+              battleState = state;
+            }
+            ensureBattleStateShape(battleState);
+            battleLobbyRoomsRequested = false;
+          } else {
+            battleState = null;
+          }
+
+          session.role = role;
+          battleViewRole = viewRole || battleViewRole || role || "p1";
+
+          if (DEBUG_BATTLE) {
+            console.info("[battle] setBattleSession:done", {
+              battleRoomId,
+              hasBattleState: !!battleState,
+              version: battleState?.version,
+              sessionRole: session.role,
+              battleViewRole
+            });
+          }
+        } catch (err) {
+          console.error("[battle] setBattleSession failed", err, { roomId, role, hasState: !!state });
+          battleState = null;
+        }
+      },
 
       persistPlayerSaveDebounced,
-     onBattleStateChanged: () => {
-  // If legacy battle UI is mounted, just ask it to repaint
-  if (legacyBattleHandle?.invalidate) legacyBattleHandle.invalidate();
-  else renderApp();
-},
+      onBattleStateChanged: () => {
+        try {
+          if (DEBUG_BATTLE) {
+            console.info("[battle] onBattleStateChanged", {
+              hasHandle: !!legacyBattleHandle,
+              hasState: !!battleState,
+              version: battleState?.version,
+              rootChildren: root?.childElementCount
+            });
+          }
+
+          if (legacyBattleHandle?.invalidate && battleState) {
+            legacyBattleHandle.invalidate();
+            return;
+          }
+
+          renderApp();
+        } catch (err) {
+          console.error("[battle] onBattleStateChanged failed", err);
+          try { legacyBattleHandle?.unmount?.(); } catch (e) { console.error("[battle] failed to unmount stale handle", e); }
+          legacyBattleHandle = null;
+          renderApp();
+        }
+      },
 
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
       onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
@@ -1387,11 +1431,28 @@ function onBack() {
 }
 
 function mountLegacyBattleInApp() {
-  // prevent double-mount
-  if (legacyBattleHandle) return;
-  if (!battleState) return;
+  if (DEBUG_BATTLE) {
+    console.info("[battle] mountLegacyBattleInApp", {
+      hasState: !!battleState,
+      hasHandle: !!legacyBattleHandle,
+      version: battleState?.version
+    });
+  }
 
-  // load script once (reuse same legacySandbox.js)
+  if (!battleState) return;
+  ensureBattleStateShape(battleState);
+
+  if (legacyBattleHandle) {
+    try {
+      legacyBattleHandle.invalidate?.();
+      return;
+    } catch (err) {
+      console.error("[battle] stale legacy handle, remounting", err);
+      try { legacyBattleHandle.unmount?.(); } catch (e) { console.error("[battle] failed to unmount stale handle", e); }
+      legacyBattleHandle = null;
+    }
+  }
+
   const ensureScript = () => new Promise((resolve, reject) => {
     if (window.LegacySandbox?.mount) return resolve();
     const existing = document.querySelector('script[data-in-app-legacy="1"]');
@@ -1414,127 +1475,76 @@ function mountLegacyBattleInApp() {
     const dragLayer = document.getElementById("dragLayer");
     if (!dragLayer) throw new Error("Missing #dragLayer for battle mount");
 
-    // ----------------------------
-    // Zone adapters (read-only)
-    // ----------------------------
     const getArr = (zoneKey, opts2 = {}) => {
       const viewed = battleViewRole || session.role || "p1";
       const owner = opts2.playerKey || viewed;
 
       if (zoneKey === "stack") return battleState.sharedZones?.stack || [];
-
-      if (zoneKey === "opponentLands") {
-        return battleState.players?.[roleOther(viewed)]?.zones?.lands || [];
-      }
-      if (zoneKey === "opponentPermanents") {
-        return battleState.players?.[roleOther(viewed)]?.zones?.permanents || [];
-      }
-
-      if (zoneKey === "lands" || zoneKey === "permanents") {
-        return battleState.players?.[viewed]?.zones?.[zoneKey] || [];
-      }
-
+      if (zoneKey === "opponentLands") return battleState.players?.[roleOther(viewed)]?.zones?.lands || [];
+      if (zoneKey === "opponentPermanents") return battleState.players?.[roleOther(viewed)]?.zones?.permanents || [];
+      if (zoneKey === "lands" || zoneKey === "permanents") return battleState.players?.[viewed]?.zones?.[zoneKey] || [];
       return battleState.players?.[owner]?.zones?.[zoneKey] || [];
     };
 
-    // NOTE: in battle, legacy should not mutate directly — use dispatch/intents.
     const setArr = () => {};
 
-    // ----------------------------
-    // Dispatch -> battle intents
-    // ----------------------------
     const dispatch = (action) => {
       if (!action || !action.type) return;
-
-      // OPTIONAL optimistic apply (keeps UI snappy)
-      // This mutates local battleState so you see the change instantly.
       try {
         applyActionToState(battleState, action);
-      } catch {}
-
-      // Repaint legacy right away
-      legacyBattleHandle?.invalidate?.();
-
-      // Translate to your existing intent schema
-      if (action.type === "MOVE_CARD") {
-        battleClient.sendIntent("MOVE_CARD", {
-          cardId: action.cardId,
-          from: action.from,
-          to: action.to
-        });
-        return;
+      } catch (err) {
+        console.error("[battle] optimistic apply failed", err, action);
       }
 
-      if (action.type === "DRAW_CARD") {
-        battleClient.sendIntent("DRAW_CARD", {
-          count: 1,
-          owner: action.owner
-        });
-        return;
+      try {
+        legacyBattleHandle?.invalidate?.();
+      } catch (err) {
+        console.error("[battle] invalidate after dispatch failed", err);
       }
 
-      if (action.type === "TOGGLE_TAP") {
-        battleClient.sendIntent("TOGGLE_TAP", {
-          cardId: action.cardId,
-          kind: action.kind
-        });
-        return;
-      }
-
-      if (action.type === "DECK_PLACE") {
-        battleClient.sendIntent("DECK_PLACE", {
-          cardId: action.cardId,
-          from: action.from,
-          owner: action.owner,
-          where: action.where
-        });
-        return;
-      }
-
-      if (action.type === "REORDER_ZONE") {
-        battleClient.sendIntent("REORDER_ZONE", {
-          owner: action.owner,
-          zone: action.zone,
-          ids: action.ids
-        });
-        return;
-      }
+      if (action.type === "MOVE_CARD") return battleClient.sendIntent("MOVE_CARD", { cardId: action.cardId, from: action.from, to: action.to });
+      if (action.type === "DRAW_CARD") return battleClient.sendIntent("DRAW_CARD", { count: 1, owner: action.owner });
+      if (action.type === "TOGGLE_TAP") return battleClient.sendIntent("TOGGLE_TAP", { cardId: action.cardId, kind: action.kind });
+      if (action.type === "DECK_PLACE") return battleClient.sendIntent("DECK_PLACE", { cardId: action.cardId, from: action.from, owner: action.owner, where: action.where });
+      if (action.type === "REORDER_ZONE") return battleClient.sendIntent("REORDER_ZONE", { owner: action.owner, zone: action.zone, ids: action.ids });
     };
 
-    // ----------------------------
-    // Mount legacy battle UI
-    // ----------------------------
     legacyBattleHandle = window.LegacySandbox.mount({
       root,
       subtitle,
       dragLayer,
-
       initialState: battleState,
-
       getMode: () => "battle",
       getActivePlayerKey: () => (battleViewRole || session.role || "p1"),
       setActivePlayerKey: (pk) => {
         battleViewRole = pk;
-        legacyBattleHandle?.invalidate?.();
+        try { legacyBattleHandle?.invalidate?.(); } catch (err) { console.error("[battle] invalidate after view switch failed", err); }
       },
-
       getZoneArray: (zoneKey, opts2) => getArr(zoneKey, opts2),
       setZoneArray: setArr,
-
+      getMarks: () => ({ tapped: battleState?.tapped || {}, tarped: battleState?.tarped || {} }),
       dispatch,
-
-      // Disable legacy persistence loop for battle
       persistIntervalMs: 0
     });
 
-    legacyBattleHandle.invalidate?.();
+    try { legacyBattleHandle.invalidate?.(); } catch (err) { console.error("[battle] initial invalidate failed", err); }
+
+    if (DEBUG_BATTLE) {
+      console.info("[battle] mountLegacyBattleInApp:mounted", {
+        hasHandle: !!legacyBattleHandle,
+        rootChildren: root?.childElementCount
+      });
+    }
   }).catch((err) => {
     console.error("Failed to mount legacy battle", err);
   });
 }
 
+
     
 
+
+    let battleLobbyBusy = false;
 
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
@@ -1542,34 +1552,68 @@ function mountLegacyBattleInApp() {
         host,
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
         openRooms,
+        isBusy: battleLobbyBusy,
         onRefreshRooms: async () => {
-          await battleClient.refreshRoomsList?.();
-          openRooms = battleClient.getOpenRooms?.() || openRooms;
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            await battleClient.refreshRoomsList?.();
+            openRooms = battleClient.getOpenRooms?.() || openRooms;
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onCreateRoom: async (requestedRoomCode) => {
-          const res = await battleClient.createRoom(requestedRoomCode);
-          if (!res?.ok) alert(res?.error || "Failed to create room");
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.createRoom(requestedRoomCode);
+            if (!res?.ok) alert(res?.error || "Failed to create room");
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onJoinRoom: async (code, preferredRole) => {
-          if (!code) return;
-          const res = await battleClient.joinRoom(code, preferredRole);
-          if (!res?.ok) alert(res?.error || "Join failed");
+          if (!code || battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.joinRoom(code, preferredRole);
+            if (!res?.ok) alert(res?.error || "Join failed");
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onDeleteRoom: async (code) => {
-          if (!code) return;
-          const res = await battleClient.deleteRoom(code);
-          if (!res?.ok) alert(res?.error || "Delete failed");
-          await battleClient.refreshRoomsList?.();
+          if (!code || battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.deleteRoom(code);
+            if (!res?.ok) alert(res?.error || "Delete failed");
+            await battleClient.refreshRoomsList?.();
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         },
         onDeleteAllRooms: async () => {
-          const res = await battleClient.deleteAllRooms();
-          if (!res?.ok) alert(res?.error || "Delete all failed");
-          await battleClient.refreshRoomsList?.();
+          if (battleLobbyBusy) return;
+          battleLobbyBusy = true;
           renderApp();
+          try {
+            const res = await battleClient.deleteAllRooms();
+            if (!res?.ok) alert(res?.error || "Delete all failed");
+            await battleClient.refreshRoomsList?.();
+          } finally {
+            battleLobbyBusy = false;
+            renderApp();
+          }
         }
       });
     }
@@ -1577,12 +1621,11 @@ function mountLegacyBattleInApp() {
   function renderModeScreen() {
   if (appMode === "battle") {
     if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
-      // If we are NOT in a room, ensure legacy battle is not mounted
-  if (!battleState && legacyBattleHandle) {
-    try { legacyBattleHandle.unmount?.(); } catch {}
-    legacyBattleHandle = null;
-    clearSandboxTopPilesHost();
-  }
+    if (!battleState && legacyBattleHandle) {
+      try { legacyBattleHandle.unmount?.(); } catch (err) { console.error("[battle] unmount on lobby transition failed", err); }
+      legacyBattleHandle = null;
+      clearSandboxTopPilesHost();
+    }
     subtitle.textContent = battleRoomId
       ? `${session.playerName} • battle • Game ${battleRoomId} • ${session.role || "-"}`
       : `${session.playerName} • battle`;
@@ -1599,7 +1642,6 @@ function mountLegacyBattleInApp() {
     card.innerHTML = "<h2>Deckbuilder coming soon</h2>";
     wrap.appendChild(card);
 
-    // Normal app-mode screen render
     const panel = renderInspector();
     const deckPanel = renderDeckPlacementChooser();
     root.replaceChildren(wrap);
@@ -1609,10 +1651,16 @@ function mountLegacyBattleInApp() {
   }
 
   if (appMode === "battle") {
-    // If we don't have a room state yet, show lobby inside app UI
+    if (DEBUG_BATTLE) {
+      console.info("[battle] renderModeScreen", {
+        branch: battleState ? "board" : "lobby",
+        hasHandle: !!legacyBattleHandle,
+        version: battleState?.version
+      });
+    }
+
     if (!battleState) {
       renderBattleLobby(wrap);
-
       const panel = renderInspector();
       const deckPanel = renderDeckPlacementChooser();
       root.replaceChildren(wrap);
@@ -1621,18 +1669,12 @@ function mountLegacyBattleInApp() {
       return;
     }
 
-// We HAVE battleState: use the legacy battle UI (it owns the rendering loop)
-root.replaceChildren(wrap);
-
-// Make sure legacy battle is mounted (it will render into root itself)
-mountLegacyBattleInApp();
-
-return;
-
-
+    // IMPORTANT: do not clear root while legacy battle is already mounted.
+    if (!legacyBattleHandle) root.replaceChildren(wrap);
+    mountLegacyBattleInApp();
+    return;
   }
 
-  // sandbox
   root.replaceChildren(wrap);
   mountLegacySandboxInApp();
 }
@@ -1640,15 +1682,33 @@ return;
 
     function renderApp() {
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
-     const usingLegacyUI =
-  (uiScreen === "mode" && appMode === "sandbox") ||
-  (uiScreen === "mode" && appMode === "battle" && !!battleState); // battleState means we mounted legacy battle UI
+      const usingLegacyUI =
+        (uiScreen === "mode" && appMode === "sandbox") ||
+        (uiScreen === "mode" && appMode === "battle" && !!battleState);
 
-if (!usingLegacyUI) clearSandboxTopPilesHost();
+      if (DEBUG_BATTLE) {
+        console.info("[battle] renderApp", {
+          uiScreen,
+          appMode,
+          hasBattleState: !!battleState,
+          hasHandle: !!legacyBattleHandle,
+          usingLegacyUI
+        });
+      }
 
-      if (uiScreen === "playerMenu") return renderPlayerMenu();
-      if (uiScreen === "mainMenu") return renderMainMenu();
-      return renderModeScreen();
+      if (!usingLegacyUI) clearSandboxTopPilesHost();
+
+      try {
+        if (uiScreen === "playerMenu") return renderPlayerMenu();
+        if (uiScreen === "mainMenu") return renderMainMenu();
+        return renderModeScreen();
+      } catch (err) {
+        console.error("[battle] renderApp failed", err);
+        const fallback = document.createElement("div");
+        fallback.className = "menuCard";
+        fallback.innerHTML = `<h3>Render error</h3><div class="zoneMeta">${String(err?.message || err)}</div>`;
+        root.replaceChildren(fallback);
+      }
     }
 
     if (playerRegistry.lastPlayerId) {
