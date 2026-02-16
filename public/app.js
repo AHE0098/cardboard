@@ -22,6 +22,19 @@ Screen + data architecture:
     const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
     const PILE_ZONES = ["stack", "deck", "graveyard"];
     const demo = window.DEMO_STATE || { zones: { hand: [], lands: [], permanents: [] }, tapped: {}, tarped: {} };
+    const DECKBUILDER_DEFAULTS = {
+      deckSize: 40,
+      targetValueSum: 0,
+      targetDeckScore: 0,
+      includeLands: true,
+      seed: 1337
+    };
+    const K_PENALTY = 60;
+    const PSTAR_A = 0.25;
+    const PSTAR_B = 0.05;
+    const PSTAR_MIN = 0.20;
+    const PSTAR_MAX = 0.60;
+    const LAND_CARD_IDS = [101, 102, 103, 104, 105, 106];
 
     let uiScreen = "playerMenu";
     let appMode = null;
@@ -40,6 +53,9 @@ Screen + data architecture:
     let saveTimer = null;
 
     let sandboxState = createSandboxState();
+    let deckbuilderState = { settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve" }, lastDeck: null, selectedSavedDeckId: "", previewCard: null };
+    let savedDecks = [];
+    let battleDeckSelections = { p1: "", p2: "" };
 
     let battleState = null;
     let battleRoomId = "";
@@ -338,6 +354,9 @@ case "TOGGLE_TAP": {
           ...prev,
           lastMode: appMode || prev.lastMode || "sandbox",
           sandboxState,
+          deckbuilderState,
+          savedDecks,
+          lastSelectedDeckId: deckbuilderState.selectedSavedDeckId || prev.lastSelectedDeckId || "",
           lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
           updatedAt: Date.now()
         };
@@ -353,6 +372,19 @@ case "TOGGLE_TAP": {
       savePlayerRegistry();
       const save = loadPlayerSave(player.id);
       sandboxState = save.sandboxState ? clone(save.sandboxState) : createSandboxState();
+      savedDecks = Array.isArray(save.savedDecks) ? save.savedDecks : [];
+      deckbuilderState = save.deckbuilderState
+        ? {
+          settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve", ...(save.deckbuilderState.settings || {}) },
+          lastDeck: save.deckbuilderState.lastDeck || null,
+          selectedSavedDeckId: save.deckbuilderState.selectedSavedDeckId || save.lastSelectedDeckId || "",
+          previewCard: null
+        }
+        : { settings: { ...DECKBUILDER_DEFAULTS, overviewView: "curve" }, lastDeck: null, selectedSavedDeckId: save.lastSelectedDeckId || "", previewCard: null };
+      battleDeckSelections = {
+        p1: deckbuilderState.selectedSavedDeckId || "",
+        p2: deckbuilderState.selectedSavedDeckId || ""
+      };
       appMode = null;
       uiScreen = "mainMenu";
       renderApp();
@@ -482,6 +514,538 @@ function onBack() {
     function getCardCostString(cardId) {
       const data = window.CARD_REPO?.[String(cardId)] || {};
       return (data.costs ?? data.cost ?? "").toString().trim();
+    }
+
+    function getSavedDeckById(deckId) {
+      if (!deckId) return null;
+      return savedDecks.find((d) => d.deckId === deckId) || null;
+    }
+
+    function shuffleInPlace(arr, rng) {
+      for (let i = arr.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(rng() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function toSavedDeckCards(deck, seed = Date.now()) {
+      const nonlands = Array.isArray(deck?.nonlandIds) ? deck.nonlandIds.map((id) => Number(id)).filter(Number.isFinite) : [];
+      const lands = Math.max(0, Number(deck?.lands || 0));
+      const landCards = Array.from({ length: lands }, (_, i) => LAND_CARD_IDS[(i + Math.abs(Number(seed) || 0)) % LAND_CARD_IDS.length]);
+      return shuffleInPlace([...nonlands, ...landCards], makeRng(`save|${seed}|${nonlands.length}|${lands}`));
+    }
+
+    function fromSavedDeckCards(cards = []) {
+      const landSet = new Set(LAND_CARD_IDS.map(String));
+      const lands = cards.filter((id) => landSet.has(String(id))).length;
+      const nonlandIds = cards.filter((id) => !landSet.has(String(id))).map((id) => String(id));
+      return { nonlandIds, lands };
+    }
+
+    function upsertSavedDeck(entry) {
+      const idx = savedDecks.findIndex((d) => d.deckId === entry.deckId);
+      if (idx >= 0) savedDecks[idx] = entry;
+      else savedDecks.unshift(entry);
+      deckbuilderState.selectedSavedDeckId = entry.deckId;
+      persistPlayerSaveDebounced();
+    }
+
+    function renderMiniCard(cardId, cardData, opts = {}) {
+      const tile = document.createElement("button");
+      tile.className = `dbMiniCard ${opts.isLand ? "isLand" : ""}`;
+      tile.type = "button";
+      const cost = opts.isLand ? "LAND" : String(cardData?.cost ?? "");
+      const pt = opts.isLand ? "" : `${cardData?.power ?? ""}|${cardData?.toughness ?? ""}`;
+      tile.innerHTML = `<span class="dbMiniCost">${cost}</span><span class="dbMiniName">${cardData?.name || `Card ${cardId}`}</span>${pt ? `<span class="dbMiniPT">${pt}</span>` : ""}`;
+      tile.onclick = () => {
+        deckbuilderState.previewCard = {
+          id: String(cardId),
+          name: cardData?.name || `Card ${cardId}`,
+          color: cardData?.color || "",
+          cost: opts.isLand ? "LAND" : (cardData?.cost ?? ""),
+          power: opts.isLand ? "-" : cardData?.power,
+          toughness: opts.isLand ? "-" : cardData?.toughness,
+          value: opts.isLand ? 0 : (cardData?.value ?? 0),
+          type: opts.isLand ? "land" : "creature"
+        };
+        renderApp();
+      };
+      return tile;
+    }
+
+    function renderDeckOverview(deck, poolById, opts = {}) {
+      const view = opts.view === "grid" ? "grid" : "curve";
+      const rootEl = document.createElement("div");
+      rootEl.className = "dbOverview";
+      const cards = [];
+      (deck?.nonlandIds || []).forEach((id) => {
+        const card = poolById[String(id)];
+        if (card) cards.push({ id: String(id), card, isLand: false });
+      });
+      for (let i = 0; i < (deck?.lands || 0); i += 1) {
+        cards.push({ id: `LAND_${i + 1}`, card: { name: "Basic Land", cost: "", power: "", toughness: "", value: 0 }, isLand: true });
+      }
+
+      if (view === "grid") {
+        const grid = document.createElement("div");
+        grid.className = "dbMiniGrid";
+        cards.forEach((item) => grid.appendChild(renderMiniCard(item.id, item.card, { isLand: item.isLand })));
+        rootEl.appendChild(grid);
+        return rootEl;
+      }
+
+      const buckets = { "0": [], "1": [], "2": [], "3": [], "4": [], "5": [], "6+": [] };
+      cards.forEach((item) => {
+        if (item.isLand) {
+          buckets["0"].push(item);
+          return;
+        }
+        const k = item.card.cost >= 6 ? "6+" : String(item.card.cost);
+        buckets[k] ||= [];
+        buckets[k].push(item);
+      });
+      ["0", "1", "2", "3", "4", "5", "6+"].forEach((k) => {
+        const group = document.createElement("div");
+        group.className = "dbOverviewGroup";
+        group.innerHTML = `<h4>Cost ${k} (${buckets[k].length})</h4>`;
+        const row = document.createElement("div");
+        row.className = "dbMiniGrid";
+        buckets[k].forEach((item) => row.appendChild(renderMiniCard(item.id, item.card, { isLand: item.isLand })));
+        group.appendChild(row);
+        rootEl.appendChild(group);
+      });
+      return rootEl;
+    }
+
+    // How to test (Deckbuilder v1):
+    // 1) Open Deckbuilder Mode from Main Menu.
+    // 2) Adjust deck controls (size/value/score) and press "Build Deck".
+    // 3) Verify list updates by cost and summary metrics (X/Z/N/Y/Base/p/p*/consistency/DeckScore).
+    // 4) Reload page and confirm settings + last deck persist for current player.
+    function getDeckbuilderCardPool() {
+      const repo = window.CARD_REPO || {};
+      return Object.entries(repo)
+        .map(([id, card]) => {
+          const costRaw = String(card?.cost ?? card?.costs ?? "").trim();
+          const cost = Number(costRaw);
+          return {
+            id: String(id),
+            name: card?.name || `Card ${id}`,
+            color: card?.color || "",
+            cost,
+            power: Number(card?.power),
+            toughness: Number(card?.toughness),
+            value: Number(card?.value ?? 0)
+          };
+        })
+        .filter((card) => /^\d+$/.test(String(card.cost)) && Number.isFinite(card.power) && Number.isFinite(card.toughness) && Number.isFinite(card.value));
+    }
+
+    function clamp(n, lo, hi) {
+      return Math.max(lo, Math.min(hi, n));
+    }
+
+    function hashSeed(input) {
+      const str = String(input || "1337");
+      let h = 1779033703 ^ str.length;
+      for (let i = 0; i < str.length; i += 1) {
+        h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+        h = (h << 13) | (h >>> 19);
+      }
+      return h >>> 0;
+    }
+
+    function makeRng(seedInput) {
+      let seed = hashSeed(seedInput);
+      return () => {
+        seed += 0x6D2B79F5;
+        let t = seed;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function computeDeckScore(stats, params = {}) {
+      const k = Number.isFinite(params.K_PENALTY) ? params.K_PENALTY : K_PENALTY;
+      const pA = Number.isFinite(params.PSTAR_A) ? params.PSTAR_A : PSTAR_A;
+      const pB = Number.isFinite(params.PSTAR_B) ? params.PSTAR_B : PSTAR_B;
+      const pMin = Number.isFinite(params.PSTAR_MIN) ? params.PSTAR_MIN : PSTAR_MIN;
+      const pMax = Number.isFinite(params.PSTAR_MAX) ? params.PSTAR_MAX : PSTAR_MAX;
+      const pStar = clamp(pA + pB * stats.avgCost, pMin, pMax);
+      const consistency = Math.exp(-k * ((stats.landFraction - pStar) ** 2));
+      return {
+        pStar,
+        consistency,
+        deckScore: stats.baseValue * consistency
+      };
+    }
+
+    function computeDeckStats(deck, poolById) {
+      const ids = Array.isArray(deck?.nonlandIds) ? deck.nonlandIds : [];
+      const lands = Math.max(0, Number(deck?.lands || 0));
+      const nonlands = ids.map((id) => poolById[id]).filter(Boolean);
+      const X = ids.length + lands;
+      const N = ids.length;
+      const Y = nonlands.reduce((sum, c) => sum + (Number.isFinite(c.value) ? c.value : 0), 0);
+      const ptSum = nonlands.reduce((sum, c) => sum + c.power + c.toughness, 0);
+      const costSum = nonlands.reduce((sum, c) => sum + c.cost, 0);
+      const avgCost = N ? (costSum / N) : 0;
+      const baseValue = N ? (Y / N) : 0;
+      const landFraction = X ? (lands / X) : 0;
+
+      const histogram = { "0": 0, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6+": 0 };
+      nonlands.forEach((c) => {
+        if (c.cost >= 6) histogram["6+"] += 1;
+        else histogram[String(c.cost)] = (histogram[String(c.cost)] || 0) + 1;
+      });
+
+      const scoreBits = computeDeckScore({ avgCost, landFraction, baseValue });
+      return {
+        totalCards: X,
+        lands,
+        nonlands: N,
+        sumValue: Y,
+        sumPT: ptSum,
+        avgCost,
+        baseValue,
+        landFraction,
+        curveHistogram: histogram,
+        pStar: scoreBits.pStar,
+        consistency: scoreBits.consistency,
+        deckScore: scoreBits.deckScore
+      };
+    }
+
+    function buildDeck(settings) {
+      const safe = {
+        deckSize: clamp(Math.round(Number(settings?.deckSize ?? DECKBUILDER_DEFAULTS.deckSize)), 20, 100),
+        targetValueSum: Math.round(Number(settings?.targetValueSum ?? DECKBUILDER_DEFAULTS.targetValueSum)),
+        targetDeckScore: Number(settings?.targetDeckScore ?? DECKBUILDER_DEFAULTS.targetDeckScore),
+        includeLands: settings?.includeLands !== false,
+        seed: settings?.seed ?? DECKBUILDER_DEFAULTS.seed
+      };
+      const pool = getDeckbuilderCardPool();
+      const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
+      if (!pool.length) return { nonlandIds: [], lands: 0, settings: safe, stats: computeDeckStats({ nonlandIds: [], lands: 0 }, poolById), builtAt: Date.now() };
+      const rng = makeRng(`${safe.seed}|${safe.deckSize}|${safe.targetValueSum}|${safe.targetDeckScore}|${safe.includeLands ? 1 : 0}`);
+
+      const maxCreatureSlots = safe.deckSize;
+      const desiredMeanValue = maxCreatureSlots ? (safe.targetValueSum / maxCreatureSlots) : 0;
+      const desiredCost = clamp(2.5 + (safe.targetDeckScore * 0.8), 0, 8);
+      const picked = [];
+      for (let i = 0; i < maxCreatureSlots; i += 1) {
+        const candidate = pool
+          .map((card) => {
+            const fit = Math.abs(card.value - desiredMeanValue) * 1.3 + Math.abs(card.cost - desiredCost) * 0.55;
+            const jitter = rng() * 0.35;
+            return { card, rank: fit + jitter };
+          })
+          .sort((a, b) => a.rank - b.rank)[Math.floor(rng() * Math.min(18, pool.length))]?.card || pool[Math.floor(rng() * pool.length)];
+        picked.push(candidate.id);
+      }
+
+      const objective = (stats) => {
+        const deckScoreWeight = 2.2;
+        const dScore = Math.abs(stats.deckScore - safe.targetDeckScore);
+        const dValue = Math.abs(stats.sumValue - safe.targetValueSum) / Math.max(1, safe.deckSize);
+        return (Number.isFinite(safe.targetDeckScore) ? dScore * deckScoreWeight : 0) + dValue;
+      };
+
+      let bestDeck = { nonlandIds: picked.slice(), lands: 0 };
+      let bestStats = computeDeckStats(bestDeck, poolById);
+      let bestObj = Infinity;
+
+      const minL = safe.includeLands ? Math.floor(safe.deckSize * PSTAR_MIN) : 0;
+      const maxL = safe.includeLands ? Math.ceil(safe.deckSize * PSTAR_MAX) : 0;
+      for (let lands = minL; lands <= maxL; lands += 1) {
+        const n = Math.max(0, safe.deckSize - lands);
+        if (n <= 0) continue;
+        const probe = { nonlandIds: picked.slice(0, n), lands };
+        const probeStats = computeDeckStats(probe, poolById);
+        const score = objective(probeStats);
+        if (score < bestObj) {
+          bestObj = score;
+          bestDeck = probe;
+          bestStats = probeStats;
+        }
+      }
+
+      const swapRounds = Math.min(250, safe.deckSize * 6);
+      for (let i = 0; i < swapRounds; i += 1) {
+        if (!bestDeck.nonlandIds.length) break;
+        const testIds = bestDeck.nonlandIds.slice();
+        const slot = Math.floor(rng() * testIds.length);
+        testIds[slot] = pool[Math.floor(rng() * pool.length)].id;
+        const probe = { nonlandIds: testIds, lands: bestDeck.lands };
+        const probeStats = computeDeckStats(probe, poolById);
+        const probeObj = objective(probeStats);
+        if (probeObj < bestObj) {
+          bestObj = probeObj;
+          bestDeck = probe;
+          bestStats = probeStats;
+        }
+      }
+
+      return { ...bestDeck, settings: safe, stats: bestStats, builtAt: Date.now() };
+    }
+
+    function renderDeckbuilder(rootNode, state) {
+      const pool = getDeckbuilderCardPool();
+      const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
+      const wrap = document.createElement("div");
+      wrap.className = "deckbuilderWrap";
+
+      const controls = document.createElement("div");
+      controls.className = "menuCard";
+      controls.innerHTML = "<h2>Deck Builder v1</h2>";
+
+      const makeControl = (label, key, min, max, step = 1) => {
+        const row = document.createElement("label");
+        row.className = "dbControl";
+        const title = document.createElement("span");
+        title.textContent = label;
+        const inputRow = document.createElement("div");
+        inputRow.className = "dbInputRow";
+        const slider = document.createElement("input");
+        slider.type = "range";
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String(state.settings[key]);
+        const num = document.createElement("input");
+        num.type = "number";
+        num.min = String(min);
+        num.max = String(max);
+        num.step = String(step);
+        num.value = String(state.settings[key]);
+        const apply = (v) => {
+          const next = clamp(Number(v), min, max);
+          state.settings[key] = step === 1 ? Math.round(next) : Number(next.toFixed(2));
+          slider.value = String(state.settings[key]);
+          num.value = String(state.settings[key]);
+          persistPlayerSaveDebounced();
+        };
+        slider.oninput = () => apply(slider.value);
+        num.onchange = () => apply(num.value);
+        inputRow.append(slider, num);
+        row.append(title, inputRow);
+        return row;
+      };
+
+      controls.append(
+        makeControl("Deck size (X)", "deckSize", 20, 100, 1),
+        makeControl("Target sum value (Y)", "targetValueSum", -200, 200, 1),
+        makeControl("Target DeckScore", "targetDeckScore", -10, 10, 0.1)
+      );
+
+      const includeRow = document.createElement("label");
+      includeRow.className = "dbInline";
+      const includeLands = document.createElement("input");
+      includeLands.type = "checkbox";
+      includeLands.checked = !!state.settings.includeLands;
+      includeLands.onchange = () => {
+        state.settings.includeLands = includeLands.checked;
+        persistPlayerSaveDebounced();
+      };
+      includeRow.append(includeLands, document.createTextNode(" Include virtual lands"));
+
+      const seedInput = document.createElement("input");
+      seedInput.className = "menuInput";
+      seedInput.type = "number";
+      seedInput.value = String(state.settings.seed ?? 1337);
+      seedInput.placeholder = "Seed";
+      seedInput.onchange = () => {
+        state.settings.seed = Number(seedInput.value || 1337);
+        persistPlayerSaveDebounced();
+      };
+
+      const buildBtn = document.createElement("button");
+      buildBtn.className = "menuBtn";
+      buildBtn.textContent = "Build Deck";
+      buildBtn.onclick = () => {
+        state.lastDeck = buildDeck(state.settings);
+        state.previewCard = null;
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "menuBtn";
+      saveBtn.textContent = "Save Deck";
+      saveBtn.onclick = () => {
+        if (!state.lastDeck) return alert("Build a deck first.");
+        const existing = getSavedDeckById(state.selectedSavedDeckId);
+        const suggested = existing?.name || `Deck ${new Date().toLocaleString()}`;
+        const name = (prompt("Deck name", suggested) || "").trim();
+        if (!name) return;
+        const now = Date.now();
+        const deckId = existing?.deckId || `dk_${new Date(now).toISOString()}_${uid().slice(0, 4)}`;
+        const cards = toSavedDeckCards(state.lastDeck, state.settings.seed);
+        const stats = state.lastDeck.stats || computeDeckStats(state.lastDeck, poolById);
+        upsertSavedDeck({
+          deckId,
+          name,
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+          settingsSnapshot: { ...state.settings },
+          deck: { cards, lands: state.lastDeck.lands || 0, size: cards.length },
+          stats
+        });
+        renderApp();
+      };
+
+      controls.append(includeRow, seedInput, buildBtn, saveBtn);
+      wrap.appendChild(controls);
+
+      const out = document.createElement("div");
+      out.className = "menuCard";
+      const deck = state.lastDeck;
+      if (!deck) {
+        out.innerHTML = `<h3>No deck yet</h3><div class="zoneMeta">Pool size: ${pool.length}. Pick settings and build.</div>`;
+      } else {
+        const stats = deck.stats || computeDeckStats(deck, poolById);
+        const byCost = new Map();
+        deck.nonlandIds.forEach((id) => {
+          const c = poolById[id];
+          if (!c) return;
+          const k = c.cost >= 6 ? "6+" : String(c.cost);
+          if (!byCost.has(k)) byCost.set(k, new Map());
+          const bucket = byCost.get(k);
+          bucket.set(id, (bucket.get(id) || 0) + 1);
+        });
+        const order = ["0", "1", "2", "3", "4", "5", "6+"];
+        const groupHtml = order.map((k) => {
+          const bucket = byCost.get(k);
+          if (!bucket || !bucket.size) return `<div class="dbCostGroup"><h4>${k}: 0</h4></div>`;
+          const items = [...bucket.entries()].map(([id, count]) => `<li>${count}x ${poolById[id]?.name || id} (v=${poolById[id]?.value ?? 0})</li>`).join("");
+          const total = [...bucket.values()].reduce((a, b) => a + b, 0);
+          return `<div class="dbCostGroup"><h4>${k}: ${total}</h4><ul>${items}</ul></div>`;
+        }).join("");
+
+        out.innerHTML = `
+          <h3>Summary</h3>
+          <div class="dbSummaryGrid">
+            <div>Total cards X: <b>${stats.totalCards}</b></div>
+            <div>Lands Z: <b>${stats.lands}</b></div>
+            <div>Creatures N: <b>${stats.nonlands}</b></div>
+            <div>Sum PT: <b>${stats.sumPT}</b></div>
+            <div>Sum value Y: <b>${stats.sumValue.toFixed(2)}</b></div>
+            <div>Base Y/N: <b>${stats.baseValue.toFixed(4)}</b></div>
+            <div>Avg cost: <b>${stats.avgCost.toFixed(3)}</b></div>
+            <div>p = Z/X: <b>${stats.landFraction.toFixed(3)}</b></div>
+            <div>p*: <b>${stats.pStar.toFixed(3)}</b></div>
+            <div>Consistency: <b>${stats.consistency.toFixed(4)}</b></div>
+            <div>DeckScore: <b>${stats.deckScore.toFixed(4)}</b></div>
+            <div>Curve [0/1/2/3/4/5/6+]: <b>${stats.curveHistogram["0"]}/${stats.curveHistogram["1"]}/${stats.curveHistogram["2"]}/${stats.curveHistogram["3"]}/${stats.curveHistogram["4"]}/${stats.curveHistogram["5"]}/${stats.curveHistogram["6+"]}</b></div>
+          </div>
+          <h3>Deck List by Cost</h3>
+          <div class="dbCosts">${groupHtml}</div>
+        `;
+
+        const viewRow = document.createElement("div");
+        viewRow.className = "dbInline";
+        const curveBtn = document.createElement("button");
+        curveBtn.className = "menuBtn";
+        curveBtn.textContent = "Curve View";
+        const gridBtn = document.createElement("button");
+        gridBtn.className = "menuBtn";
+        gridBtn.textContent = "Grid View";
+        const setView = (v) => {
+          state.settings.overviewView = v;
+          persistPlayerSaveDebounced();
+          renderApp();
+        };
+        curveBtn.onclick = () => setView("curve");
+        gridBtn.onclick = () => setView("grid");
+        curveBtn.disabled = state.settings.overviewView === "curve";
+        gridBtn.disabled = state.settings.overviewView === "grid";
+        viewRow.append(curveBtn, gridBtn);
+
+        out.appendChild(viewRow);
+        const overviewTitle = document.createElement("h3");
+        overviewTitle.textContent = "Deck Overview";
+        out.appendChild(overviewTitle);
+        out.appendChild(renderDeckOverview(deck, poolById, { view: state.settings.overviewView || "curve" }));
+      }
+      wrap.appendChild(out);
+
+      const savedCard = document.createElement("div");
+      savedCard.className = "menuCard";
+      savedCard.innerHTML = "<h3>Saved Decks</h3>";
+      if (!savedDecks.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No saved decks yet.";
+        savedCard.appendChild(empty);
+      } else {
+        savedDecks.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = "dbSavedRow";
+          const stats = entry.stats || {};
+          row.innerHTML = `<div><b>${entry.name}</b><div class="zoneMeta">Size ${entry.deck?.size || entry.deck?.cards?.length || 0} • Lands ${entry.deck?.lands || 0} • Score ${(stats.deckScore ?? 0).toFixed ? stats.deckScore.toFixed(3) : Number(stats.deckScore || 0).toFixed(3)}</div></div>`;
+
+          const actions = document.createElement("div");
+          actions.className = "dbSavedActions";
+          const loadBtn = document.createElement("button");
+          loadBtn.className = "menuBtn";
+          loadBtn.textContent = "Load";
+          loadBtn.onclick = () => {
+            const parsed = fromSavedDeckCards(entry.deck?.cards || []);
+            const parsedStats = computeDeckStats(parsed, poolById);
+            state.lastDeck = { ...parsed, settings: { ...state.settings }, stats: parsedStats, builtAt: Date.now() };
+            state.selectedSavedDeckId = entry.deckId;
+            persistPlayerSaveDebounced();
+            renderApp();
+          };
+          const delBtn = document.createElement("button");
+          delBtn.className = "menuBtn";
+          delBtn.textContent = "Delete";
+          delBtn.onclick = () => {
+            if (!confirm(`Delete deck "${entry.name}"?`)) return;
+            savedDecks = savedDecks.filter((d) => d.deckId !== entry.deckId);
+            if (state.selectedSavedDeckId === entry.deckId) state.selectedSavedDeckId = "";
+            persistPlayerSaveDebounced();
+            renderApp();
+          };
+          actions.append(loadBtn, delBtn);
+          row.appendChild(actions);
+          savedCard.appendChild(row);
+        });
+      }
+      wrap.appendChild(savedCard);
+
+      if (state.previewCard) {
+        const ov = document.createElement("div");
+        ov.className = "cbOverlay";
+        const panel = document.createElement("div");
+        panel.className = "cbPanel";
+        const c = state.previewCard;
+        panel.innerHTML = `
+          <h3>${c.name}</h3>
+          <div class="zoneMeta">ID: ${c.id}</div>
+          <div class="zoneMeta">Type: ${c.type}</div>
+          <div class="zoneMeta">Cost: ${c.cost}</div>
+          <div class="zoneMeta">PT: ${c.power}|${c.toughness}</div>
+          <div class="zoneMeta">Value: ${c.value}</div>
+          <button class="menuBtn">Close</button>
+        `;
+        panel.querySelector("button")?.addEventListener("click", () => {
+          state.previewCard = null;
+          renderApp();
+        });
+        ov.addEventListener("click", (e) => {
+          if (e.target === ov) {
+            state.previewCard = null;
+            renderApp();
+          }
+        });
+        ov.appendChild(panel);
+        wrap.appendChild(ov);
+      }
+
+      rootNode.replaceChildren(wrap);
     }
 
     function parseManaCost(costStr) {
@@ -1550,6 +2114,55 @@ function mountLegacyBattleInApp() {
 
     let battleLobbyBusy = false;
 
+    function applySavedDeckToRole(role, deckId) {
+      const entry = getSavedDeckById(deckId);
+      if (!entry || !battleState || !session.role || role !== session.role) return;
+      const cards = Array.isArray(entry.deck?.cards) ? entry.deck.cards.map((id) => Number(id)).filter(Number.isFinite) : [];
+      battleClient.sendIntent("SET_DECK", { owner: role, cards });
+    }
+
+    function renderBattleDeckSelector(host) {
+      const card = document.createElement("div");
+      card.className = "menuCard";
+      card.innerHTML = "<h3>Battle Deck Selection</h3>";
+
+      if (!savedDecks.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No saved decks. Build and save one in Deckbuilder Mode.";
+        card.appendChild(empty);
+        host.appendChild(card);
+        return;
+      }
+
+      const mkSelect = (role) => {
+        const row = document.createElement("div");
+        row.className = "dbBattlePick";
+        const label = document.createElement("label");
+        label.textContent = `${role.toUpperCase()} deck`;
+        const sel = document.createElement("select");
+        sel.className = "menuInput";
+        sel.innerHTML = `<option value="">(none)</option>${savedDecks.map((d) => `<option value="${d.deckId}">${d.name}</option>`).join("")}`;
+        sel.value = battleDeckSelections[role] || "";
+        sel.onchange = () => {
+          battleDeckSelections[role] = sel.value;
+          if (role === "p1" || role === "p2") {
+            deckbuilderState.selectedSavedDeckId = sel.value || deckbuilderState.selectedSavedDeckId;
+          }
+          persistPlayerSaveDebounced();
+        };
+        row.append(label, sel);
+        return row;
+      };
+
+      card.append(mkSelect("p1"), mkSelect("p2"));
+      const hint = document.createElement("div");
+      hint.className = "zoneMeta";
+      hint.textContent = "Selected deck auto-loads into your own seat on create/join.";
+      card.appendChild(hint);
+      host.appendChild(card);
+    }
+
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
       window.CardboardMeta.renderBattleLobby({
@@ -1576,6 +2189,7 @@ function mountLegacyBattleInApp() {
           try {
             const res = await battleClient.createRoom(requestedRoomCode);
             if (!res?.ok) alert(res?.error || "Failed to create room");
+            else applySavedDeckToRole("p1", battleDeckSelections.p1);
           } finally {
             battleLobbyBusy = false;
             renderApp();
@@ -1588,6 +2202,7 @@ function mountLegacyBattleInApp() {
           try {
             const res = await battleClient.joinRoom(code, preferredRole);
             if (!res?.ok) alert(res?.error || "Join failed");
+            else applySavedDeckToRole(res.role || preferredRole, battleDeckSelections[res.role || preferredRole]);
           } finally {
             battleLobbyBusy = false;
             renderApp();
@@ -1641,16 +2256,7 @@ function mountLegacyBattleInApp() {
   wrap.className = "view";
 
   if (appMode === "deckbuilder") {
-    const card = document.createElement("div");
-    card.className = "menuCard";
-    card.innerHTML = "<h2>Deckbuilder coming soon</h2>";
-    wrap.appendChild(card);
-
-    const panel = renderInspector();
-    const deckPanel = renderDeckPlacementChooser();
-    root.replaceChildren(wrap);
-    if (panel) root.appendChild(panel);
-    if (deckPanel) root.appendChild(deckPanel);
+    renderDeckbuilder(root, deckbuilderState);
     return;
   }
 
@@ -1665,6 +2271,7 @@ function mountLegacyBattleInApp() {
 
     if (!battleState) {
       renderBattleLobby(wrap);
+      renderBattleDeckSelector(wrap);
       const panel = renderInspector();
       const deckPanel = renderDeckPlacementChooser();
       root.replaceChildren(wrap);

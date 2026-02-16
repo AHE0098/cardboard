@@ -1569,3 +1569,155 @@ body.isFocus #topPiles{
 
 
 
+
+.deckbuilderWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.dbControl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dbInputRow {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 8px;
+}
+
+.dbInputRow input[type="range"] {
+  width: 100%;
+}
+
+.dbInputRow input[type="number"] {
+  background: #0b1323;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.dbInline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dbSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  font-size: 14px;
+}
+
+.dbCosts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dbCostGroup {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255,255,255,0.02);
+}
+
+.dbCostGroup h4 {
+  margin: 0 0 6px;
+}
+
+.dbCostGroup ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 760px) {
+  .dbSummaryGrid,
+  .dbCosts {
+    grid-template-columns: 1fr;
+  }
+
+  .dbInputRow {
+    grid-template-columns: 1fr 82px;
+  }
+}
+
+.dbOverview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dbOverviewGroup h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.dbMiniGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 6px;
+}
+
+.dbMiniCard {
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+  border-radius: 10px;
+  min-height: 86px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--text);
+  text-align: left;
+  position: relative;
+}
+
+.dbMiniCard.isLand {
+  background: linear-gradient(180deg, rgba(80,150,120,0.2), rgba(80,150,120,0.08));
+}
+
+.dbMiniCost {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dbMiniName {
+  font-size: 11px;
+  opacity: 0.92;
+}
+
+.dbMiniPT {
+  align-self: flex-end;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dbSavedRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.dbSavedActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dbBattlePick {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+}
