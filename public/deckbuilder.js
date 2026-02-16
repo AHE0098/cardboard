@@ -1,6 +1,7 @@
 (() => {
   const DEFAULTS = {
     deckSize: 40,
+    lands: 17,
     targetValueSum: 0,
     targetDeckScore: 0,
     includeLands: true,
@@ -18,42 +19,61 @@
 
   const CURVE_ORDER = ["0", "1", "2", "3", "4", "5", "6+"];
   const LAND_IDS = [101, 102, 103, 104, 105, 106];
+  const LAND_ID_SET = new Set(LAND_IDS.map((id) => String(id)));
 
   function clamp(n, lo, hi) {
     return Math.max(lo, Math.min(hi, n));
   }
 
- function getDeckbuilderCardPool(allCards) {
-  // Accept either array or object-map like window.CARD_REPO
-  const entries = Array.isArray(allCards)
-    ? allCards.map((c) => [c?.id, c])
-    : (allCards && typeof allCards === "object")
-      ? Object.entries(allCards)
-      : [];
-
-  // Convert "cost" safely to a number
-  const toNum = (x, fallback = 0) => {
+  function toFiniteNumber(x, fallback = 0) {
     const n = Number(x);
     return Number.isFinite(n) ? n : fallback;
-  };
+  }
 
-  return entries
-    .map(([idRaw, card]) => ({
-      id: String(idRaw), // keep string IDs (supports "2000_1")
-      name: String(card?.name || `Card ${idRaw ?? "?"}`),
-      cost: toNum(card?.cost, 0),
-      power: toNum(card?.power, 0),
-      toughness: toNum(card?.toughness, 0),
-      value: toNum(card?.value, 0)
-    }))
-    .filter((c) =>
-      c.id &&               // must exist
-      Number.isFinite(c.cost) &&
-      Number.isFinite(c.power) &&
-      Number.isFinite(c.toughness) &&
-      Number.isFinite(c.value)
-    );
-}
+  function isLandId(id) {
+    return LAND_ID_SET.has(String(id));
+  }
+
+  function analyzeCardPool(allCards) {
+    const entries = Array.isArray(allCards)
+      ? allCards.map((c) => [c?.id, c])
+      : (allCards && typeof allCards === "object")
+        ? Object.entries(allCards)
+        : [];
+
+    let droppedMalformed = 0;
+    let landCount = 0;
+    const pool = [];
+
+    entries.forEach(([idRaw, card]) => {
+      if (idRaw == null || idRaw === "") {
+        droppedMalformed += 1;
+        return;
+      }
+      const id = String(idRaw);
+      const land = isLandId(id);
+      if (land) landCount += 1;
+      pool.push({
+        id,
+        name: String(card?.name || `Card ${idRaw ?? "?"}`),
+        cost: toFiniteNumber(card?.cost, 0),
+        power: toFiniteNumber(card?.power, 0),
+        toughness: toFiniteNumber(card?.toughness, 0),
+        value: toFiniteNumber(card?.value, 0),
+        isLand: land
+      });
+    });
+
+    return {
+      pool,
+      droppedMalformed,
+      landCount
+    };
+  }
+
+  function getDeckbuilderCardPool(allCards) {
+    return analyzeCardPool(allCards).pool;
+  }
 
 
   function hashSeed(input) {
@@ -124,8 +144,11 @@
   }
 
   function buildDeck(settings, allCards) {
+    const requestedDeckSize = clamp(Math.round(Number(settings?.deckSize ?? DEFAULTS.deckSize)), 20, 100);
+    const requestedLands = clamp(Math.round(Number(settings?.lands ?? DEFAULTS.lands)), 0, requestedDeckSize);
     const safe = {
-      deckSize: clamp(Math.round(Number(settings?.deckSize ?? DEFAULTS.deckSize)), 20, 100),
+      deckSize: requestedDeckSize,
+      lands: requestedLands,
       targetValueSum: Math.round(Number(settings?.targetValueSum ?? DEFAULTS.targetValueSum)),
       targetDeckScore: Number(settings?.targetDeckScore ?? DEFAULTS.targetDeckScore),
       includeLands: settings?.includeLands !== false,
@@ -133,62 +156,80 @@
       overviewMode: settings?.overviewMode === "curve" ? "curve" : "grid"
     };
 
-    const pool = getDeckbuilderCardPool(allCards);
+    const inspected = analyzeCardPool(allCards);
+    const pool = inspected.pool.filter((c) => !c.isLand);
     const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
-    if (!pool.length) {
-      return { nonlandIds: [], lands: 0, settings: safe, stats: computeDeckStats({ nonlandIds: [], lands: 0 }, poolById), builtAt: Date.now() };
-    }
-
-    const rng = makeRng(`${safe.seed}|${safe.deckSize}|${safe.targetValueSum}|${safe.targetDeckScore}|${safe.includeLands ? 1 : 0}`);
-    const desiredMeanValue = safe.deckSize ? safe.targetValueSum / safe.deckSize : 0;
-    const desiredCost = clamp(2.5 + safe.targetDeckScore * 0.8, 0, 8);
-    const picked = [];
-
-    for (let i = 0; i < safe.deckSize; i += 1) {
-      const candidate = pool
-        .map((card) => {
-          const fit = Math.abs(card.value - desiredMeanValue) * 1.3 + Math.abs(card.cost - desiredCost) * 0.55;
-          return { card, rank: fit + rng() * 0.35 };
-        })
-        .sort((a, b) => a.rank - b.rank)[Math.floor(rng() * Math.min(18, pool.length))]?.card || pool[Math.floor(rng() * pool.length)];
-      picked.push(candidate.id);
-    }
-
-    const objective = (stats) => {
-      const deckScoreWeight = 2.2;
-      const dScore = Math.abs(stats.deckScore - safe.targetDeckScore);
-      const dValue = Math.abs(stats.sumValue - safe.targetValueSum) / Math.max(1, safe.deckSize);
-      return (Number.isFinite(safe.targetDeckScore) ? dScore * deckScoreWeight : 0) + dValue;
+    const nonlandTarget = Math.max(0, safe.deckSize - safe.lands);
+    const diagnostics = {
+      poolSize: pool.length,
+      recognizedLandIds: inspected.landCount,
+      droppedMalformed: inspected.droppedMalformed,
+      usedReplacement: false,
+      feasibleRange: [0, 0],
+      targetOutOfRange: false,
+      hint: ""
     };
 
-    let bestDeck = { nonlandIds: picked.slice(), lands: 0 };
-    let bestStats = computeDeckStats(bestDeck, poolById);
-    let bestObj = Infinity;
-
-    const minL = safe.includeLands ? Math.floor(safe.deckSize * CONSTS.PSTAR_MIN) : 0;
-    const maxL = safe.includeLands ? Math.ceil(safe.deckSize * CONSTS.PSTAR_MAX) : 0;
-    for (let lands = minL; lands <= maxL; lands += 1) {
-      const n = Math.max(0, safe.deckSize - lands);
-      if (n <= 0) continue;
-      const probe = { nonlandIds: picked.slice(0, n), lands };
-      const probeStats = computeDeckStats(probe, poolById);
-      const score = objective(probeStats);
-      if (score < bestObj) {
-        bestObj = score;
-        bestDeck = probe;
-        bestStats = probeStats;
-      }
+    if (!pool.length) {
+      const error = "No nonland cards available in CARD_REPO. Showing safe empty deck.";
+      const emptyDeck = { nonlandIds: [], lands: safe.lands };
+      return {
+        ...emptyDeck,
+        settings: safe,
+        diagnostics,
+        error,
+        stats: computeDeckStats(emptyDeck, poolById),
+        builtAt: Date.now()
+      };
     }
 
-    const swapRounds = Math.min(250, safe.deckSize * 6);
+    const rng = makeRng(`${safe.seed}|${safe.deckSize}|${safe.lands}|${safe.targetValueSum}`);
+    const sortedValues = pool.map((c) => c.value).sort((a, b) => a - b);
+    if (nonlandTarget > 0) {
+      if (pool.length < nonlandTarget) diagnostics.usedReplacement = true;
+      if (pool.length < nonlandTarget) {
+        diagnostics.feasibleRange = [sortedValues[0] * nonlandTarget, sortedValues[sortedValues.length - 1] * nonlandTarget];
+      } else {
+        const minSum = sortedValues.slice(0, nonlandTarget).reduce((sum, v) => sum + v, 0);
+        const maxSum = sortedValues.slice(Math.max(0, sortedValues.length - nonlandTarget)).reduce((sum, v) => sum + v, 0);
+        diagnostics.feasibleRange = [minSum, maxSum];
+      }
+      diagnostics.targetOutOfRange = safe.targetValueSum < diagnostics.feasibleRange[0] || safe.targetValueSum > diagnostics.feasibleRange[1];
+      if (diagnostics.targetOutOfRange) diagnostics.hint = "Target Y is outside feasible range; closest deck shown.";
+    }
+
+    const pickAt = () => pool[Math.floor(rng() * pool.length)].id;
+    const seedIds = [];
+    for (let i = 0; i < nonlandTarget; i += 1) {
+      seedIds.push(pickAt());
+    }
+
+    const costVariance = (ids) => {
+      if (!ids.length) return 0;
+      const costs = ids.map((id) => poolById[id]?.cost || 0);
+      const mean = costs.reduce((s, c) => s + c, 0) / costs.length;
+      return costs.reduce((s, c) => s + ((c - mean) ** 2), 0) / costs.length;
+    };
+
+    const objective = (stats, ids) => {
+      const valueDelta = Math.abs(stats.sumValue - safe.targetValueSum);
+      const smoothness = costVariance(ids);
+      return valueDelta + smoothness * 0.01 - stats.sumPT * 0.001;
+    };
+
+    let bestDeck = { nonlandIds: seedIds.slice(), lands: safe.lands };
+    let bestStats = computeDeckStats(bestDeck, poolById);
+    let bestObj = objective(bestStats, bestDeck.nonlandIds);
+
+    const swapRounds = clamp(nonlandTarget * 20, 300, 1000);
     for (let i = 0; i < swapRounds; i += 1) {
       if (!bestDeck.nonlandIds.length) break;
       const testIds = bestDeck.nonlandIds.slice();
       const slot = Math.floor(rng() * testIds.length);
-      testIds[slot] = pool[Math.floor(rng() * pool.length)].id;
-      const probe = { nonlandIds: testIds, lands: bestDeck.lands };
+      testIds[slot] = pickAt();
+      const probe = { nonlandIds: testIds, lands: safe.lands };
       const probeStats = computeDeckStats(probe, poolById);
-      const probeObj = objective(probeStats);
+      const probeObj = objective(probeStats, probe.nonlandIds);
       if (probeObj < bestObj) {
         bestObj = probeObj;
         bestDeck = probe;
@@ -196,12 +237,22 @@
       }
     }
 
-    return { ...bestDeck, settings: safe, stats: bestStats, builtAt: Date.now() };
+    return { ...bestDeck, settings: safe, stats: bestStats, diagnostics, builtAt: Date.now() };
   }
 
   function normalizeState(state) {
+    const input = { ...DEFAULTS, ...(state?.settings || {}) };
+    const deckSize = clamp(Math.round(Number(input.deckSize ?? DEFAULTS.deckSize)), 20, 100);
+    const lands = clamp(Math.round(Number(input.lands ?? DEFAULTS.lands)), 0, deckSize);
     return {
-      settings: { ...DEFAULTS, ...(state?.settings || {}) },
+      settings: {
+        ...input,
+        deckSize,
+        lands,
+        targetValueSum: Math.round(Number(input.targetValueSum ?? DEFAULTS.targetValueSum)),
+        seed: Number(input.seed ?? DEFAULTS.seed),
+        overviewMode: input.overviewMode === "curve" ? "curve" : "grid"
+      },
       lastDeck: state?.lastDeck || null,
       savedDecks: Array.isArray(state?.savedDecks) ? state.savedDecks : [],
       lastSelectedDeckId: state?.lastSelectedDeckId || ""
@@ -245,9 +296,9 @@
   }
 
   function hydrateBuiltDeckFromSaved(savedDeck, poolById) {
-    const cards = Array.isArray(savedDeck?.deck?.cards) ? savedDeck.deck.cards.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : [];
-    const lands = cards.filter((id) => LAND_IDS.includes(id)).length;
-    const nonlandIds = cards.filter((id) => !LAND_IDS.includes(id) && poolById[id]);
+    const cards = Array.isArray(savedDeck?.deck?.cards) ? savedDeck.deck.cards.map((id) => String(id)) : [];
+    const lands = cards.filter((id) => isLandId(id)).length;
+    const nonlandIds = cards.filter((id) => !isLandId(id) && poolById[id]);
     const stats = computeDeckStats({ nonlandIds, lands }, poolById);
     return {
       nonlandIds,
@@ -402,20 +453,42 @@
 
     controls.append(
       makeControl("Deck size (X)", "deckSize", 20, 100, 1),
-      makeControl("Target sum value (Y)", "targetValueSum", -200, 200, 1),
-      makeControl("Target DeckScore", "targetDeckScore", -10, 10, 0.1)
+      makeControl("Lands (Z)", "lands", 0, workingState.settings.deckSize, 1),
+      makeControl("Target sum value (Y)", "targetValueSum", -2000, 2000, 1)
     );
 
-    const includeRow = document.createElement("label");
-    includeRow.className = "dbInline";
-    const includeLands = document.createElement("input");
-    includeLands.type = "checkbox";
-    includeLands.checked = !!workingState.settings.includeLands;
-    includeLands.onchange = () => {
-      workingState.settings.includeLands = includeLands.checked;
-      commitState();
+    const [deckSizeControl, landsControl, targetControl] = controls.querySelectorAll(".dbControl");
+    const deckSizeSlider = deckSizeControl?.querySelector('input[type="range"]');
+    const landsSlider = landsControl?.querySelector('input[type="range"]');
+    const landsNumber = landsControl?.querySelector('input[type="number"]');
+    const setLandLimit = (maxLands) => {
+      if (!landsSlider || !landsNumber) return;
+      const clamped = clamp(Number(workingState.settings.lands || 0), 0, maxLands);
+      workingState.settings.lands = clamped;
+      landsSlider.max = String(maxLands);
+      landsNumber.max = String(maxLands);
+      landsSlider.value = String(clamped);
+      landsNumber.value = String(clamped);
     };
-    includeRow.append(includeLands, document.createTextNode(" Include virtual lands"));
+    setLandLimit(workingState.settings.deckSize);
+    if (deckSizeSlider) {
+      deckSizeSlider.addEventListener("input", () => {
+        setLandLimit(clamp(Number(deckSizeSlider.value), 20, 100));
+      });
+      deckSizeSlider.addEventListener("change", () => {
+        setLandLimit(workingState.settings.deckSize);
+        commitState();
+      });
+    }
+
+    if (targetControl) {
+      const title = targetControl.querySelector("span");
+      if (title) title.textContent = "Target sum value (Y)";
+    }
+
+    const advancedLabel = document.createElement("div");
+    advancedLabel.className = "zoneMeta";
+    advancedLabel.textContent = "Advanced";
 
     const seedInput = document.createElement("input");
     seedInput.className = "menuInput";
@@ -436,7 +509,7 @@
       deps.render?.();
     };
 
-    controls.append(includeRow, seedInput, buildBtn);
+    controls.append(advancedLabel, seedInput, buildBtn);
     wrap.appendChild(controls);
 
     const out = document.createElement("div");
@@ -446,9 +519,19 @@
       out.innerHTML = `<h3>No deck yet</h3><div class="zoneMeta">Pool size: ${pool.length}. Pick settings and build.</div>`;
     } else {
       const stats = deck.stats || computeDeckStats(deck, poolById);
+      const diagnostics = deck.diagnostics || {};
       const inspector = document.createElement("div");
       inspector.className = "zoneMeta";
       inspector.textContent = "Tap a tile to inspect a card.";
+
+      const health = document.createElement("div");
+      health.className = "zoneMeta";
+      const feasible = Array.isArray(diagnostics.feasibleRange) ? diagnostics.feasibleRange : [0, 0];
+      health.textContent = `Pool nonlands: ${Number(diagnostics.poolSize || 0)} • Land IDs recognized: ${Number(diagnostics.recognizedLandIds || 0)} • Dropped malformed: ${Number(diagnostics.droppedMalformed || 0)} • Repeated cards: ${diagnostics.usedReplacement ? "yes" : "no"} • Feasible Y: [${Number(feasible[0] || 0).toFixed(1)}, ${Number(feasible[1] || 0).toFixed(1)}]${diagnostics.hint ? ` • ${diagnostics.hint}` : ""}`;
+
+      const errorPanel = document.createElement("div");
+      errorPanel.className = "zoneMeta";
+      if (deck.error) errorPanel.textContent = `Error: ${deck.error}`;
 
       const overviewToolbar = document.createElement("div");
       overviewToolbar.className = "dbInline";
@@ -558,7 +641,9 @@
           <div>Curve [0/1/2/3/4/5/6+]: <b>${stats.curveHistogram["0"]}/${stats.curveHistogram["1"]}/${stats.curveHistogram["2"]}/${stats.curveHistogram["3"]}/${stats.curveHistogram["4"]}/${stats.curveHistogram["5"]}/${stats.curveHistogram["6+"]}</b></div>
         </div>
       `;
-      out.append(overviewToolbar, overview, inspector, saveBtn, savedWrap);
+      out.append(overviewToolbar, overview, inspector, health);
+      if (deck.error) out.append(errorPanel);
+      out.append(saveBtn, savedWrap);
     }
 
     wrap.appendChild(out);
