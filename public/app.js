@@ -1871,6 +1871,55 @@ function mountLegacyBattleInApp() {
 
     let battleLobbyBusy = false;
 
+    function applySavedDeckToRole(role, deckId) {
+      const entry = getSavedDeckById(deckId);
+      if (!entry || !battleState || !session.role || role !== session.role) return;
+      const cards = Array.isArray(entry.deck?.cards) ? entry.deck.cards.map((id) => Number(id)).filter(Number.isFinite) : [];
+      battleClient.sendIntent("SET_DECK", { owner: role, cards });
+    }
+
+    function renderBattleDeckSelector(host) {
+      const card = document.createElement("div");
+      card.className = "menuCard";
+      card.innerHTML = "<h3>Battle Deck Selection</h3>";
+
+      if (!savedDecks.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No saved decks. Build and save one in Deckbuilder Mode.";
+        card.appendChild(empty);
+        host.appendChild(card);
+        return;
+      }
+
+      const mkSelect = (role) => {
+        const row = document.createElement("div");
+        row.className = "dbBattlePick";
+        const label = document.createElement("label");
+        label.textContent = `${role.toUpperCase()} deck`;
+        const sel = document.createElement("select");
+        sel.className = "menuInput";
+        sel.innerHTML = `<option value="">(none)</option>${savedDecks.map((d) => `<option value="${d.deckId}">${d.name}</option>`).join("")}`;
+        sel.value = battleDeckSelections[role] || "";
+        sel.onchange = () => {
+          battleDeckSelections[role] = sel.value;
+          if (role === "p1" || role === "p2") {
+            deckbuilderState.selectedSavedDeckId = sel.value || deckbuilderState.selectedSavedDeckId;
+          }
+          persistPlayerSaveDebounced();
+        };
+        row.append(label, sel);
+        return row;
+      };
+
+      card.append(mkSelect("p1"), mkSelect("p2"));
+      const hint = document.createElement("div");
+      hint.className = "zoneMeta";
+      hint.textContent = "Selected deck auto-loads into your own seat on create/join.";
+      card.appendChild(hint);
+      host.appendChild(card);
+    }
+
     function renderBattleLobby(host) {
       if (!window.CardboardMeta?.renderBattleLobby) return;
       window.CardboardMeta.renderBattleLobby({
@@ -1897,6 +1946,7 @@ function mountLegacyBattleInApp() {
           try {
             const res = await battleClient.createRoom(requestedRoomCode);
             if (!res?.ok) alert(res?.error || "Failed to create room");
+            else applySavedDeckToRole("p1", battleDeckSelections.p1);
           } finally {
             battleLobbyBusy = false;
             renderApp();
@@ -1909,6 +1959,7 @@ function mountLegacyBattleInApp() {
           try {
             const res = await battleClient.joinRoom(code, preferredRole);
             if (!res?.ok) alert(res?.error || "Join failed");
+            else applySavedDeckToRole(res.role || preferredRole, battleDeckSelections[res.role || preferredRole]);
           } finally {
             battleLobbyBusy = false;
             renderApp();
@@ -1977,6 +2028,7 @@ function mountLegacyBattleInApp() {
 
     if (!battleState) {
       renderBattleLobby(wrap);
+      renderBattleDeckSelector(wrap);
       const panel = renderInspector();
       const deckPanel = renderDeckPlacementChooser();
       root.replaceChildren(wrap);
