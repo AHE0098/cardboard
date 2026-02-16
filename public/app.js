@@ -49,6 +49,8 @@ Screen + data architecture:
 
     let sandboxState = createSandboxState();
     let deckbuilderState = deckbuilderApi?.normalizeState ? deckbuilderApi.normalizeState(null) : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null };
+    let savedDecks = [];
+    let lastSelectedDeckId = "";
 
     let battleState = null;
     let battleRoomId = "";
@@ -348,6 +350,8 @@ case "TOGGLE_TAP": {
           lastMode: appMode || prev.lastMode || "sandbox",
           sandboxState,
           deckbuilderState,
+          savedDecks,
+          lastSelectedDeckId,
           lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
           updatedAt: Date.now()
         };
@@ -368,6 +372,8 @@ case "TOGGLE_TAP": {
         : (save.deckbuilderState
           ? { settings: { ...DECKBUILDER_DEFAULTS, ...(save.deckbuilderState.settings || {}) }, lastDeck: save.deckbuilderState.lastDeck || null }
           : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null });
+      savedDecks = Array.isArray(save.savedDecks) ? save.savedDecks : [];
+      lastSelectedDeckId = save.lastSelectedDeckId || "";
       appMode = null;
       uiScreen = "mainMenu";
       renderApp();
@@ -515,6 +521,15 @@ function onBack() {
 
       deckbuilderApi.renderDeckbuilder(rootNode, state, {
         allCards: window.ALL_CARDS,
+        savedDecks,
+        lastSelectedDeckId,
+        onStateChange: (nextState) => {
+          deckbuilderState = deckbuilderApi?.normalizeState ? deckbuilderApi.normalizeState(nextState) : nextState;
+        },
+        onSavedDecksChange: (nextSavedDecks, nextLastSelectedDeckId) => {
+          savedDecks = Array.isArray(nextSavedDecks) ? nextSavedDecks : [];
+          lastSelectedDeckId = String(nextLastSelectedDeckId || "");
+        },
         persist: persistPlayerSaveDebounced,
         render: renderApp
       });
@@ -1593,6 +1608,8 @@ function mountLegacyBattleInApp() {
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
         openRooms,
         isBusy: battleLobbyBusy,
+        savedDecks,
+        lastSelectedDeckId,
         onRefreshRooms: async () => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
@@ -1605,24 +1622,24 @@ function mountLegacyBattleInApp() {
             renderApp();
           }
         },
-        onCreateRoom: async (requestedRoomCode) => {
+        onCreateRoom: async (requestedRoomCode, deckSelection = {}) => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.createRoom(requestedRoomCode);
+            const res = await battleClient.createRoom(requestedRoomCode, deckSelection);
             if (!res?.ok) alert(res?.error || "Failed to create room");
           } finally {
             battleLobbyBusy = false;
             renderApp();
           }
         },
-        onJoinRoom: async (code, preferredRole) => {
+        onJoinRoom: async (code, preferredRole, deckSelection = {}) => {
           if (!code || battleLobbyBusy) return;
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.joinRoom(code, preferredRole);
+            const res = await battleClient.joinRoom(code, preferredRole, deckSelection);
             if (!res?.ok) alert(res?.error || "Join failed");
           } finally {
             battleLobbyBusy = false;

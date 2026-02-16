@@ -50,6 +50,29 @@ function makePlayer(id = null, name = "") {
   return { id, name, zones: { hand, deck, graveyard: [], lands: [], permanents: [] } };
 }
 
+function sanitizeDeckCards(cards) {
+  const arr = Array.isArray(cards) ? cards : [];
+  return arr
+    .map((id) => Number(id))
+    .filter((id) => Number.isInteger(id) && id >= 0);
+}
+
+function applyDeckToPlayer(player, cards) {
+  const deckCards = sanitizeDeckCards(cards);
+  if (!deckCards.length) return ensurePlayerZones(player);
+  const nextDeck = [...deckCards];
+  const hand = [];
+  for (let i = 0; i < 3 && nextDeck.length; i += 1) hand.push(nextDeck.shift());
+  player.zones = {
+    hand,
+    deck: nextDeck,
+    graveyard: [],
+    lands: [],
+    permanents: []
+  };
+  return ensurePlayerZones(player);
+}
+
 function ensurePlayerZones(player) {
   const zones = player.zones || {};
   zones.hand ||= [];
@@ -72,14 +95,23 @@ function makeRoom(creator, opts = {}) {
 
   if (rooms.has(roomId)) return null;
 
+  const p1 = makePlayer(creator.playerId, creator.playerName);
+  const p2 = makePlayer(null, "Waiting...");
+  if (Array.isArray(opts.deckSelection?.p1DeckCards) && opts.deckSelection.p1DeckCards.length) {
+    applyDeckToPlayer(p1, opts.deckSelection.p1DeckCards);
+  }
+  if (Array.isArray(opts.deckSelection?.p2DeckCards) && opts.deckSelection.p2DeckCards.length) {
+    applyDeckToPlayer(p2, opts.deckSelection.p2DeckCards);
+  }
+
   const room = {
     roomId,
     createdAt: Date.now(),
     state: {
       sharedZones: { stack: [] },
       players: {
-        p1: makePlayer(creator.playerId, creator.playerName),
-        p2: makePlayer(null, "Waiting...")
+        p1,
+        p2
       },
       tapped: {},
       tarped: {},
@@ -130,7 +162,7 @@ function validateZoneAccess(role, move) {
   if (toPrivate && move.to.owner !== role) return "Cannot move to opponent zone";
 
   // Keep cross-owner private moves blocked.
-  if ((fromPrivate || toPrivate) && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
+  if (fromPrivate && toPrivate && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
     return "Cross-owner private move blocked";
   }
 
@@ -255,10 +287,10 @@ function createServer() {
     });
 
     // Create a room, optionally with a requested code (from the same input as join)
-    socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
+    socket.on("create_room", ({ playerId, playerName, roomId, deckSelection = {} }, ack) => {
       detachFromRoomIfPresent();
 
-      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
+      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId, deckSelection });
       if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
 
       socket.join(room.roomId);
@@ -268,7 +300,7 @@ function createServer() {
       broadcastRoomsList();
     });
 
-    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole }, ack) => {
+    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole, deckSelection = {} }, ack) => {
       detachFromRoomIfPresent();
 
       roomId = String(roomId || "").trim().toUpperCase();
@@ -288,6 +320,9 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players[preferred].name
           });
+          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
+            applyDeckToPlayer(room.state.players[preferred], deckSelection.deckCards);
+          }
           role = preferred;
         } else if (!room.state.players.p2.id) {
           room.state.players.p2 = ensurePlayerZones({
@@ -295,6 +330,9 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p2.name
           });
+          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
+            applyDeckToPlayer(room.state.players.p2, deckSelection.deckCards);
+          }
           role = "p2";
         } else if (!room.state.players.p1.id) {
           room.state.players.p1 = ensurePlayerZones({
@@ -302,6 +340,9 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p1.name
           });
+          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
+            applyDeckToPlayer(room.state.players.p1, deckSelection.deckCards);
+          }
           role = "p1";
         } else {
           return ack?.({ ok: false, error: "Room full" });
