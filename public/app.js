@@ -1608,8 +1608,6 @@ function mountLegacyBattleInApp() {
         lastBattleRoomId: loadPlayerSave(session.playerId).lastBattleRoomId,
         openRooms,
         isBusy: battleLobbyBusy,
-        savedDecks,
-        lastSelectedDeckId,
         onRefreshRooms: async () => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
@@ -1622,24 +1620,24 @@ function mountLegacyBattleInApp() {
             renderApp();
           }
         },
-        onCreateRoom: async (requestedRoomCode, deckSelection = {}) => {
+        onCreateRoom: async (requestedRoomCode) => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.createRoom(requestedRoomCode, deckSelection);
+            const res = await battleClient.createRoom(requestedRoomCode);
             if (!res?.ok) alert(res?.error || "Failed to create room");
           } finally {
             battleLobbyBusy = false;
             renderApp();
           }
         },
-        onJoinRoom: async (code, preferredRole, deckSelection = {}) => {
+        onJoinRoom: async (code, preferredRole) => {
           if (!code || battleLobbyBusy) return;
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.joinRoom(code, preferredRole, deckSelection);
+            const res = await battleClient.joinRoom(code, preferredRole);
             if (!res?.ok) alert(res?.error || "Join failed");
           } finally {
             battleLobbyBusy = false;

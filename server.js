@@ -2,6 +2,10 @@ const express = require("express");
 const path = require("path");
 const http = require("http");
 const { Server } = require("socket.io");
+const {
+  DEFAULT_BATTLE_DECK_P1,
+  DEFAULT_BATTLE_DECK_P2
+} = require("./battleDecks");
 
 const PORT = process.env.PORT || 3000;
 const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
@@ -53,8 +57,8 @@ function makePlayer(id = null, name = "") {
 function sanitizeDeckCards(cards) {
   const arr = Array.isArray(cards) ? cards : [];
   return arr
-    .map((id) => Number(id))
-    .filter((id) => Number.isInteger(id) && id >= 0);
+    .map((id) => String(id || "").trim())
+    .filter((id) => id.length > 0);
 }
 
 function applyDeckToPlayer(player, cards) {
@@ -97,12 +101,8 @@ function makeRoom(creator, opts = {}) {
 
   const p1 = makePlayer(creator.playerId, creator.playerName);
   const p2 = makePlayer(null, "Waiting...");
-  if (Array.isArray(opts.deckSelection?.p1DeckCards) && opts.deckSelection.p1DeckCards.length) {
-    applyDeckToPlayer(p1, opts.deckSelection.p1DeckCards);
-  }
-  if (Array.isArray(opts.deckSelection?.p2DeckCards) && opts.deckSelection.p2DeckCards.length) {
-    applyDeckToPlayer(p2, opts.deckSelection.p2DeckCards);
-  }
+  applyDeckToPlayer(p1, DEFAULT_BATTLE_DECK_P1);
+  applyDeckToPlayer(p2, DEFAULT_BATTLE_DECK_P2);
 
   const room = {
     roomId,
@@ -287,10 +287,10 @@ function createServer() {
     });
 
     // Create a room, optionally with a requested code (from the same input as join)
-    socket.on("create_room", ({ playerId, playerName, roomId, deckSelection = {} }, ack) => {
+    socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
       detachFromRoomIfPresent();
 
-      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId, deckSelection });
+      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
       if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
 
       socket.join(room.roomId);
@@ -300,7 +300,7 @@ function createServer() {
       broadcastRoomsList();
     });
 
-    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole, deckSelection = {} }, ack) => {
+    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole }, ack) => {
       detachFromRoomIfPresent();
 
       roomId = String(roomId || "").trim().toUpperCase();
@@ -320,9 +320,8 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players[preferred].name
           });
-          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
-            applyDeckToPlayer(room.state.players[preferred], deckSelection.deckCards);
-          }
+          const defaultDeck = preferred === "p1" ? DEFAULT_BATTLE_DECK_P1 : DEFAULT_BATTLE_DECK_P2;
+          applyDeckToPlayer(room.state.players[preferred], defaultDeck);
           role = preferred;
         } else if (!room.state.players.p2.id) {
           room.state.players.p2 = ensurePlayerZones({
@@ -330,9 +329,7 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p2.name
           });
-          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
-            applyDeckToPlayer(room.state.players.p2, deckSelection.deckCards);
-          }
+          applyDeckToPlayer(room.state.players.p2, DEFAULT_BATTLE_DECK_P2);
           role = "p2";
         } else if (!room.state.players.p1.id) {
           room.state.players.p1 = ensurePlayerZones({
@@ -340,9 +337,7 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p1.name
           });
-          if (Array.isArray(deckSelection.deckCards) && deckSelection.deckCards.length) {
-            applyDeckToPlayer(room.state.players.p1, deckSelection.deckCards);
-          }
+          applyDeckToPlayer(room.state.players.p1, DEFAULT_BATTLE_DECK_P1);
           role = "p1";
         } else {
           return ack?.({ ok: false, error: "Room full" });
