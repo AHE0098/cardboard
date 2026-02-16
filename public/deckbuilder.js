@@ -4,7 +4,8 @@
     targetValueSum: 0,
     targetDeckScore: 0,
     includeLands: true,
-    seed: 1337
+    seed: 1337,
+    overviewMode: "grid"
   };
 
   const CONSTS = {
@@ -15,11 +16,14 @@
     PSTAR_MAX: 0.6
   };
 
+  const CURVE_ORDER = ["0", "1", "2", "3", "4", "5", "6+"];
+  const LAND_IDS = [101, 102, 103, 104, 105, 106];
+
   function clamp(n, lo, hi) {
     return Math.max(lo, Math.min(hi, n));
   }
 
-  function getCardPool(allCards) {
+  function getDeckbuilderCardPool(allCards) {
     return (Array.isArray(allCards) ? allCards : [])
       .map((card) => ({
         id: Number(card?.id),
@@ -105,10 +109,11 @@
       targetValueSum: Math.round(Number(settings?.targetValueSum ?? DEFAULTS.targetValueSum)),
       targetDeckScore: Number(settings?.targetDeckScore ?? DEFAULTS.targetDeckScore),
       includeLands: settings?.includeLands !== false,
-      seed: settings?.seed ?? DEFAULTS.seed
+      seed: settings?.seed ?? DEFAULTS.seed,
+      overviewMode: settings?.overviewMode === "curve" ? "curve" : "grid"
     };
 
-    const pool = getCardPool(allCards);
+    const pool = getDeckbuilderCardPool(allCards);
     const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
     if (!pool.length) {
       return { nonlandIds: [], lands: 0, settings: safe, stats: computeDeckStats({ nonlandIds: [], lands: 0 }, poolById), builtAt: Date.now() };
@@ -175,21 +180,172 @@
   }
 
   function normalizeState(state) {
-    return state
-      ? { settings: { ...DEFAULTS, ...(state.settings || {}) }, lastDeck: state.lastDeck || null }
-      : { settings: { ...DEFAULTS }, lastDeck: null };
+    return {
+      settings: { ...DEFAULTS, ...(state?.settings || {}) },
+      lastDeck: state?.lastDeck || null,
+      savedDecks: Array.isArray(state?.savedDecks) ? state.savedDecks : [],
+      lastSelectedDeckId: state?.lastSelectedDeckId || ""
+    };
+  }
+
+  function getCurveBucket(cost) {
+    if (!Number.isFinite(cost)) return "0";
+    return cost >= 6 ? "6+" : String(Math.max(0, Math.floor(cost)));
+  }
+
+  function mapLandsToIds(landCount, seedInput) {
+    const lands = Math.max(0, Number(landCount || 0));
+    const rng = makeRng(`${seedInput || "lands"}|${lands}`);
+    const out = [];
+    for (let i = 0; i < lands; i += 1) {
+      const idx = Math.floor(rng() * LAND_IDS.length);
+      out.push(LAND_IDS[idx]);
+    }
+    return out;
+  }
+
+  function buildSavedDeckPayload(deck, poolById, name) {
+    const nonlandIds = Array.isArray(deck?.nonlandIds) ? deck.nonlandIds.filter((id) => !!poolById[id]) : [];
+    const landIds = mapLandsToIds(deck?.lands || 0, `${Date.now()}|${name || "deck"}`);
+    const stats = deck?.stats || computeDeckStats(deck, poolById);
+    const now = Date.now();
+    return {
+      deckId: `dk_${now}_${Math.random().toString(16).slice(2, 8)}`,
+      name: (name || "Untitled Deck").trim(),
+      createdAt: now,
+      updatedAt: now,
+      settingsSnapshot: deck?.settings || null,
+      deck: {
+        size: nonlandIds.length + landIds.length,
+        lands: landIds.length,
+        cards: [...nonlandIds, ...landIds]
+      },
+      stats
+    };
+  }
+
+  function hydrateBuiltDeckFromSaved(savedDeck, poolById) {
+    const cards = Array.isArray(savedDeck?.deck?.cards) ? savedDeck.deck.cards.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : [];
+    const lands = cards.filter((id) => LAND_IDS.includes(id)).length;
+    const nonlandIds = cards.filter((id) => !LAND_IDS.includes(id) && poolById[id]);
+    const stats = computeDeckStats({ nonlandIds, lands }, poolById);
+    return {
+      nonlandIds,
+      lands,
+      settings: savedDeck?.settingsSnapshot || null,
+      stats,
+      builtAt: Date.now()
+    };
+  }
+
+  function renderMiniCardTile(cardId, cardData = {}, opts = {}) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "miniCard dbMiniCard";
+    tile.dataset.cardId = String(cardId || "");
+
+    const isLand = !!opts.isLand;
+    if (isLand) tile.classList.add("miniLand");
+
+    const cost = document.createElement("div");
+    cost.className = "miniCost";
+    cost.textContent = isLand ? "LAND" : String(cardData?.cost ?? "0");
+    tile.appendChild(cost);
+
+    const pt = document.createElement("div");
+    pt.className = "miniPT";
+    pt.textContent = isLand ? "-|-" : `${Number(cardData?.power || 0)}|${Number(cardData?.toughness || 0)}`;
+    tile.appendChild(pt);
+
+    const valueBadge = document.createElement("div");
+    valueBadge.className = "miniValue";
+    valueBadge.textContent = Number.isFinite(cardData?.value) ? `v:${Number(cardData.value).toFixed(1)}` : "v:0.0";
+    tile.appendChild(valueBadge);
+
+    const title = isLand ? "Basic Land" : (cardData?.name || `Card ${cardId}`);
+    tile.title = `${title} (${cost.textContent}, ${pt.textContent})`;
+
+    tile.onclick = () => {
+      opts.onInspect?.({
+        id: cardId,
+        isLand,
+        name: title,
+        cost: isLand ? "LAND" : String(cardData?.cost ?? "0"),
+        power: isLand ? null : Number(cardData?.power || 0),
+        toughness: isLand ? null : Number(cardData?.toughness || 0),
+        value: Number(cardData?.value || 0)
+      });
+    };
+
+    return tile;
+  }
+
+  function renderDeckOverview(deck, poolById, opts = {}) {
+    const viewMode = opts.viewMode === "curve" ? "curve" : "grid";
+    const host = document.createElement("div");
+    host.className = "deckOverviewWrap";
+
+    const cards = [];
+    const nonlandIds = Array.isArray(deck?.nonlandIds) ? deck.nonlandIds : [];
+    nonlandIds.forEach((id, index) => {
+      const data = poolById[id];
+      if (!data) return;
+      cards.push({ key: `c_${id}_${index}`, id, data, bucket: getCurveBucket(data.cost), isLand: false });
+    });
+
+    const lands = Math.max(0, Number(deck?.lands || 0));
+    for (let i = 0; i < lands; i += 1) {
+      cards.push({ key: `l_${i}`, id: LAND_IDS[i % LAND_IDS.length], data: { name: "Basic Land", cost: "LAND", power: 0, toughness: 0, value: 0 }, bucket: "LAND", isLand: true });
+    }
+
+    if (viewMode === "grid") {
+      const grid = document.createElement("div");
+      grid.className = "deckOverviewGrid";
+      cards.forEach((item) => grid.appendChild(renderMiniCardTile(item.id, item.data, { isLand: item.isLand, onInspect: opts.onInspect })));
+      host.appendChild(grid);
+      return host;
+    }
+
+    const sections = [{ key: "LAND", label: "Lands" }, ...CURVE_ORDER.map((k) => ({ key: k, label: `${k} mana` }))];
+    sections.forEach((section) => {
+      const groupCards = cards.filter((c) => c.bucket === section.key);
+      const group = document.createElement("div");
+      group.className = "dbCurveGroup";
+      const title = document.createElement("h4");
+      title.textContent = `${section.label} (${groupCards.length})`;
+      const grid = document.createElement("div");
+      grid.className = "deckOverviewGrid";
+      groupCards.forEach((item) => grid.appendChild(renderMiniCardTile(item.id, item.data, { isLand: item.isLand, onInspect: opts.onInspect })));
+      group.append(title, grid);
+      host.appendChild(group);
+    });
+
+    return host;
   }
 
   function renderDeckbuilder(rootNode, state, deps = {}) {
     const workingState = normalizeState(state);
-    const pool = getCardPool(deps.allCards);
+    const pool = getDeckbuilderCardPool(deps.allCards);
     const poolById = Object.fromEntries(pool.map((c) => [c.id, c]));
+    if (Array.isArray(deps.savedDecks)) workingState.savedDecks = deps.savedDecks;
+    if (typeof deps.lastSelectedDeckId === "string") workingState.lastSelectedDeckId = deps.lastSelectedDeckId;
+
+    const commitState = () => {
+      deps.onStateChange?.(workingState);
+      deps.persist?.();
+    };
+
+    const commitSavedDecks = () => {
+      deps.onSavedDecksChange?.(workingState.savedDecks, workingState.lastSelectedDeckId);
+      commitState();
+    };
+
     const wrap = document.createElement("div");
     wrap.className = "deckbuilderWrap";
 
     const controls = document.createElement("div");
     controls.className = "menuCard";
-    controls.innerHTML = "<h2>Deck Builder v1</h2>";
+    controls.innerHTML = "<h2>Deck Builder v1.1</h2>";
 
     const makeControl = (label, key, min, max, step = 1) => {
       const row = document.createElement("label");
@@ -215,7 +371,7 @@
         workingState.settings[key] = step === 1 ? Math.round(next) : Number(next.toFixed(2));
         slider.value = String(workingState.settings[key]);
         num.value = String(workingState.settings[key]);
-        deps.persist?.();
+        commitState();
       };
       slider.oninput = () => apply(slider.value);
       num.onchange = () => apply(num.value);
@@ -237,7 +393,7 @@
     includeLands.checked = !!workingState.settings.includeLands;
     includeLands.onchange = () => {
       workingState.settings.includeLands = includeLands.checked;
-      deps.persist?.();
+      commitState();
     };
     includeRow.append(includeLands, document.createTextNode(" Include virtual lands"));
 
@@ -248,7 +404,7 @@
     seedInput.placeholder = "Seed";
     seedInput.onchange = () => {
       workingState.settings.seed = Number(seedInput.value || 1337);
-      deps.persist?.();
+      commitState();
     };
 
     const buildBtn = document.createElement("button");
@@ -256,7 +412,7 @@
     buildBtn.textContent = "Build Deck";
     buildBtn.onclick = () => {
       workingState.lastDeck = buildDeck(workingState.settings, deps.allCards);
-      deps.persist?.();
+      commitState();
       deps.render?.();
     };
 
@@ -270,24 +426,100 @@
       out.innerHTML = `<h3>No deck yet</h3><div class="zoneMeta">Pool size: ${pool.length}. Pick settings and build.</div>`;
     } else {
       const stats = deck.stats || computeDeckStats(deck, poolById);
-      const byCost = new Map();
-      deck.nonlandIds.forEach((id) => {
-        const c = poolById[id];
-        if (!c) return;
-        const k = c.cost >= 6 ? "6+" : String(c.cost);
-        if (!byCost.has(k)) byCost.set(k, new Map());
-        const bucket = byCost.get(k);
-        bucket.set(id, (bucket.get(id) || 0) + 1);
+      const inspector = document.createElement("div");
+      inspector.className = "zoneMeta";
+      inspector.textContent = "Tap a tile to inspect a card.";
+
+      const overviewToolbar = document.createElement("div");
+      overviewToolbar.className = "dbInline";
+      const gridBtn = document.createElement("button");
+      gridBtn.className = "menuBtn";
+      gridBtn.textContent = "Grid view";
+      const curveBtn = document.createElement("button");
+      curveBtn.className = "menuBtn";
+      curveBtn.textContent = "Curve view";
+
+      const setMode = (mode) => {
+        workingState.settings.overviewMode = mode;
+        commitState();
+        deps.render?.();
+      };
+      gridBtn.onclick = () => setMode("grid");
+      curveBtn.onclick = () => setMode("curve");
+      gridBtn.disabled = workingState.settings.overviewMode === "grid";
+      curveBtn.disabled = workingState.settings.overviewMode === "curve";
+      overviewToolbar.append(gridBtn, curveBtn);
+
+      const overview = renderDeckOverview(deck, poolById, {
+        viewMode: workingState.settings.overviewMode,
+        onInspect: (card) => {
+          inspector.textContent = `${card.name} • cost ${card.cost} • ${card.isLand ? "LAND" : `${card.power}|${card.toughness}`} • value ${Number(card.value || 0).toFixed(2)}`;
+        }
       });
 
-      const order = ["0", "1", "2", "3", "4", "5", "6+"];
-      const groupHtml = order.map((k) => {
-        const bucket = byCost.get(k);
-        if (!bucket || !bucket.size) return `<div class="dbCostGroup"><h4>${k}: 0</h4></div>`;
-        const items = [...bucket.entries()].map(([id, count]) => `<li>${count}x ${poolById[id]?.name || id} (v=${poolById[id]?.value ?? 0})</li>`).join("");
-        const total = [...bucket.values()].reduce((a, b) => a + b, 0);
-        return `<div class="dbCostGroup"><h4>${k}: ${total}</h4><ul>${items}</ul></div>`;
-      }).join("");
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "menuBtn";
+      saveBtn.textContent = "Save Deck";
+      saveBtn.onclick = () => {
+        const suggested = `Deck ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+        const name = window.prompt("Deck name", suggested);
+        if (name == null) return;
+        const trimmed = String(name || "").trim();
+        if (!trimmed) return;
+        const payload = buildSavedDeckPayload(deck, poolById, trimmed);
+        workingState.savedDecks = [payload, ...(workingState.savedDecks || [])];
+        workingState.lastSelectedDeckId = payload.deckId;
+        commitSavedDecks();
+        deps.render?.();
+      };
+
+      const savedWrap = document.createElement("div");
+      savedWrap.className = "dbSavedDecks";
+      const savedTitle = document.createElement("h3");
+      savedTitle.textContent = "Saved Decks";
+      savedWrap.appendChild(savedTitle);
+
+      const savedDecks = Array.isArray(workingState.savedDecks) ? workingState.savedDecks : [];
+      if (!savedDecks.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No saved decks yet.";
+        savedWrap.appendChild(empty);
+      } else {
+        savedDecks.forEach((saved) => {
+          const row = document.createElement("div");
+          row.className = "dbSavedDeckRow";
+          const score = Number(saved?.stats?.deckScore || 0).toFixed(3);
+          const size = Number(saved?.deck?.size || saved?.deck?.cards?.length || 0);
+          const landsCount = Number(saved?.deck?.lands || 0);
+          const meta = document.createElement("div");
+          meta.className = "zoneMeta";
+          meta.textContent = `${saved.name} • score ${score} • size ${size} • lands ${landsCount}`;
+
+          const loadBtn = document.createElement("button");
+          loadBtn.className = "menuBtn";
+          loadBtn.textContent = "Load";
+          loadBtn.onclick = () => {
+            workingState.lastDeck = hydrateBuiltDeckFromSaved(saved, poolById);
+            workingState.lastSelectedDeckId = saved.deckId;
+            commitSavedDecks();
+            deps.render?.();
+          };
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "menuBtn";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.onclick = () => {
+            workingState.savedDecks = savedDecks.filter((d) => d.deckId !== saved.deckId);
+            if (workingState.lastSelectedDeckId === saved.deckId) workingState.lastSelectedDeckId = "";
+            commitSavedDecks();
+            deps.render?.();
+          };
+
+          row.append(meta, loadBtn, deleteBtn);
+          savedWrap.appendChild(row);
+        });
+      }
 
       out.innerHTML = `
         <h3>Summary</h3>
@@ -305,9 +537,8 @@
           <div>DeckScore: <b>${stats.deckScore.toFixed(4)}</b></div>
           <div>Curve [0/1/2/3/4/5/6+]: <b>${stats.curveHistogram["0"]}/${stats.curveHistogram["1"]}/${stats.curveHistogram["2"]}/${stats.curveHistogram["3"]}/${stats.curveHistogram["4"]}/${stats.curveHistogram["5"]}/${stats.curveHistogram["6+"]}</b></div>
         </div>
-        <h3>Deck List by Cost</h3>
-        <div class="dbCosts">${groupHtml}</div>
       `;
+      out.append(overviewToolbar, overview, inspector, saveBtn, savedWrap);
     }
 
     wrap.appendChild(out);
@@ -318,7 +549,11 @@
     DEFAULTS,
     normalizeState,
     renderDeckbuilder,
+    renderDeckOverview,
+    renderMiniCardTile,
     buildDeck,
-    computeDeckStats
+    computeDeckStats,
+    computeDeckScore,
+    getDeckbuilderCardPool
   };
 })();

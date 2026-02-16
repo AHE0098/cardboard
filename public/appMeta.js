@@ -79,7 +79,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       return [...openRooms];
     },
 
-    async createRoom(roomId = "") {
+    async createRoom(roomId = "", deckSelection = {}) {
       const s = await this.connect();
       return new Promise((resolve) => {
         const currentSession = api.getSession();
@@ -88,7 +88,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           {
             playerId: currentSession.playerId,
             playerName: currentSession.playerName,
-            roomId: String(roomId || "").trim().toUpperCase()
+            roomId: String(roomId || "").trim().toUpperCase(),
+            deckSelection
           },
           (res) => {
             if (res?.ok) {
@@ -101,7 +102,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       });
     },
 
-    async joinRoom(roomId, preferredRole = null) {
+    async joinRoom(roomId, preferredRole = null, deckSelection = {}) {
       const s = await this.connect();
       return new Promise((resolve) => {
         const currentSession = api.getSession();
@@ -111,7 +112,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
             roomId,
             preferredRole: normalizeRole(preferredRole),
             playerId: currentSession.playerId,
-            playerName: currentSession.playerName
+            playerName: currentSession.playerName,
+            deckSelection
           },
           (res) => {
             if (res?.ok) {
@@ -162,7 +164,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
 }
 
 
-  function renderBattleLobby({ host, lastBattleRoomId, openRooms = [], isBusy = false, onCreateRoom, onJoinRoom, onRefreshRooms, onDeleteRoom, onDeleteAllRooms }) {
+  function renderBattleLobby({ host, lastBattleRoomId, openRooms = [], isBusy = false, savedDecks = [], lastSelectedDeckId = "", onCreateRoom, onJoinRoom, onRefreshRooms, onDeleteRoom, onDeleteAllRooms }) {
     const card = document.createElement("div");
     card.className = "menuCard";
     card.innerHTML = "<h3>Battle Room</h3>";
@@ -178,6 +180,43 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       <option value="p2">Join as Player 2</option>
       <option value="p1">Join as Player 1</option>
     `;
+
+    const deckOptions = [{ deckId: "", name: "Default seeded deck", deck: { cards: [] } }, ...savedDecks];
+
+    const makeDeckSelect = (labelText) => {
+      const wrap = document.createElement("label");
+      wrap.className = "dbControl";
+      const label = document.createElement("span");
+      label.textContent = labelText;
+      const select = document.createElement("select");
+      select.className = "menuInput";
+      deckOptions.forEach((deck) => {
+        const opt = document.createElement("option");
+        opt.value = String(deck.deckId || "");
+        opt.textContent = deck.name || "Unnamed deck";
+        select.appendChild(opt);
+      });
+      if (lastSelectedDeckId && deckOptions.some((d) => d.deckId === lastSelectedDeckId)) select.value = lastSelectedDeckId;
+      wrap.append(label, select);
+      return { wrap, select };
+    };
+
+    const p1Deck = makeDeckSelect("P1 saved deck");
+    const p2Deck = makeDeckSelect("P2 saved deck");
+
+    const deckSelectionForCreate = () => ({
+      p1DeckId: p1Deck.select.value || "",
+      p2DeckId: p2Deck.select.value || "",
+      p1DeckCards: deckOptions.find((d) => d.deckId === p1Deck.select.value)?.deck?.cards || [],
+      p2DeckCards: deckOptions.find((d) => d.deckId === p2Deck.select.value)?.deck?.cards || []
+    });
+
+    const deckSelectionForJoin = (role) => ({
+      deckId: role === "p1" ? (p1Deck.select.value || "") : (p2Deck.select.value || ""),
+      deckCards: role === "p1"
+        ? (deckOptions.find((d) => d.deckId === p1Deck.select.value)?.deck?.cards || [])
+        : (deckOptions.find((d) => d.deckId === p2Deck.select.value)?.deck?.cards || [])
+    });
 
     const normalizeRoomCode = (value) => String(value || "").trim().toUpperCase();
     const findOpenRoom = (code) => openRooms.find((r) => r.roomId === normalizeRoomCode(code));
@@ -222,13 +261,13 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
     const createBtn = document.createElement("button");
     createBtn.className = "menuBtn";
     createBtn.textContent = "Create room";
-    createBtn.onclick = () => onCreateRoom(input.value.trim().toUpperCase());
+    createBtn.onclick = () => onCreateRoom(input.value.trim().toUpperCase(), deckSelectionForCreate());
     createBtn.disabled = !!isBusy;
 
     const joinBtn = document.createElement("button");
     joinBtn.className = "menuBtn";
     joinBtn.textContent = "Join room";
-    joinBtn.onclick = () => onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value);
+    joinBtn.onclick = () => onJoinRoom(input.value.trim().toUpperCase(), roleSelect.value, deckSelectionForJoin(roleSelect.value));
     joinBtn.disabled = !!isBusy;
 
     const deleteBtn = document.createElement("button");
@@ -250,7 +289,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       const safeRole = pickAvailableRole(room, roleSelect.value);
       if (!roomCode || !safeRole) return;
       roleSelect.value = safeRole;
-      onJoinRoom(roomCode, safeRole);
+      onJoinRoom(roomCode, safeRole, deckSelectionForJoin(safeRole));
     });
     input.addEventListener("input", syncRoleSelect);
 
@@ -292,13 +331,13 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
         joinP1.className = "menuBtn";
         joinP1.textContent = `Join ${room.roomId} as P1`;
         joinP1.disabled = !!room.p1 || !!isBusy;
-        joinP1.onclick = () => onJoinRoom(room.roomId, "p1");
+        joinP1.onclick = () => onJoinRoom(room.roomId, "p1", deckSelectionForJoin("p1"));
 
         const joinP2 = document.createElement("button");
         joinP2.className = "menuBtn";
         joinP2.textContent = `Join ${room.roomId} as P2`;
         joinP2.disabled = !!room.p2 || !!isBusy;
-        joinP2.onclick = () => onJoinRoom(room.roomId, "p2");
+        joinP2.onclick = () => onJoinRoom(room.roomId, "p2", deckSelectionForJoin("p2"));
 
         row.append(title, joinP1, joinP2);
         list.appendChild(row);
@@ -315,7 +354,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       card.appendChild(busy);
     }
 
-    card.append(input, roleSelect, createBtn, joinBtn, deleteBtn, deleteAllBtn, hint, listCard);
+    card.append(input, roleSelect, p1Deck.wrap, p2Deck.wrap, createBtn, joinBtn, deleteBtn, deleteAllBtn, hint, listCard);
     host.appendChild(card);
   }
 
