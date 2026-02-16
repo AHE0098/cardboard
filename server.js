@@ -129,8 +129,8 @@ function validateZoneAccess(role, move) {
   if (fromPrivate && move.from.owner !== role) return "Cannot move opponent card";
   if (toPrivate && move.to.owner !== role) return "Cannot move to opponent zone";
 
-  // Keep destination private zones owner-locked across owners.
-  if (toPrivate && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
+  // Keep cross-owner private moves blocked.
+  if ((fromPrivate || toPrivate) && move.from.owner !== move.to.owner && !(fromShared || toShared)) {
     return "Cross-owner private move blocked";
   }
 
