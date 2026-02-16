@@ -1569,3 +1569,80 @@ body.isFocus #topPiles{
 
 
 
+
+.deckbuilderWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.dbControl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dbInputRow {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 8px;
+}
+
+.dbInputRow input[type="range"] {
+  width: 100%;
+}
+
+.dbInputRow input[type="number"] {
+  background: #0b1323;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.dbInline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dbSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  font-size: 14px;
+}
+
+.dbCosts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dbCostGroup {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255,255,255,0.02);
+}
+
+.dbCostGroup h4 {
+  margin: 0 0 6px;
+}
+
+.dbCostGroup ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 760px) {
+  .dbSummaryGrid,
+  .dbCosts {
+    grid-template-columns: 1fr;
+  }
+
+  .dbInputRow {
+    grid-template-columns: 1fr 82px;
+  }
+}
