@@ -1,3 +1,7 @@
+// What changed / how to test:
+// - Added optional per-role deck payload support on create/join so server-authoritative battle can load saved decks reliably.
+// - Added server-side applyDeckToBattleState helper usage through applyDeckToPlayer for chosen seats.
+// - Test: create/join room with deckCardsByRole payload; verify initial hand/deck reflect chosen deck and draws operate normally.
 const express = require("express");
 const path = require("path");
 const http = require("http");
@@ -61,6 +65,14 @@ function sanitizeDeckCards(cards) {
     .filter((id) => id.length > 0);
 }
 
+function sanitizeDeckCardsByRole(payload) {
+  const src = payload && typeof payload === "object" ? payload : {};
+  return {
+    p1: sanitizeDeckCards(src.p1),
+    p2: sanitizeDeckCards(src.p2)
+  };
+}
+
 function applyDeckToPlayer(player, cards) {
   const deckCards = sanitizeDeckCards(cards);
   if (!deckCards.length) return ensurePlayerZones(player);
@@ -101,8 +113,9 @@ function makeRoom(creator, opts = {}) {
 
   const p1 = makePlayer(creator.playerId, creator.playerName);
   const p2 = makePlayer(null, "Waiting...");
-  applyDeckToPlayer(p1, DEFAULT_BATTLE_DECK_P1);
-  applyDeckToPlayer(p2, DEFAULT_BATTLE_DECK_P2);
+  const requestedDecks = sanitizeDeckCardsByRole(opts.deckCardsByRole);
+  applyDeckToPlayer(p1, requestedDecks.p1.length ? requestedDecks.p1 : DEFAULT_BATTLE_DECK_P1);
+  applyDeckToPlayer(p2, requestedDecks.p2.length ? requestedDecks.p2 : DEFAULT_BATTLE_DECK_P2);
 
   const room = {
     roomId,
@@ -287,10 +300,10 @@ function createServer() {
     });
 
     // Create a room, optionally with a requested code (from the same input as join)
-    socket.on("create_room", ({ playerId, playerName, roomId }, ack) => {
+    socket.on("create_room", ({ playerId, playerName, roomId, deckCardsByRole }, ack) => {
       detachFromRoomIfPresent();
 
-      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId });
+      const room = makeRoom({ playerId, playerName }, { requestedRoomId: roomId, deckCardsByRole });
       if (!room) return ack?.({ ok: false, error: "Room code already exists (or invalid)" });
 
       socket.join(room.roomId);
@@ -300,7 +313,7 @@ function createServer() {
       broadcastRoomsList();
     });
 
-    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole }, ack) => {
+    socket.on("join_room", ({ roomId, playerId, playerName, preferredRole, deckCardsByRole }, ack) => {
       detachFromRoomIfPresent();
 
       roomId = String(roomId || "").trim().toUpperCase();
@@ -343,6 +356,10 @@ function createServer() {
           return ack?.({ ok: false, error: "Room full" });
         }
       }
+
+      const requestedDecks = sanitizeDeckCardsByRole(deckCardsByRole);
+      if (role === "p1" && requestedDecks.p1.length) applyDeckToPlayer(room.state.players.p1, requestedDecks.p1);
+      if (role === "p2" && requestedDecks.p2.length) applyDeckToPlayer(room.state.players.p2, requestedDecks.p2);
 
       socket.join(roomId);
       socketPresence.set(socket.id, { roomId, role });

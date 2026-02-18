@@ -1,3 +1,7 @@
+// What changed / how to test:
+// - Added deckbuilder randomizer (with lock lands + fixed picks), final deck preview, and robust save/load wiring to cb_decks_v1 helpers.
+// - Added saved deck UX (load/rename/delete) with land badges and currentDeck metadata.
+// - Test: set Deck size + land counts, click Randomize Deck, verify preview totals, Save Deck, refresh, and Load from Saved Decks.
 (() => {
   const DEBUG = false;
 
@@ -14,6 +18,8 @@
     enforceCurve: true,
     lockColors: false,
     allowDuplicates: false,
+    lockLands: true,
+    landCounts: { "101": 0, "102": 0, "103": 0, "104": 0, "105": 0, "106": 0 },
     colorsSelected: ["W", "U", "B", "R", "G"],
     overviewMode: "grid",
     listSort: "name"
@@ -246,7 +252,12 @@
       colorsSelected,
       seed: merged.seed == null ? "1337" : String(merged.seed),
       overviewMode: ["grid", "curve", "list"].includes(merged.overviewMode) ? merged.overviewMode : "grid",
-      listSort: ["name", "value", "cmc"].includes(merged.listSort) ? merged.listSort : "name"
+      listSort: ["name", "value", "cmc"].includes(merged.listSort) ? merged.listSort : "name",
+      lockLands: merged.lockLands !== false,
+      landCounts: LAND_IDS.reduce((acc, id) => {
+        acc[id] = Math.max(0, Math.round(toFiniteNumber(merged?.landCounts?.[id], 0)));
+        return acc;
+      }, {})
     };
   }
 
@@ -256,7 +267,8 @@
       lastDeck: state?.lastDeck || null,
       savedDecks: Array.isArray(state?.savedDecks) ? state.savedDecks : [],
       lastSelectedDeckId: state?.lastSelectedDeckId || "",
-      inspectCardId: state?.inspectCardId || ""
+      inspectCardId: state?.inspectCardId || "",
+      currentDeck: state?.currentDeck || null
     };
   }
 
@@ -468,46 +480,128 @@ const inspected = analyzeCardPool(cardsSource);
     return out;
   }
 
-  function buildSavedDeckPayload(deck, poolById, name) {
-    const nonlandIds = Array.isArray(deck?.nonlandIds)
-      ? deck.nonlandIds.map(String).filter((id) => !!poolById[id])
-      : [];
-    const landIds = mapLandsToIds(deck?.lands || 0, `${deck?.settings?.seed || Date.now()}|${name || "deck"}`);
-    const statsSnapshot = deck?.stats || computeDeckStats(deck, poolById);
-    const now = Date.now();
+
+
+  function summarizeDeckIds(deckIds, cardRepo) {
+    const ids = Array.isArray(deckIds) ? deckIds.map(String) : [];
+    const byLandType = { "101": 0, "102": 0, "103": 0, "104": 0, "105": 0, "106": 0 };
+    const nonlands = [];
+    ids.forEach((id) => {
+      if (byLandType[id] != null) byLandType[id] += 1;
+      else nonlands.push(id);
+    });
     return {
-      deckId: `dk_${now}_${Math.random().toString(16).slice(2, 8)}`,
-      name: (name || "Untitled Deck").trim(),
-      createdAt: now,
-      updatedAt: now,
-      settingsSnapshot: deck?.settings || null,
-      meta: {
-        colorsSelected: deck?.settings?.colorsSelected || [],
-        curvePreset: deck?.settings?.curvePreset || "midrange",
-        avgCmcTarget: deck?.settings?.avgCmcTarget || 2.6,
-        allowDuplicates: !!deck?.settings?.allowDuplicates,
-        seed: deck?.settings?.seed ?? "1337"
-      },
-      deck: {
-        size: nonlandIds.length + landIds.length,
-        lands: landIds.length,
-        cards: [...nonlandIds, ...landIds].map(String)
-      },
-      statsSnapshot
+      totalCards: ids.length,
+      lands: Object.values(byLandType).reduce((a, b) => a + b, 0),
+      nonlands: nonlands.length,
+      byLandType,
+      nonlandIds: nonlands,
+      nonlandNames: nonlands.map((id) => String(cardRepo?.[id]?.name || `Unknown ${id}`))
     };
   }
 
-  function hydrateBuiltDeckFromSaved(savedDeck, poolById) {
-    const cards = Array.isArray(savedDeck?.deck?.cards) ? savedDeck.deck.cards.map((id) => String(id)) : [];
-    const lands = cards.filter((id) => isLandId(id)).length;
-    const nonlandIds = cards.filter((id) => !isLandId(id) && poolById[id]);
-    const stats = computeDeckStats({ nonlandIds, lands }, poolById);
+  function buildRandomDeckFromChoices(settingsInput, cardRepo, opts = {}) {
+    const settings = normalizeSettings(settingsInput || {});
+    const warnings = [];
+    const errors = [];
+    const fixedCardCounts = opts?.fixedCardCounts && typeof opts.fixedCardCounts === "object" ? opts.fixedCardCounts : {};
+    const deckSize = Math.max(0, Math.round(toFiniteNumber(settings.deckSize, 0)));
+
+    if (!deckSize) {
+      return { deckIds: [], summary: summarizeDeckIds([], cardRepo), warnings, errors: ["Set deck size to randomize."] };
+    }
+
+    const deckIds = [];
+    LAND_IDS.forEach((id) => {
+      const n = Math.max(0, Math.round(toFiniteNumber(settings?.landCounts?.[id], 0)));
+      for (let i = 0; i < n; i += 1) deckIds.push(id);
+    });
+    Object.entries(fixedCardCounts).forEach(([id, count]) => {
+      const n = Math.max(0, Math.round(toFiniteNumber(count, 0)));
+      for (let i = 0; i < n; i += 1) deckIds.push(String(id));
+    });
+
+    if (deckIds.length > deckSize) {
+      errors.push(`Fixed picks (${deckIds.length}) exceed deck size (${deckSize}).`);
+      return { deckIds: [], summary: summarizeDeckIds([], cardRepo), warnings, errors };
+    }
+
+    const poolNonLand = Object.keys(cardRepo || {}).filter((id) => window.CARD_KIND?.(id) !== "land");
+    if (!poolNonLand.length && deckIds.length < deckSize) {
+      errors.push("No nonland cards available for random fill.");
+      return { deckIds: [], summary: summarizeDeckIds([], cardRepo), warnings, errors };
+    }
+
+    const allowDuplicates = settings.allowDuplicates !== false;
+    if (!allowDuplicates) {
+      const used = new Set(deckIds.filter((id) => window.CARD_KIND?.(id) !== "land"));
+      const available = poolNonLand.filter((id) => !used.has(id));
+      if (available.length < (deckSize - deckIds.length)) {
+        errors.push(`Need ${deckSize - deckIds.length} unique nonlands, but only ${available.length} available.`);
+        warnings.push("Enable duplicates or reduce deck size/fixed picks.");
+        return { deckIds: [], summary: summarizeDeckIds([], cardRepo), warnings, errors };
+      }
+    }
+
+    const rng = makeRng(`${settings.seed}|randomizer|${deckSize}|${Date.now()}`);
+    const available = poolNonLand.slice();
+    while (deckIds.length < deckSize) {
+      const source = allowDuplicates ? poolNonLand : available;
+      const idx = Math.floor(rng() * source.length);
+      const chosen = source[idx];
+      if (!chosen) break;
+      deckIds.push(chosen);
+      if (!allowDuplicates) {
+        const rm = available.indexOf(chosen);
+        if (rm >= 0) available.splice(rm, 1);
+      }
+    }
+
+    if (deckIds.length !== deckSize) errors.push(`Could not build deck to exact size ${deckSize}.`);
+    const summary = summarizeDeckIds(deckIds, cardRepo);
+    return { deckIds, summary, warnings, errors };
+  }
+
+  function buildSavedDeckPayload(currentDeck, cardRepo, name, selectedDeckId = "") {
+    const now = Date.now();
+    const id = selectedDeckId || `dk_${now}_${Math.random().toString(16).slice(2, 8)}`;
+    const cards = Array.isArray(currentDeck?.deckIds) ? currentDeck.deckIds.map(String) : [];
+    const summary = currentDeck?.summary || summarizeDeckIds(cards, cardRepo || {});
     return {
-      nonlandIds,
-      lands,
-      settings: normalizeSettings(savedDeck?.settingsSnapshot || {}),
-      stats,
-      builtAt: Date.now()
+      id,
+      name: (name || "Untitled Deck").trim(),
+      createdAt: Number(currentDeck?.createdAt || now),
+      updatedAt: now,
+      deckSize: Number(currentDeck?.deckSize || cards.length),
+      cards,
+      stats: {
+        lands: Number(summary.lands || 0),
+        nonlands: Number(summary.nonlands || 0),
+        byLandType: { ...(summary.byLandType || {}) }
+      },
+      source: {
+        lockLands: !!currentDeck?.lockLands,
+        landCounts: { ...(currentDeck?.landCounts || {}) },
+        seed: currentDeck?.seed || ""
+      }
+    };
+  }
+
+  function hydrateBuiltDeckFromSaved(savedDeck, cardRepo) {
+    const cards = Array.isArray(savedDeck?.cards)
+      ? savedDeck.cards.map((id) => String(id))
+      : (Array.isArray(savedDeck?.deck?.cards) ? savedDeck.deck.cards.map((id) => String(id)) : []);
+    const summary = summarizeDeckIds(cards, cardRepo || {});
+    return {
+      deckIds: cards,
+      summary,
+      warnings: [],
+      deckSize: Number(savedDeck?.deckSize || savedDeck?.deck?.size || cards.length),
+      lockLands: !!savedDeck?.source?.lockLands,
+      landCounts: { ...(savedDeck?.source?.landCounts || summary.byLandType || {}) },
+      builtAt: Date.now(),
+      createdAt: Number(savedDeck?.createdAt || Date.now()),
+      seed: savedDeck?.source?.seed || ""
     };
   }
 
@@ -640,7 +734,9 @@ const inspected = analyzeCardPool(cardsSource);
 const pool = getDeckbuilderCardPool(cardsSource);
 
     const poolById = Object.fromEntries(pool.filter((c) => c.type !== "land").map((c) => [c.id, c]));
+    const storageApi = window.CardboardDeckStorage || null;
     if (Array.isArray(deps.savedDecks)) workingState.savedDecks = deps.savedDecks;
+    else if (storageApi?.getSavedDecks) workingState.savedDecks = storageApi.getSavedDecks();
     if (typeof deps.lastSelectedDeckId === "string") workingState.lastSelectedDeckId = deps.lastSelectedDeckId;
 
     const commitState = () => {
@@ -649,6 +745,9 @@ const pool = getDeckbuilderCardPool(cardsSource);
     };
 
     const commitSavedDecks = () => {
+      if (storageApi?.getSavedDecks) {
+        workingState.savedDecks = storageApi.getSavedDecks();
+      }
       deps.onSavedDecksChange?.(workingState.savedDecks, workingState.lastSelectedDeckId);
       commitState();
     };
@@ -851,7 +950,68 @@ const pool = getDeckbuilderCardPool(cardsSource);
 
     const out = document.createElement("div");
     out.className = "menuCard dbOutput";
+
+    const lockLandsLabel = document.createElement("label");
+    lockLandsLabel.className = "dbHint";
+    const lockLandsInput = document.createElement("input");
+    lockLandsInput.type = "checkbox";
+    lockLandsInput.checked = !!workingState.settings.lockLands;
+    lockLandsInput.onchange = () => {
+      workingState.settings.lockLands = lockLandsInput.checked;
+      commitState();
+    };
+    lockLandsLabel.append(lockLandsInput, document.createTextNode("Lock lands"));
+    controls.appendChild(lockLandsLabel);
+
+    const landCountsWrap = document.createElement("div");
+    landCountsWrap.className = "dbInline";
+    LAND_IDS.forEach((id) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "menuInput";
+      input.min = "0";
+      input.style.maxWidth = "80px";
+      input.value = String(workingState.settings?.landCounts?.[id] || 0);
+      input.title = `${window.CARD_REPO?.[id]?.name || id}`;
+      input.onchange = () => {
+        workingState.settings.landCounts[id] = Math.max(0, Math.round(toFiniteNumber(input.value, 0)));
+        commitState();
+      };
+      const lbl = document.createElement("label");
+      lbl.className = "dbHint";
+      lbl.textContent = (window.CARD_REPO?.[id]?.name || id).slice(0, 3);
+      lbl.appendChild(input);
+      landCountsWrap.appendChild(lbl);
+    });
+    controls.appendChild(landCountsWrap);
+
+    const randomizeBtn = document.createElement("button");
+    randomizeBtn.className = "menuBtn";
+    randomizeBtn.textContent = "Randomize Deck";
+    randomizeBtn.onclick = () => {
+      const result = buildRandomDeckFromChoices(workingState.settings, window.CARD_REPO || {}, { fixedCardCounts: workingState.settings.fixedCardCounts || {} });
+      if (result.errors.length) {
+        alert(result.errors[0]);
+        return;
+      }
+      workingState.currentDeck = {
+        deckIds: result.deckIds,
+        summary: result.summary,
+        warnings: result.warnings,
+        builtAt: Date.now(),
+        deckSize: workingState.settings.deckSize,
+        lockLands: !!workingState.settings.lockLands,
+        landCounts: { ...(workingState.settings.landCounts || {}) },
+        seed: workingState.settings.seed
+      };
+      commitState();
+      deps.render?.();
+    };
+    controls.appendChild(randomizeBtn);
+
     const deck = workingState.lastDeck;
+    const currentDeck = workingState.currentDeck || null;
+
     if (!pool.length) {
       out.innerHTML = '<h3>Deck Output</h3><div class="dbWarning">CARD_REPO is empty. Add cards to build decks.</div>';
       wrap.appendChild(out);
@@ -859,103 +1019,72 @@ const pool = getDeckbuilderCardPool(cardsSource);
       return;
     }
 
-    if (!deck) {
-      out.innerHTML = `<h3>Deck Output</h3><div class="dbHint">Pool: ${pool.length} cards. Set options and click Build Deck.</div>`;
-      wrap.appendChild(out);
-      rootNode.replaceChildren(wrap);
-      return;
+    if (deck) {
+      const stats = deck.stats || computeDeckStats(deck, poolById);
+      const diagnostics = deck.diagnostics || {};
+      const hintLines = buildHintLines(workingState.settings, diagnostics, { count: nonlandPool.length });
+      const status = document.createElement("div");
+      status.className = "dbHint";
+      status.textContent = diagnostics.status || "Built.";
+      out.appendChild(status);
+      hintLines.forEach((line) => {
+        const hint = document.createElement("div");
+        hint.className = "dbWarning";
+        hint.textContent = line;
+        out.appendChild(hint);
+      });
+      const deckStats = document.createElement("div");
+      deckStats.className = "dbHint";
+      deckStats.textContent = `Legacy build: total ${stats.totalCards}, lands ${stats.lands}, nonlands ${stats.nonlands}`;
+      out.appendChild(deckStats);
     }
 
-    const stats = deck.stats || computeDeckStats(deck, poolById);
-    const diagnostics = deck.diagnostics || {};
-    const hintLines = buildHintLines(workingState.settings, diagnostics, { count: nonlandPool.length });
+    const previewTitle = document.createElement("h3");
+    previewTitle.textContent = "Final Deck Preview";
+    out.appendChild(previewTitle);
 
-    const chipRow = document.createElement("div");
-    chipRow.className = "dbInline";
-    const chips = [
-      `X ${stats.totalCards}`,
-      `Z ${stats.lands}`,
-      `Avg CMC ${stats.avgCmc.toFixed(2)}`,
-      `Value ${stats.sumValue.toFixed(1)}`,
-      `Deck Quality ${stats.deckQuality.toFixed(0)}`,
-      `Colors W${stats.colorCounts.W}/U${stats.colorCounts.U}/B${stats.colorCounts.B}/R${stats.colorCounts.R}/G${stats.colorCounts.G}/C${stats.colorCounts.C}`
-    ];
-    chips.forEach((text) => {
-      const chip = document.createElement("span");
-      chip.className = "dbChip";
-      chip.textContent = text;
-      chipRow.appendChild(chip);
-    });
+    if (!currentDeck) {
+      const empty = document.createElement("div");
+      empty.className = "dbHint";
+      empty.textContent = "Set deck size to randomize.";
+      out.appendChild(empty);
+    } else {
+      const ssum = currentDeck.summary || summarizeDeckIds(currentDeck.deckIds, window.CARD_REPO || {});
+      const totals = document.createElement("div");
+      totals.className = "dbHint";
+      totals.textContent = `Total cards ${ssum.totalCards} • Lands ${ssum.lands} • Nonlands ${ssum.nonlands}`;
+      out.appendChild(totals);
 
-    const hist = document.createElement("div");
-    hist.className = "dbCurveHistogram";
-    CURVE_ORDER.forEach((bucket) => {
-      const barWrap = document.createElement("div");
-      const value = stats.curveHistogram[bucket] || 0;
-      const pct = stats.nonlands ? Math.round((value / stats.nonlands) * 100) : 0;
-      barWrap.innerHTML = `<div class="dbHint">${bucket}</div><div style="height:10px;background:#444;position:relative"><div style="width:${pct}%;height:100%;background:#7aa2f7"></div></div><div class="dbHint">${value}</div>`;
-      hist.appendChild(barWrap);
-    });
+      const landLine = document.createElement("div");
+      landLine.className = "dbHint";
+      landLine.textContent = LAND_IDS.map((id) => `${window.CARD_REPO?.[id]?.name || id} x${ssum.byLandType?.[id] || 0}`).join(" • ");
+      out.appendChild(landLine);
 
-    const status = document.createElement("div");
-    status.className = "dbHint";
-    status.textContent = diagnostics.status || "Built.";
+      const list = document.createElement("div");
+      list.className = "zoneMeta";
+      list.style.maxHeight = "140px";
+      list.style.overflow = "auto";
+      list.textContent = (ssum.nonlandIds || []).map((id) => window.CARD_REPO?.[id]?.name || `Unknown ${id}`).join(", ");
+      out.appendChild(list);
 
-    const relaxed = document.createElement("div");
-    relaxed.className = "dbHint";
-    if (diagnostics.relaxed?.length) {
-      relaxed.textContent = `Relaxed: ${diagnostics.relaxed.join(" → ")}.`;
-    }
-
-    const hintWrap = document.createElement("div");
-    hintLines.forEach((line) => {
-      const hint = document.createElement("div");
-      hint.className = "dbWarning";
-      hint.textContent = line;
-      hintWrap.appendChild(hint);
-    });
-
-    const inspector = document.createElement("div");
-    inspector.className = "zoneMeta";
-    inspector.textContent = "Inspect: click a card to pin details.";
-
-    const modeRow = document.createElement("div");
-    modeRow.className = "dbInline";
-    ["grid", "curve", "list"].forEach((mode) => {
-      const b = document.createElement("button");
-      b.className = "menuBtn";
-      b.textContent = `${mode[0].toUpperCase()}${mode.slice(1)} view`;
-      b.disabled = workingState.settings.overviewMode === mode;
-      b.onclick = () => {
-        workingState.settings.overviewMode = mode;
-        commitState();
+      const saveBtn = document.createElement("button");
+      saveBtn.className = "menuBtn";
+      saveBtn.textContent = "Save Deck";
+      saveBtn.onclick = () => {
+        const suggested = `Deck ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+        const name = window.prompt("Deck name", suggested);
+        if (name == null) return;
+        const trimmed = String(name || "").trim();
+        if (!trimmed) return;
+        const payload = buildSavedDeckPayload(currentDeck, window.CARD_REPO || {}, trimmed, workingState.lastSelectedDeckId || "");
+        const saved = storageApi?.saveDeck ? storageApi.saveDeck(payload) : payload;
+        workingState.lastSelectedDeckId = saved.id;
+        commitSavedDecks();
+        alert("Deck saved ✅");
         deps.render?.();
       };
-      modeRow.appendChild(b);
-    });
-
-    const overview = renderDeckOverview(deck, poolById, {
-      viewMode: workingState.settings.overviewMode,
-      onInspect: (card) => {
-        inspector.textContent = `${card.name} • cost ${card.cost} • ${card.isLand ? "LAND" : `${card.power}|${card.toughness}`} • value ${Number(card.value || 0).toFixed(2)}`;
-      }
-    });
-
-    const saveBtn = document.createElement("button");
-    saveBtn.className = "menuBtn";
-    saveBtn.textContent = "Save Deck";
-    saveBtn.onclick = () => {
-      const suggested = `Deck ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
-      const name = window.prompt("Deck name", suggested);
-      if (name == null) return;
-      const trimmed = String(name || "").trim();
-      if (!trimmed) return;
-      const payload = buildSavedDeckPayload(deck, poolById, trimmed);
-      workingState.savedDecks = [payload, ...(workingState.savedDecks || [])];
-      workingState.lastSelectedDeckId = payload.deckId;
-      commitSavedDecks();
-      deps.render?.();
-    };
+      out.appendChild(saveBtn);
+    }
 
     const savedWrap = document.createElement("div");
     savedWrap.className = "dbSavedDecks";
@@ -974,16 +1103,36 @@ const pool = getDeckbuilderCardPool(cardsSource);
         row.className = "dbSavedDeckRow";
         const meta = document.createElement("div");
         meta.className = "dbHint";
-        const snap = saved.statsSnapshot || {};
-        meta.textContent = `${saved.name} • quality ${Number(snap.deckQuality || 0).toFixed(0)} • size ${Number(saved?.deck?.size || 0)}`;
+        const st = saved?.stats || {};
+        meta.textContent = `${saved.name} • size ${Number(saved?.deckSize || saved?.cards?.length || 0)} • lands ${Number(st.lands || 0)} • nonlands ${Number(st.nonlands || 0)}`;
+
+        const pills = document.createElement("div");
+        pills.className = "dbInline";
+        LAND_IDS.forEach((id) => {
+          const n = Number(saved?.stats?.byLandType?.[id] || 0);
+          if (!n) return;
+          const pill = document.createElement("span");
+          pill.className = "dbChip";
+          pill.textContent = `${window.CARD_REPO?.[id]?.name || id} x${n}`;
+          pills.appendChild(pill);
+        });
 
         const loadBtn = document.createElement("button");
         loadBtn.className = "menuBtn";
         loadBtn.textContent = "Load";
         loadBtn.onclick = () => {
-          workingState.lastDeck = hydrateBuiltDeckFromSaved(saved, poolById);
-          workingState.lastSelectedDeckId = saved.deckId;
-          commitSavedDecks();
+          const loaded = storageApi?.loadDeck ? storageApi.loadDeck(saved.id) : saved;
+          if (!loaded) return;
+          const cards = Array.isArray(loaded.cards) ? loaded.cards.map(String) : [];
+          if (Number(loaded.deckSize || cards.length) !== cards.length) {
+            alert("Deck size mismatch. Refusing to load.");
+            return;
+          }
+          const unknown = cards.filter((id) => !window.CARD_REPO?.[id]);
+          if (unknown.length) alert(`Warning: ${unknown.length} unknown cards will load as Unknown <id>.`);
+          workingState.currentDeck = hydrateBuiltDeckFromSaved(loaded, window.CARD_REPO || {});
+          workingState.lastSelectedDeckId = loaded.id;
+          commitState();
           deps.render?.();
         };
 
@@ -993,23 +1142,8 @@ const pool = getDeckbuilderCardPool(cardsSource);
         renameBtn.onclick = () => {
           const nextName = window.prompt("Rename deck", saved.name);
           if (nextName == null) return;
-          saved.name = String(nextName || "").trim() || saved.name;
-          saved.updatedAt = Date.now();
-          commitSavedDecks();
-          deps.render?.();
-        };
-
-        const dupBtn = document.createElement("button");
-        dupBtn.className = "menuBtn";
-        dupBtn.textContent = "Duplicate";
-        dupBtn.onclick = () => {
-          const now = Date.now();
-          const clone = JSON.parse(JSON.stringify(saved));
-          clone.deckId = `dk_${now}_${Math.random().toString(16).slice(2, 8)}`;
-          clone.name = `${saved.name} Copy`;
-          clone.createdAt = now;
-          clone.updatedAt = now;
-          workingState.savedDecks = [clone, ...savedDecks];
+          const renamed = { ...saved, name: String(nextName || "").trim() || saved.name, updatedAt: Date.now() };
+          storageApi?.saveDeck?.(renamed);
           commitSavedDecks();
           deps.render?.();
         };
@@ -1018,30 +1152,24 @@ const pool = getDeckbuilderCardPool(cardsSource);
         delBtn.className = "menuBtn";
         delBtn.textContent = "Delete";
         delBtn.onclick = () => {
-          workingState.savedDecks = savedDecks.filter((d) => d.deckId !== saved.deckId);
-          if (workingState.lastSelectedDeckId === saved.deckId) workingState.lastSelectedDeckId = "";
+          storageApi?.deleteDeck?.(saved.id);
+          if (workingState.lastSelectedDeckId === saved.id) workingState.lastSelectedDeckId = "";
           commitSavedDecks();
           deps.render?.();
         };
 
-        row.append(meta, loadBtn, renameBtn, dupBtn, delBtn);
-        savedWrap.appendChild(row);
+        row.append(meta, loadBtn, renameBtn, delBtn);
+        savedWrap.append(row, pills);
       });
     }
 
-    out.append(chipRow, hist, status);
-    if (diagnostics.relaxed?.length) out.append(relaxed);
-    if (deck.error) {
-      const err = document.createElement("div");
-      err.className = "dbWarning";
-      err.textContent = deck.error;
-      out.appendChild(err);
-    }
-    out.append(hintWrap, modeRow, overview, inspector, saveBtn, savedWrap);
-
+    out.append(savedWrap);
+    wrap.appendChild(out);
     wrap.appendChild(out);
     rootNode.replaceChildren(wrap);
   }
+
+
 
   window.CardboardDeckbuilder = {
     DEFAULTS,
@@ -1052,6 +1180,7 @@ const pool = getDeckbuilderCardPool(cardsSource);
     buildDeck,
     computeDeckStats,
     computeDeckScore,
-    getDeckbuilderCardPool
+    getDeckbuilderCardPool,
+    buildRandomDeckFromChoices
   };
 })();
