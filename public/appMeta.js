@@ -1,3 +1,6 @@
+// What changed / how to test:
+// - Updated battle lobby hint text to reflect selectable saved decks with default fallback.
+// - Test by entering battle mode and verifying hint mentions saved decks/default random.
 (() => {
   function ensureSocket() {
     if (window.io) return Promise.resolve();
@@ -79,7 +82,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       return [...openRooms];
     },
 
-    async createRoom(roomId = "") {
+    async createRoom(roomId = "", deckCardsByRole = null) {
       const s = await this.connect();
       return new Promise((resolve) => {
         const currentSession = api.getSession();
@@ -88,7 +91,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           {
             playerId: currentSession.playerId,
             playerName: currentSession.playerName,
-            roomId: String(roomId || "").trim().toUpperCase()
+            roomId: String(roomId || "").trim().toUpperCase(),
+            deckCardsByRole: deckCardsByRole || null
           },
           (res) => {
             if (res?.ok) {
@@ -101,7 +105,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       });
     },
 
-    async joinRoom(roomId, preferredRole = null) {
+    async joinRoom(roomId, preferredRole = null, deckCardsByRole = null) {
       const s = await this.connect();
       return new Promise((resolve) => {
         const currentSession = api.getSession();
@@ -111,7 +115,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
             roomId,
             preferredRole: normalizeRole(preferredRole),
             playerId: currentSession.playerId,
-            playerName: currentSession.playerName
+            playerName: currentSession.playerName,
+            deckCardsByRole: deckCardsByRole || null
           },
           (res) => {
             if (res?.ok) {
@@ -256,7 +261,7 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
 
     const hint = document.createElement("div");
     hint.className = "zoneMeta";
-    hint.textContent = "Battle mode always uses predefined decks for P1 and P2. Choose your seat before joining.";
+    hint.textContent = "Battle mode can use saved decks per seat, or default random when none are selected.";
 
     const listCard = document.createElement("div");
     listCard.className = "zoneMeta";

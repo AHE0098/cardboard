@@ -1,3 +1,7 @@
+// What changed / how to test:
+// - Added saved-deck integration across deckbuilder and 2P battle with per-seat selection + robust deck application.
+// - Added battle deck chooser panel and safe applyDeckToBattleState cloning/validation.
+// - Test: save deck in deckbuilder, enter battle lobby, choose deck for P1/P2, join/create room, verify decks are shuffled + draw works.
 /*
 Screen + data architecture:
 - uiScreen: playerMenu -> mainMenu -> mode
@@ -51,6 +55,7 @@ Screen + data architecture:
     let deckbuilderState = deckbuilderApi?.normalizeState ? deckbuilderApi.normalizeState(null) : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null };
     let savedDecks = [];
     let lastSelectedDeckId = "";
+    let battleDeckSelections = { p1: "", p2: "" };
 
     let battleState = null;
     let battleRoomId = "";
@@ -294,6 +299,50 @@ case "TOGGLE_TAP": {
 
     function clone(x) { return JSON.parse(JSON.stringify(x)); }
 
+    function deepClone(value) {
+      if (typeof structuredClone === "function") return structuredClone(value);
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function shuffleCopy(cards, seed = "") {
+      const arr = deepClone(Array.isArray(cards) ? cards.map(String) : []);
+      let h = 2166136261;
+      const str = `${seed}|${arr.length}|${Date.now()}`;
+      for (let i = 0; i < str.length; i += 1) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+      const rand = () => {
+        h += 0x6d2b79f5;
+        let t = h;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      for (let i = arr.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(rand() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function applyDeckToBattleState(playerKey, deckCards) {
+      if (!battleState || !battleState.players?.[playerKey]) return;
+      const shuffled = shuffleCopy(deckCards, `${playerKey}|${battleRoomId}`);
+      const hand = shuffled.splice(0, 3);
+      battleState.players[playerKey].zones = {
+        hand,
+        deck: shuffled,
+        graveyard: [],
+        lands: [],
+        permanents: []
+      };
+    }
+
+    function getDeckById(id) {
+      if (!id) return null;
+      return window.CardboardDeckStorage?.loadDeck?.(id)
+        || (savedDecks || []).find((d) => d.id === id || d.deckId === id)
+        || null;
+    }
+
     function createSeedDeck(offset = 0) {
       const seed = [200, 201, 202, 203, 204, 205, 210, 211, 212, 213, 220, 221, 222, 230, 231, 240, 241, 101, 102, 103, 104, 105];
       return seed.map((_, i) => seed[(i + offset) % seed.length]);
@@ -350,8 +399,9 @@ case "TOGGLE_TAP": {
           lastMode: appMode || prev.lastMode || "sandbox",
           sandboxState,
           deckbuilderState,
-          savedDecks,
+          savedDecks: window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks,
           lastSelectedDeckId,
+          battleDeckSelections,
           lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
           updatedAt: Date.now()
         };
@@ -372,8 +422,9 @@ case "TOGGLE_TAP": {
         : (save.deckbuilderState
           ? { settings: { ...DECKBUILDER_DEFAULTS, ...(save.deckbuilderState.settings || {}) }, lastDeck: save.deckbuilderState.lastDeck || null }
           : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null });
-      savedDecks = Array.isArray(save.savedDecks) ? save.savedDecks : [];
+      savedDecks = (window.CardboardDeckStorage?.getSavedDecks?.() || (Array.isArray(save.savedDecks) ? save.savedDecks : []));
       lastSelectedDeckId = save.lastSelectedDeckId || "";
+      battleDeckSelections = { p1: String(save?.battleDeckSelections?.p1 || ""), p2: String(save?.battleDeckSelections?.p2 || "") };
       appMode = null;
       uiScreen = "mainMenu";
       renderApp();
@@ -521,7 +572,7 @@ function onBack() {
 
       deckbuilderApi.renderDeckbuilder(rootNode, state, {
         allCards: window.ALL_CARDS,
-        savedDecks,
+        savedDecks: window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks,
         lastSelectedDeckId,
         onStateChange: (nextState) => {
           deckbuilderState = deckbuilderApi?.normalizeState ? deckbuilderApi.normalizeState(nextState) : nextState;
@@ -1599,6 +1650,21 @@ function mountLegacyBattleInApp() {
     
 
 
+
+    function getSelectedDeckPayloadByRole() {
+      const out = {};
+      ["p1", "p2"].forEach((pk) => {
+        const selected = battleDeckSelections[pk];
+        if (!selected) return;
+        const deckObj = getDeckById(selected);
+        const cards = Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : [];
+        const declaredSize = Number(deckObj?.deckSize || cards.length);
+        if (!cards.length || declaredSize !== cards.length) return;
+        out[pk] = cards;
+      });
+      return out;
+    }
+
     let battleLobbyBusy = false;
 
     function renderBattleLobby(host) {
@@ -1625,7 +1691,7 @@ function mountLegacyBattleInApp() {
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.createRoom(requestedRoomCode);
+            const res = await battleClient.createRoom(requestedRoomCode, getSelectedDeckPayloadByRole());
             if (!res?.ok) alert(res?.error || "Failed to create room");
           } finally {
             battleLobbyBusy = false;
@@ -1637,7 +1703,9 @@ function mountLegacyBattleInApp() {
           battleLobbyBusy = true;
           renderApp();
           try {
-            const res = await battleClient.joinRoom(code, preferredRole);
+            const chosen = getSelectedDeckPayloadByRole();
+            const onlyPreferred = preferredRole === "p1" || preferredRole === "p2" ? { [preferredRole]: chosen[preferredRole] } : chosen;
+            const res = await battleClient.joinRoom(code, preferredRole, onlyPreferred);
             if (!res?.ok) alert(res?.error || "Join failed");
           } finally {
             battleLobbyBusy = false;
@@ -1673,6 +1741,60 @@ function mountLegacyBattleInApp() {
       });
     }
 
+  function renderBattleDeckChooser() {
+    const panel = document.createElement("div");
+    panel.className = "menuCard";
+    const title = document.createElement("h3");
+    title.textContent = "Choose Decks";
+    panel.appendChild(title);
+
+    const decks = window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks || [];
+    ["p1", "p2"].forEach((pk) => {
+      const row = document.createElement("div");
+      row.className = "zoneMeta";
+      const label = document.createElement("div");
+      label.textContent = `Select deck for ${pk.toUpperCase()}`;
+      const select = document.createElement("select");
+      select.className = "menuInput";
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "Default random";
+      select.appendChild(none);
+      decks.forEach((deck) => {
+        const opt = document.createElement("option");
+        opt.value = deck.id || deck.deckId;
+        opt.textContent = `${deck.name} • ${deck.deckSize || deck?.cards?.length || deck?.deck?.size || 0}`;
+        if (battleDeckSelections[pk] === opt.value) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.onchange = () => {
+        battleDeckSelections[pk] = select.value;
+        persistPlayerSaveDebounced();
+      };
+      row.append(label, select);
+
+      const chosen = getDeckById(battleDeckSelections[pk]);
+      if (chosen) {
+        const preview = document.createElement("div");
+        preview.className = "dbInline";
+        const byLand = chosen?.stats?.byLandType || {};
+        Object.keys(byLand).forEach((id) => {
+          const n = Number(byLand[id] || 0);
+          if (!n) return;
+          const pill = document.createElement("span");
+          pill.className = "dbChip";
+          pill.textContent = `${window.CARD_REPO?.[id]?.name || id} x${n}`;
+          preview.appendChild(pill);
+        });
+        row.appendChild(preview);
+      }
+
+      panel.appendChild(row);
+    });
+
+    return panel;
+  }
+
   function renderModeScreen() {
   if (appMode === "battle") {
     if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
@@ -1707,6 +1829,7 @@ function mountLegacyBattleInApp() {
 
     if (!battleState) {
       renderBattleLobby(wrap);
+      wrap.appendChild(renderBattleDeckChooser());
       const panel = renderInspector();
       const deckPanel = renderDeckPlacementChooser();
       root.replaceChildren(wrap);

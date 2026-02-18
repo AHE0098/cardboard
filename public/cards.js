@@ -1,14 +1,19 @@
+// What changed / how to test:
+// - Added explicit machine-friendly metadata to basic lands (101-106) for deckbuilder reliability.
+// - Updated CARD_KIND to prefer explicit `kind` before legacy heuristics.
+// - Test by running in console: ["101","102","103","104","105","106"].map((id)=>window.CARD_KIND(id)) and verify all return "land".
+
 window.CARD_REPO = {
   ...(window.CARD_REPO || {}),
 // =====================
 // GENERIC LANDS CHUNK
 // =====================
-  "101": { name: "Plains",  color: "white", cost: "" },
-  "102": { name: "Island",  color: "blue",  cost: "" },
-  "103": { name: "Swamp",   color: "black", cost: "" },
-  "104": { name: "Mountain",color: "red",   cost: "" },
-  "105": { name: "Forest",  color: "green", cost: "" },
-  "106": { name: "Wastes",  color: "colorless", cost: "" },
+  "101": { name: "Plains", color: "white", cost: "", kind: "land", isBasic: true, colorIdentity: "W" },
+  "102": { name: "Island", color: "blue", cost: "", kind: "land", isBasic: true, colorIdentity: "U" },
+  "103": { name: "Swamp", color: "black", cost: "", kind: "land", isBasic: true, colorIdentity: "B" },
+  "104": { name: "Mountain", color: "red", cost: "", kind: "land", isBasic: true, colorIdentity: "R" },
+  "105": { name: "Forest", color: "green", cost: "", kind: "land", isBasic: true, colorIdentity: "G" },
+  "106": { name: "Wastes", color: "colorless", cost: "", kind: "land", isBasic: true, colorIdentity: "C" },
 
 // =====================
 // 100 CREATURE CARDS CHUNK
@@ -651,6 +656,7 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
 // Kind detector (safe defaults)
 window.CARD_KIND = window.CARD_KIND || function CARD_KIND(cardId) {
   const data = window.CARD_REPO?.[String(cardId)] || {};
+  if (typeof data.kind === "string" && data.kind.trim()) return data.kind.trim().toLowerCase();
   const name = (data.name || "").toLowerCase().trim();
 
   const isCreature = Number.isFinite(data.power) && Number.isFinite(data.toughness);
