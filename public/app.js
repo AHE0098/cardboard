@@ -20,6 +20,8 @@ Screen + data architecture:
 
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
+    const BATTLE_DECK_KEY_P1 = "cb_battle_deck_p1";
+    const BATTLE_DECK_KEY_P2 = "cb_battle_deck_p2";
     const ALL_ZONES = ["permanents", "lands", "hand", "stack", "deck", "graveyard", "opponentPermanents", "opponentLands"];
     const BATTLEFIELD_ZONES = ["lands", "permanents", "opponentPermanents", "opponentLands"];
     const SHARED_ZONES = ["stack"];
@@ -34,6 +36,11 @@ Screen + data architecture:
       includeLands: true,
       seed: 1337
     };
+
+    function isHumanMenuInteractionActive() {
+      const el = document.activeElement;
+      return !!(el && el.tagName === "SELECT" && el.dataset?.stickyMenu === "1");
+    }
 
     let uiScreen = "playerMenu";
     let appMode = null;
@@ -139,7 +146,15 @@ Screen + data architecture:
       },
 
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
-      onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
+      onRoomsListChanged: (rooms) => {
+        openRooms = Array.isArray(rooms) ? rooms : [];
+        battleLobbyRoomsRequested = true;
+        if (isHumanMenuInteractionActive()) {
+          setTimeout(() => { if (!isHumanMenuInteractionActive()) renderApp(); }, 180);
+          return;
+        }
+        renderApp();
+      },
       uid
     }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
@@ -343,6 +358,22 @@ case "TOGGLE_TAP": {
         || null;
     }
 
+    function assignDeckForBattle(playerKey, deckObj) {
+      const pk = playerKey === "p2" ? "p2" : "p1";
+      const cards = Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : [];
+      const deckId = String(deckObj?.id || "");
+      if (!cards.length) return false;
+      if (pk === "p1") localStorage.setItem(BATTLE_DECK_KEY_P1, JSON.stringify({ id: deckId, cards }));
+      else localStorage.setItem(BATTLE_DECK_KEY_P2, JSON.stringify({ id: deckId, cards }));
+      battleDeckSelections[pk] = deckId;
+      if (battleState?.players?.[pk]) {
+        applyDeckToBattleState(pk, cards);
+        battleClient.sendIntent("SET_DECK", { owner: pk, cards });
+      }
+      persistPlayerSaveDebounced();
+      return true;
+    }
+
     function createSeedDeck(offset = 0) {
       const seed = [200, 201, 202, 203, 204, 205, 210, 211, 212, 213, 220, 221, 222, 230, 231, 240, 241, 101, 102, 103, 104, 105];
       return seed.map((_, i) => seed[(i + offset) % seed.length]);
@@ -424,7 +455,12 @@ case "TOGGLE_TAP": {
           : { settings: { ...DECKBUILDER_DEFAULTS }, lastDeck: null });
       savedDecks = (window.CardboardDeckStorage?.getSavedDecks?.() || (Array.isArray(save.savedDecks) ? save.savedDecks : []));
       lastSelectedDeckId = save.lastSelectedDeckId || "";
-      battleDeckSelections = { p1: String(save?.battleDeckSelections?.p1 || ""), p2: String(save?.battleDeckSelections?.p2 || "") };
+      const localP1 = JSON.parse(localStorage.getItem(BATTLE_DECK_KEY_P1) || "null");
+      const localP2 = JSON.parse(localStorage.getItem(BATTLE_DECK_KEY_P2) || "null");
+      battleDeckSelections = {
+        p1: String(save?.battleDeckSelections?.p1 || localP1?.id || ""),
+        p2: String(save?.battleDeckSelections?.p2 || localP2?.id || "")
+      };
       appMode = null;
       uiScreen = "mainMenu";
       renderApp();
@@ -582,7 +618,13 @@ function onBack() {
           lastSelectedDeckId = String(nextLastSelectedDeckId || "");
         },
         persist: persistPlayerSaveDebounced,
-        render: renderApp
+        render: renderApp,
+        appMode,
+        playerId: session.playerId,
+        onAssignToBattle: (playerKey, deckObj) => {
+          assignDeckForBattle(playerKey, deckObj);
+          renderApp();
+        }
       });
     }
 
@@ -1677,8 +1719,10 @@ function mountLegacyBattleInApp() {
         onRefreshRooms: async () => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
+          battleLobbyRoomsRequested = false;
           renderApp();
           try {
+            battleLobbyRoomsRequested = true;
             await battleClient.refreshRoomsList?.();
             openRooms = battleClient.getOpenRooms?.() || openRooms;
           } finally {
@@ -1756,6 +1800,7 @@ function mountLegacyBattleInApp() {
       label.textContent = `Select deck for ${pk.toUpperCase()}`;
       const select = document.createElement("select");
       select.className = "menuInput";
+      select.dataset.stickyMenu = "1";
       const none = document.createElement("option");
       none.value = "";
       none.textContent = "Default random";
@@ -1797,7 +1842,10 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
-    if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
+    if (!battleState && !battleLobbyRoomsRequested) {
+      battleLobbyRoomsRequested = true;
+      battleClient.refreshRoomsList?.();
+    }
     if (!battleState && legacyBattleHandle) {
       try { legacyBattleHandle.unmount?.(); } catch (err) { console.error("[battle] unmount on lobby transition failed", err); }
       legacyBattleHandle = null;
