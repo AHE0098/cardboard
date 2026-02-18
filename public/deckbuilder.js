@@ -268,8 +268,66 @@
       savedDecks: Array.isArray(state?.savedDecks) ? state.savedDecks : [],
       lastSelectedDeckId: state?.lastSelectedDeckId || "",
       inspectCardId: state?.inspectCardId || "",
-      currentDeck: state?.currentDeck || null
+      currentDeck: state?.currentDeck || null,
+      qaMode: !!state?.qaMode,
+      qaStatus: state?.qaStatus || {},
+      lastBattleAssignment: state?.lastBattleAssignment || { p1: "", p2: "" }
     };
+  }
+
+  function normalizeDeckList(deckInput = [], cardRepo = {}) {
+    const tally = {};
+    const list = Array.isArray(deckInput) ? deckInput : [];
+    list.forEach((entry) => {
+      if (!entry) return;
+      if (typeof entry === "string" || typeof entry === "number") {
+        const id = String(entry);
+        tally[id] = (tally[id] || 0) + 1;
+        return;
+      }
+      const id = String(entry?.cardId || entry?.id || "").trim();
+      const qty = Math.max(0, Math.round(toFiniteNumber(entry?.qty, 0)));
+      if (!id || !qty) return;
+      tally[id] = (tally[id] || 0) + qty;
+    });
+
+    return Object.entries(tally)
+      .map(([cardId, qty]) => ({ cardId, qty }))
+      .filter((entry) => entry.qty > 0)
+      .sort((a, b) => {
+        const ca = cardRepo?.[a.cardId] || {};
+        const cb = cardRepo?.[b.cardId] || {};
+        const cmcA = toFiniteNumber(ca.cmc ?? parseManaCost(ca.cost).cmcApprox, 0);
+        const cmcB = toFiniteNumber(cb.cmc ?? parseManaCost(cb.cost).cmcApprox, 0);
+        if (cmcA !== cmcB) return cmcA - cmcB;
+        const nameA = String(ca.name || "").toLowerCase();
+        const nameB = String(cb.name || "").toLowerCase();
+        if (nameA !== nameB) return nameA.localeCompare(nameB);
+        return a.cardId.localeCompare(b.cardId);
+      });
+  }
+
+  function expandDeckList(normalizedList = []) {
+    const out = [];
+    normalizedList.forEach((entry) => {
+      for (let i = 0; i < entry.qty; i += 1) out.push(String(entry.cardId));
+    });
+    return out;
+  }
+
+  function validateLibraryDeck(deck, cardRepo = {}) {
+    const warnings = [];
+    if (!deck || typeof deck !== "object") return ["Deck entry is not an object."];
+    const cards = Array.isArray(deck.cards) ? deck.cards : [];
+    if (!cards.length) warnings.push("Deck has no cards.");
+    cards.forEach((entry, idx) => {
+      const id = String(entry?.cardId || "").trim();
+      const qty = toFiniteNumber(entry?.qty, 0);
+      if (!id) warnings.push(`cards[${idx}] missing cardId`);
+      if (!Number.isInteger(qty) || qty < 1) warnings.push(`cards[${idx}] invalid qty ${entry?.qty}`);
+      if (id && !cardRepo[id]) warnings.push(`cards[${idx}] unknown cardId ${id}`);
+    });
+    return warnings;
   }
 
   function colorEligibility(card, selectedSet, strict) {
@@ -582,7 +640,8 @@ const inspected = analyzeCardPool(cardsSource);
       source: {
         lockLands: !!currentDeck?.lockLands,
         landCounts: { ...(currentDeck?.landCounts || {}) },
-        seed: currentDeck?.seed || ""
+        seed: currentDeck?.seed || "",
+        settings: normalizeSettings(currentDeck?.settings || {})
       }
     };
   }
@@ -601,7 +660,8 @@ const inspected = analyzeCardPool(cardsSource);
       landCounts: { ...(savedDeck?.source?.landCounts || summary.byLandType || {}) },
       builtAt: Date.now(),
       createdAt: Number(savedDeck?.createdAt || Date.now()),
-      seed: savedDeck?.source?.seed || ""
+      seed: savedDeck?.source?.seed || "",
+      settings: normalizeSettings(savedDeck?.source?.settings || {})
     };
   }
 
@@ -724,6 +784,15 @@ const inspected = analyzeCardPool(cardsSource);
 
   function renderDeckbuilder(rootNode, state, deps = {}) {
     const workingState = normalizeState(state);
+    const qaStatus = workingState.qaStatus || {};
+    const setQaResult = (action, result) => {
+      workingState.qaStatus = {
+        ...workingState.qaStatus,
+        lastAction: action,
+        lastResult: result,
+        at: Date.now()
+      };
+    };
     const cardsSource =
   deps.allCards ??
   window.CARD_REPO ??
@@ -807,6 +876,41 @@ const pool = getDeckbuilderCardPool(cardsSource);
       return { slider, num };
     }
 
+    const modeRow = document.createElement("div");
+    modeRow.className = "dbInline";
+    const modeLabel = document.createElement("span");
+    modeLabel.className = "dbHint";
+    modeLabel.textContent = "Mode";
+    const modeSelect = document.createElement("select");
+    modeSelect.className = "menuInput";
+    ["quick", "guided", "advanced", "remix"].forEach((mode) => {
+      const opt = document.createElement("option");
+      opt.value = mode;
+      opt.textContent = mode[0].toUpperCase() + mode.slice(1);
+      if ((workingState.settings.buildMode || "quick") === mode) opt.selected = true;
+      modeSelect.appendChild(opt);
+    });
+    modeSelect.onchange = () => {
+      workingState.settings.buildMode = modeSelect.value;
+      setQaResult("mode selector", `set to ${modeSelect.value}`);
+      commitState();
+    };
+    modeRow.append(modeLabel, modeSelect);
+    controls.appendChild(modeRow);
+
+    const qaLabel = document.createElement("label");
+    qaLabel.className = "dbHint";
+    const qaInput = document.createElement("input");
+    qaInput.type = "checkbox";
+    qaInput.checked = !!workingState.qaMode;
+    qaInput.onchange = () => {
+      workingState.qaMode = qaInput.checked;
+      setQaResult("qa mode", qaInput.checked ? "on" : "off");
+      commitState();
+      deps.render?.();
+    };
+    qaLabel.append(qaInput, document.createTextNode("QA Mode"));
+    controls.appendChild(qaLabel);
     addSectionTitle("Core");
     const deckSizeControl = addSlider("Deck size X", "deckSize", 20, 100, 1, (nextDeckSize) => {
       workingState.settings.lands = clamp(workingState.settings.lands, 0, nextDeckSize);
@@ -921,6 +1025,7 @@ const pool = getDeckbuilderCardPool(cardsSource);
     buildBtn.textContent = "Build Deck";
     buildBtn.onclick = () => {
       workingState.lastDeck = buildDeck(workingState.settings, deps.allCards);
+      setQaResult("build", `built ${workingState.lastDeck?.stats?.totalCards || 0} cards`);
       commitState();
       deps.render?.();
     };
@@ -940,6 +1045,7 @@ const pool = getDeckbuilderCardPool(cardsSource);
     optimizeBtn.textContent = "Optimize";
     optimizeBtn.onclick = () => {
       workingState.lastDeck = buildDeck({ ...workingState.settings, optimizeIterations: 4000 }, deps.allCards);
+      setQaResult("optimize", `optimized ${workingState.lastDeck?.stats?.totalCards || 0} cards`);
       commitState();
       deps.render?.();
     };
@@ -1002,8 +1108,10 @@ const pool = getDeckbuilderCardPool(cardsSource);
         deckSize: workingState.settings.deckSize,
         lockLands: !!workingState.settings.lockLands,
         landCounts: { ...(workingState.settings.landCounts || {}) },
-        seed: workingState.settings.seed
+        seed: workingState.settings.seed,
+        settings: normalizeSettings(workingState.settings)
       };
+      setQaResult("randomize", `created ${result.summary.totalCards} cards`);
       commitState();
       deps.render?.();
     };
@@ -1080,6 +1188,7 @@ const pool = getDeckbuilderCardPool(cardsSource);
         const saved = storageApi?.saveDeck ? storageApi.saveDeck(payload) : payload;
         workingState.lastSelectedDeckId = saved.id;
         commitSavedDecks();
+        setQaResult("save", `saved ${trimmed}`);
         alert("Deck saved ✅");
         deps.render?.();
       };
@@ -1131,7 +1240,9 @@ const pool = getDeckbuilderCardPool(cardsSource);
           const unknown = cards.filter((id) => !window.CARD_REPO?.[id]);
           if (unknown.length) alert(`Warning: ${unknown.length} unknown cards will load as Unknown <id>.`);
           workingState.currentDeck = hydrateBuiltDeckFromSaved(loaded, window.CARD_REPO || {});
+          if (loaded?.source?.settings) workingState.settings = normalizeSettings(loaded.source.settings);
           workingState.lastSelectedDeckId = loaded.id;
+          setQaResult("load", `loaded ${loaded.name || loaded.id}`);
           commitState();
           deps.render?.();
         };
@@ -1143,9 +1254,41 @@ const pool = getDeckbuilderCardPool(cardsSource);
           const nextName = window.prompt("Rename deck", saved.name);
           if (nextName == null) return;
           const renamed = { ...saved, name: String(nextName || "").trim() || saved.name, updatedAt: Date.now() };
+          setQaResult("rename", `renamed to ${renamed.name}`);
           storageApi?.saveDeck?.(renamed);
           commitSavedDecks();
           deps.render?.();
+        };
+
+        const duplicateBtn = document.createElement("button");
+        duplicateBtn.className = "menuBtn";
+        duplicateBtn.textContent = "Duplicate";
+        duplicateBtn.onclick = () => {
+          const copy = { ...saved, id: `dk_${Date.now()}_${Math.random().toString(16).slice(2, 6)}`, name: `${saved.name} Copy`, createdAt: Date.now(), updatedAt: Date.now() };
+          storageApi?.saveDeck?.(copy);
+          setQaResult("duplicate", `duplicated ${saved.name}`);
+          commitSavedDecks();
+          deps.render?.();
+        };
+
+        const useP1Btn = document.createElement("button");
+        useP1Btn.className = "menuBtn";
+        useP1Btn.textContent = "Use for Player 1";
+        useP1Btn.onclick = () => {
+          deps.onAssignToBattle?.("p1", saved);
+          workingState.lastBattleAssignment = { ...(workingState.lastBattleAssignment || {}), p1: saved.id };
+          setQaResult("assign p1", saved.name || saved.id);
+          commitState();
+        };
+
+        const useP2Btn = document.createElement("button");
+        useP2Btn.className = "menuBtn";
+        useP2Btn.textContent = "Use for Player 2";
+        useP2Btn.onclick = () => {
+          deps.onAssignToBattle?.("p2", saved);
+          workingState.lastBattleAssignment = { ...(workingState.lastBattleAssignment || {}), p2: saved.id };
+          setQaResult("assign p2", saved.name || saved.id);
+          commitState();
         };
 
         const delBtn = document.createElement("button");
@@ -1153,18 +1296,158 @@ const pool = getDeckbuilderCardPool(cardsSource);
         delBtn.textContent = "Delete";
         delBtn.onclick = () => {
           storageApi?.deleteDeck?.(saved.id);
+          setQaResult("delete", `deleted ${saved.name || saved.id}`);
           if (workingState.lastSelectedDeckId === saved.id) workingState.lastSelectedDeckId = "";
           commitSavedDecks();
           deps.render?.();
         };
 
-        row.append(meta, loadBtn, renameBtn, delBtn);
+        row.append(meta, loadBtn, renameBtn, duplicateBtn, useP1Btn, useP2Btn, delBtn);
         savedWrap.append(row, pills);
       });
     }
 
+    const libraryWrap = document.createElement("div");
+    libraryWrap.className = "dbSavedDecks";
+    const libraryTitle = document.createElement("h3");
+    libraryTitle.textContent = "Built-in Deck Library";
+    libraryWrap.appendChild(libraryTitle);
+    const libraryDecks = Array.isArray(window.CARDBOARD_DECK_LIBRARY) ? window.CARDBOARD_DECK_LIBRARY : [];
+    if (!libraryDecks.length) {
+      const emptyLibrary = document.createElement("div");
+      emptyLibrary.className = "dbHint";
+      emptyLibrary.textContent = "No built-in decks loaded.";
+      libraryWrap.appendChild(emptyLibrary);
+    } else {
+      libraryDecks.forEach((libDeck) => {
+        const normalized = normalizeDeckList(libDeck.cards || [], window.CARD_REPO || {});
+        const cardsExpanded = expandDeckList(normalized);
+        const row = document.createElement("div");
+        row.className = "dbSavedDeckRow";
+        const meta = document.createElement("div");
+        meta.className = "dbHint";
+        meta.textContent = `${libDeck.name} (${cardsExpanded.length})`;
+        row.appendChild(meta);
+
+        const previewBtn = document.createElement("button");
+        previewBtn.className = "menuBtn";
+        previewBtn.textContent = "Preview";
+        previewBtn.onclick = () => {
+          const summary = summarizeDeckIds(cardsExpanded, window.CARD_REPO || {});
+          alert(`${libDeck.name}
+Cards: ${summary.totalCards}
+Lands: ${summary.lands}
+Nonlands: ${summary.nonlands}`);
+          setQaResult("library preview", `previewed ${libDeck.id}`);
+        };
+
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "menuBtn";
+        copyBtn.textContent = "Copy to My Decks";
+        copyBtn.onclick = () => {
+          const payload = {
+            id: `lib_${libDeck.id}_${Date.now()}`,
+            name: `${libDeck.name} (Copy)`,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            deckSize: cardsExpanded.length,
+            cards: cardsExpanded,
+            stats: summarizeDeckIds(cardsExpanded, window.CARD_REPO || {}),
+            source: { libraryDeckId: libDeck.id, settings: normalizeSettings(workingState.settings || {}) }
+          };
+          storageApi?.saveDeck?.(payload);
+          commitSavedDecks();
+          setQaResult("library copy", `copied ${libDeck.id}`);
+          deps.render?.();
+        };
+
+        const useP1Btn = document.createElement("button");
+        useP1Btn.className = "menuBtn";
+        useP1Btn.textContent = "Use for P1";
+        useP1Btn.onclick = () => {
+          deps.onAssignToBattle?.("p1", { id: libDeck.id, name: libDeck.name, cards: cardsExpanded });
+          workingState.lastBattleAssignment = { ...(workingState.lastBattleAssignment || {}), p1: libDeck.id };
+          setQaResult("library use p1", libDeck.id);
+          commitState();
+        };
+
+        const useP2Btn = document.createElement("button");
+        useP2Btn.className = "menuBtn";
+        useP2Btn.textContent = "Use for P2";
+        useP2Btn.onclick = () => {
+          deps.onAssignToBattle?.("p2", { id: libDeck.id, name: libDeck.name, cards: cardsExpanded });
+          workingState.lastBattleAssignment = { ...(workingState.lastBattleAssignment || {}), p2: libDeck.id };
+          setQaResult("library use p2", libDeck.id);
+          commitState();
+        };
+
+        row.append(previewBtn, copyBtn, useP1Btn, useP2Btn);
+        libraryWrap.appendChild(row);
+      });
+    }
+    out.append(libraryWrap);
+
+    if (currentDeck) {
+      const exportBtn = document.createElement("button");
+      exportBtn.className = "menuBtn";
+      exportBtn.textContent = "Export (library format)";
+      exportBtn.onclick = () => {
+        const cardsNormalized = normalizeDeckList(currentDeck.deckIds || [], window.CARD_REPO || {});
+        const payload = {
+          id: `export_${Date.now()}`,
+          name: `Exported ${new Date().toISOString()}`,
+          author: "",
+          createdAt: new Date().toISOString(),
+          notes: "",
+          format: "cardboard",
+          cards: cardsNormalized
+        };
+        const text = JSON.stringify(payload, null, 2);
+        const area = document.createElement("textarea");
+        area.className = "menuInput";
+        area.style.width = "100%";
+        area.style.minHeight = "140px";
+        area.value = text;
+        out.appendChild(area);
+        area.select();
+        setQaResult("export", `exported ${cardsNormalized.length} lines`);
+      };
+      out.appendChild(exportBtn);
+    }
+
+    if (workingState.qaMode) {
+      const qaPanel = document.createElement("div");
+      qaPanel.className = "dbHint";
+      qaPanel.style.border = "1px solid #444";
+      qaPanel.style.padding = "8px";
+      qaPanel.style.marginTop = "8px";
+      const activeMode = deps.appMode || "deckbuilder";
+      const activePlayer = deps.playerId || "unknown";
+      const libraryWarnings = [];
+      (Array.isArray(window.CARDBOARD_DECK_LIBRARY) ? window.CARDBOARD_DECK_LIBRARY : []).forEach((deck) => {
+        const warnings = validateLibraryDeck(deck, window.CARD_REPO || {});
+        warnings.forEach((w) => libraryWarnings.push(`${deck.id}: ${w}`));
+      });
+      qaPanel.innerHTML = `
+        <div><strong>QA Mode</strong>: on</div>
+        <div>Last action: ${workingState.qaStatus?.lastAction || "-"}</div>
+        <div>Last result: ${workingState.qaStatus?.lastResult || "-"}</div>
+        <div>Last saved deck id: ${workingState.lastSelectedDeckId || "-"}</div>
+        <div>Last loaded/assigned: P1=${workingState.lastBattleAssignment?.p1 || "-"}, P2=${workingState.lastBattleAssignment?.p2 || "-"}</div>
+        <div>Player: ${activePlayer}</div>
+        <div>Mode: ${activeMode}</div>
+        <div>Wiring: Build=${typeof buildBtn.onclick === "function" ? "ok" : "missing"}, Optimize=${typeof optimizeBtn.onclick === "function" ? "ok" : "missing"}, Save=${currentDeck ? "ok" : "disabled"}</div>
+      `;
+      if (libraryWarnings.length) {
+        const warn = document.createElement("div");
+        warn.className = "dbWarning";
+        warn.textContent = `Library warnings: ${libraryWarnings.join(" | ")}`;
+        qaPanel.appendChild(warn);
+      }
+      out.appendChild(qaPanel);
+    }
+
     out.append(savedWrap);
-    wrap.appendChild(out);
     wrap.appendChild(out);
     rootNode.replaceChildren(wrap);
   }
@@ -1181,6 +1464,9 @@ const pool = getDeckbuilderCardPool(cardsSource);
     computeDeckStats,
     computeDeckScore,
     getDeckbuilderCardPool,
-    buildRandomDeckFromChoices
+    buildRandomDeckFromChoices,
+    normalizeDeckList,
+    validateLibraryDeck,
+    expandDeckList
   };
 })();
