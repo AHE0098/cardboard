@@ -249,6 +249,12 @@ function applyIntent(room, role, intent) {
     fromArr.splice(idx, 1);
     if (payload.where === "top") deck.unshift(cardId);
     else deck.push(cardId);
+  } else if (type === "SET_DECK") {
+    const owner = payload.owner || role;
+    if (owner !== role) return { ok: false, error: "Cannot set opponent deck" };
+    const cards = Array.isArray(payload.cards) ? payload.cards.map((id) => String(id)) : [];
+    if (!cards.length) return { ok: false, error: "Deck list empty" };
+    s.players[owner].zones.deck = cards;
   } else {
     return { ok: false, error: "Unknown intent" };
   }
