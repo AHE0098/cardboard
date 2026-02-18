@@ -37,6 +37,11 @@ Screen + data architecture:
       seed: 1337
     };
 
+    function isHumanMenuInteractionActive() {
+      const el = document.activeElement;
+      return !!(el && el.tagName === "SELECT" && el.dataset?.stickyMenu === "1");
+    }
+
     let uiScreen = "playerMenu";
     let appMode = null;
     let dragging = null;
@@ -141,7 +146,15 @@ Screen + data architecture:
       },
 
       onBattleLeaveRoom: () => { deckPlacementChoice = null; },
-      onRoomsListChanged: (rooms) => { openRooms = Array.isArray(rooms) ? rooms : []; renderApp(); },
+      onRoomsListChanged: (rooms) => {
+        openRooms = Array.isArray(rooms) ? rooms : [];
+        battleLobbyRoomsRequested = true;
+        if (isHumanMenuInteractionActive()) {
+          setTimeout(() => { if (!isHumanMenuInteractionActive()) renderApp(); }, 180);
+          return;
+        }
+        renderApp();
+      },
       uid
     }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
@@ -1706,8 +1719,10 @@ function mountLegacyBattleInApp() {
         onRefreshRooms: async () => {
           if (battleLobbyBusy) return;
           battleLobbyBusy = true;
+          battleLobbyRoomsRequested = false;
           renderApp();
           try {
+            battleLobbyRoomsRequested = true;
             await battleClient.refreshRoomsList?.();
             openRooms = battleClient.getOpenRooms?.() || openRooms;
           } finally {
@@ -1785,6 +1800,7 @@ function mountLegacyBattleInApp() {
       label.textContent = `Select deck for ${pk.toUpperCase()}`;
       const select = document.createElement("select");
       select.className = "menuInput";
+      select.dataset.stickyMenu = "1";
       const none = document.createElement("option");
       none.value = "";
       none.textContent = "Default random";
@@ -1826,7 +1842,10 @@ function mountLegacyBattleInApp() {
 
   function renderModeScreen() {
   if (appMode === "battle") {
-    if (!battleState && !openRooms.length) battleClient.refreshRoomsList?.();
+    if (!battleState && !battleLobbyRoomsRequested) {
+      battleLobbyRoomsRequested = true;
+      battleClient.refreshRoomsList?.();
+    }
     if (!battleState && legacyBattleHandle) {
       try { legacyBattleHandle.unmount?.(); } catch (err) { console.error("[battle] unmount on lobby transition failed", err); }
       legacyBattleHandle = null;
