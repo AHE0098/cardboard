@@ -161,6 +161,16 @@ function zoneArr(state, owner, zone) {
   return state.players[owner].zones[zone];
 }
 
+
+function sameCardId(a, b) {
+  return String(a) === String(b);
+}
+
+function findCardIndex(arr, cardId) {
+  if (!Array.isArray(arr)) return -1;
+  return arr.findIndex((id) => sameCardId(id, cardId));
+}
+
 function validateZoneAccess(role, move) {
   const fromShared = zoneIsShared(move.from.zone);
   const toShared = zoneIsShared(move.to.zone);
@@ -206,8 +216,8 @@ function applyIntent(room, role, intent) {
     s.players[owner].zones.hand.unshift(deck.shift());
   } else if (type === "TOGGLE_TAP") {
     const presentInAnyZone = ["p1", "p2"].some((pk) =>
-      Object.values(s.players[pk].zones).some((arr) => arr.includes(payload.cardId))
-    ) || s.sharedZones.stack.includes(payload.cardId);
+      Object.values(s.players[pk].zones).some((arr) => findCardIndex(arr, payload.cardId) >= 0)
+    ) || findCardIndex(s.sharedZones.stack, payload.cardId) >= 0;
     if (!presentInAnyZone) return { ok: false, error: "Card not found" };
 
     const map = payload.kind === "tarped" ? s.tarped : s.tapped;
@@ -231,11 +241,11 @@ function applyIntent(room, role, intent) {
     const toArr = zoneArr(s, move.to.owner, move.to.zone);
     if (!fromArr || !toArr) return { ok: false, error: "Illegal zone" };
 
-    const idx = fromArr.indexOf(cardId);
+    const idx = findCardIndex(fromArr, cardId);
     if (idx < 0) return { ok: false, error: "Card not in source" };
 
-    fromArr.splice(idx, 1);
-    toArr.push(cardId);
+    const [movedCardId] = fromArr.splice(idx, 1);
+    toArr.push(movedCardId);
   } else if (type === "DECK_PLACE") {
     const invalid = validateDeckPlace(role, payload);
     if (invalid) return { ok: false, error: invalid };
@@ -244,11 +254,11 @@ function applyIntent(room, role, intent) {
     const fromArr = zoneArr(s, from.owner, from.zone);
     const deck = zoneArr(s, role, "deck");
     if (!fromArr || !deck) return { ok: false, error: "Illegal zone" };
-    const idx = fromArr.indexOf(cardId);
+    const idx = findCardIndex(fromArr, cardId);
     if (idx < 0) return { ok: false, error: "Card not in source" };
-    fromArr.splice(idx, 1);
-    if (payload.where === "top") deck.unshift(cardId);
-    else deck.push(cardId);
+    const [movedCardId] = fromArr.splice(idx, 1);
+    if (payload.where === "top") deck.unshift(movedCardId);
+    else deck.push(movedCardId);
   } else if (type === "SET_DECK") {
     const owner = payload.owner || role;
     if (owner !== role) return { ok: false, error: "Cannot set opponent deck" };
@@ -451,5 +461,7 @@ module.exports = {
   PRIVATE_ZONES,
   BATTLEFIELD_ZONES,
   SHARED_ZONES,
-  validateDeckPlace
+  validateDeckPlace,
+  findCardIndex,
+  sameCardId
 };

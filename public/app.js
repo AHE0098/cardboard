@@ -52,7 +52,8 @@ Screen + data architecture:
     let legacySandboxHandle = null;
     let legacyBattleHandle = null;
     let battleLobbyRoomsRequested = false;
-    const DEBUG_BATTLE = true;
+    const DEBUG_BATTLE = false;
+    const MOVE_DEBUG = false;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -129,6 +130,10 @@ Screen + data architecture:
               version: battleState?.version,
               rootChildren: root?.childElementCount
             });
+          }
+
+          if (MOVE_DEBUG) {
+            console.info("[move]", { stage: "render", roomId: battleRoomId || null, serverStateVersion: battleState?.version ?? 0 });
           }
 
           if (legacyBattleHandle?.invalidate && battleState) {
@@ -216,6 +221,20 @@ function removeOnce(arr, cardId) {
   return idx >= 0;
 }
 
+// 2P authoritative state invariants:
+// 1) A card exists in exactly one zone in authoritative state.
+// 2) MOVE_CARD commits converge to identical state across clients after server sync.
+// 3) Canceled drags never mutate authoritative state.
+// 4) In 2P mode, server resolves move legality and ordering; client only sends intents.
+// 5) DOM is a projection of battleState/sandboxState; no persistent DOM-only card position state.
+//
+// QC checklist (run after each movement fix):
+// A) Sandbox: hand->battlefield, battlefield->graveyard/exile/hand, reorder, tap/rotate.
+// B) 2P: P1 hand->battlefield mirrors on P2; P2 hand->battlefield mirrors on P1;
+//    battlefield->other zones mirrors; opponent-zone drops (if allowed) mirror; 10 rapid drags;
+//    simultaneous different-card moves converge.
+// C) Regression: load library/pasted/saved decks in 2P; image fallback/resolution works; legacy flows render.
+//
 // Pure-ish: mutates `state` in place (by design for perf/simple integration)
 function applyActionToState(state, action) {
   if (!action || !action.type) return;
@@ -1645,18 +1664,6 @@ function mountLegacyBattleInApp() {
 
     const dispatch = (action) => {
       if (!action || !action.type) return;
-      try {
-        applyActionToState(battleState, action);
-      } catch (err) {
-        console.error("[battle] optimistic apply failed", err, action);
-      }
-
-      try {
-        legacyBattleHandle?.invalidate?.();
-      } catch (err) {
-        console.error("[battle] invalidate after dispatch failed", err);
-      }
-
       if (action.type === "MOVE_CARD") return battleClient.sendIntent("MOVE_CARD", { cardId: action.cardId, from: action.from, to: action.to });
       if (action.type === "DRAW_CARD") return battleClient.sendIntent("DRAW_CARD", { count: 1, owner: action.owner });
       if (action.type === "TOGGLE_TAP") return battleClient.sendIntent("TOGGLE_TAP", { cardId: action.cardId, kind: action.kind });
@@ -1683,6 +1690,8 @@ function mountLegacyBattleInApp() {
       }),
 
       dispatch,
+      authoritativeDispatch: true,
+      debugDnD: MOVE_DEBUG,
       persistIntervalMs: 0
     });
 

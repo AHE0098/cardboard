@@ -16,6 +16,8 @@
 function createBattleClient(api) {
   let socket = null;
   let openRooms = [];
+  const MOVE_DEBUG = false;
+  let moveDebugSeq = 0;
 
   const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
 
@@ -28,6 +30,26 @@ function createBattleClient(api) {
       socket.on("room_state", ({ roomId, state, role }) => {
         const currentSession = api.getSession();
         const pid = currentSession.playerId;
+        const prevState = api.getBattleState();
+        const prevVersion = Number(prevState?.version || 0);
+        const nextVersion = Number(state?.version || 0);
+
+        if (MOVE_DEBUG) {
+          console.info("[move]", {
+            stage: "recv",
+            roomId: roomId || api.getBattleRoomId(),
+            prevVersion,
+            nextVersion,
+            role: role || null
+          });
+        }
+
+        if (prevState && nextVersion < prevVersion) {
+          if (MOVE_DEBUG) {
+            console.warn("[move]", { stage: "recv", event: "stale room_state ignored", prevVersion, nextVersion });
+          }
+          return;
+        }
 
         let derived = null;
         if (state?.players?.p1?.id === pid) derived = "p1";
@@ -53,6 +75,9 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           viewRole: nextViewRole
         });
 
+        if (MOVE_DEBUG) {
+          console.info("[move]", { stage: "apply", roomId: roomId || api.getBattleRoomId(), ownerKey: nextRole || null, serverStateVersion: nextVersion });
+        }
         api.onBattleStateChanged();
       });
 
@@ -67,6 +92,15 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       socket.on("rooms_list", ({ rooms }) => {
         openRooms = Array.isArray(rooms) ? rooms : [];
         api.onRoomsListChanged?.(openRooms);
+      });
+      socket.on("intent_rejected", ({ error, state }) => {
+        if (!MOVE_DEBUG) return;
+        console.warn("[move]", {
+          stage: "apply",
+          event: "intent rejected",
+          error: error || "unknown",
+          serverVersion: Number(state?.version || 0)
+        });
       });
 
       return socket;
@@ -148,12 +182,18 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       if (!socket || !api.getBattleRoomId() || !api.getBattleState()) return;
       const currentSession = api.getSession();
       const currentBattle = api.getBattleState();
+      const clientActionId = api.uid();
+      const baseVersion = currentBattle.version || 0;
+      const moveClientActionId = ++moveDebugSeq;
+      if (MOVE_DEBUG) {
+        console.info("[move]", { stage: "emit", type, clientActionId: moveClientActionId, roomId: api.getBattleRoomId(), cardId: payload?.cardId ?? null, fromZoneKey: payload?.from?.zone ?? null, toZoneKey: payload?.to?.zone ?? null, ownerKey: payload?.from?.owner || currentSession.role || null, targetIndex: payload?.to?.index ?? null, serverStateVersion: baseVersion });
+      }
       socket.emit("intent", {
         type,
         roomId: api.getBattleRoomId(),
         playerId: currentSession.playerId,
-        clientActionId: api.uid(),
-        baseVersion: currentBattle.version || 0,
+        clientActionId,
+        baseVersion,
         payload
       });
     },

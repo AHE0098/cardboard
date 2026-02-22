@@ -24,6 +24,18 @@ function mkRoom() {
   });
   assert.equal(res.ok, true, 'p1 should move own card to own battlefield');
 
+  const numericMoveCard = Number(room.state.players.p1.zones.hand[0]);
+  res = applyIntent(room, 'p1', {
+    type: 'MOVE_CARD',
+    payload: {
+      cardId: numericMoveCard,
+      from: { owner: 'p1', zone: 'hand' },
+      to: { owner: 'p1', zone: 'permanents' }
+    }
+  });
+  assert.equal(res.ok, true, 'numeric card id should match string-backed zone cards for MOVE_CARD');
+
+
   res = applyIntent(room, 'p1', {
     type: 'MOVE_CARD',
     payload: {
@@ -92,6 +104,9 @@ function mkRoom() {
   assert.equal(res.ok, true, 'p1 can toggle opponent battlefield card');
 
 
+  if (!room.state.players.p1.zones.hand.length) {
+    applyIntent(room, 'p1', { type: 'DRAW_CARD', payload: { owner: 'p1' } });
+  }
   const toDeckCard = room.state.players.p1.zones.hand[0];
   res = applyIntent(room, 'p1', {
     type: 'DECK_PLACE',
@@ -104,6 +119,21 @@ function mkRoom() {
   });
   assert.equal(res.ok, true, 'p1 can place own hand card on top of own deck');
   assert.equal(room.state.players.p1.zones.deck[0], toDeckCard, 'card should be placed on top');
+
+  if (!room.state.players.p1.zones.hand.length) {
+    applyIntent(room, 'p1', { type: 'DRAW_CARD', payload: { owner: 'p1' } });
+  }
+  const numericDeckPlaceCard = Number(room.state.players.p1.zones.hand[0]);
+  res = applyIntent(room, 'p1', {
+    type: 'DECK_PLACE',
+    payload: {
+      cardId: numericDeckPlaceCard,
+      from: { owner: 'p1', zone: 'hand' },
+      owner: 'p1',
+      where: 'bottom'
+    }
+  });
+  assert.equal(res.ok, true, 'numeric card id should match string-backed zone cards for DECK_PLACE');
 
   res = applyIntent(room, 'p1', {
     type: 'DECK_PLACE',
