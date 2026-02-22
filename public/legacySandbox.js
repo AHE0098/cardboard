@@ -1583,6 +1583,7 @@ function renderFocus(zoneKey) {
 
       dragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
       debugLog({ event: "dragStart", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
+      renderBoardOverlay();
       syncDropTargetHighlights(null);
 
       // little vibration if supported
@@ -1808,6 +1809,7 @@ function finalizeDrop(toZoneKey) {
 
   // remove ghost
   if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
+  removeBoardOverlay();
 
   const from = d.fromZoneKey;
   const cardId = d.cardId;
