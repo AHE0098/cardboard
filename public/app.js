@@ -314,6 +314,13 @@ case "TOGGLE_TAP": {
 
     function clone(x) { return JSON.parse(JSON.stringify(x)); }
 
+    function getCardDef(cardId) {
+      const id = String(cardId);
+      const raw = window.CARD_REPO?.[id] || {};
+      if (typeof window.normalizeCardDef === "function") return window.normalizeCardDef(id, raw);
+      return raw;
+    }
+
     function deepClone(value) {
       if (typeof structuredClone === "function") return structuredClone(value);
       return JSON.parse(JSON.stringify(value));
@@ -353,14 +360,17 @@ case "TOGGLE_TAP": {
 
     function getDeckById(id) {
       if (!id) return null;
-      return window.CardboardDeckStorage?.loadDeck?.(id)
-        || (savedDecks || []).find((d) => d.id === id || d.deckId === id)
-        || null;
+      const allDecks = typeof window.getAllAvailableDecks === "function"
+        ? window.getAllAvailableDecks()
+        : (window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks || []);
+      return allDecks.find((d) => d.id === id || d.deckId === id) || null;
     }
 
     function assignDeckForBattle(playerKey, deckObj) {
       const pk = playerKey === "p2" ? "p2" : "p1";
-      const cards = Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : [];
+      const cards = typeof window.expandDeckCardIds === "function"
+        ? window.expandDeckCardIds(deckObj)
+        : (Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : []);
       const deckId = String(deckObj?.id || "");
       if (!cards.length) return false;
       if (pk === "p1") localStorage.setItem(BATTLE_DECK_KEY_P1, JSON.stringify({ id: deckId, cards }));
@@ -508,7 +518,8 @@ function onBack() {
 
 
     function cardName(cardId) {
-      return window.CARD_REPO?.[String(cardId)]?.name || `Card ${cardId}`;
+      const data = getCardDef(cardId);
+      return data?.name || `Card ${cardId}`;
     }
 
     function modeState() {
@@ -588,7 +599,7 @@ function onBack() {
     }
 
     function getCardCostString(cardId) {
-      const data = window.CARD_REPO?.[String(cardId)] || {};
+      const data = getCardDef(cardId);
       return (data.costs ?? data.cost ?? "").toString().trim();
     }
 
@@ -876,7 +887,7 @@ function onBack() {
       const costEl = renderManaCostOverlay(getCardCostString(cardId), { mode: "mini" });
       if (costEl) card.appendChild(costEl);
 
-      const data = window.CARD_REPO?.[String(cardId)] || {};
+      const data = getCardDef(cardId);
       if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
         const pt = document.createElement("div");
         pt.className = "miniPT";
@@ -1322,7 +1333,7 @@ function onBack() {
         name.className = "inspectorName";
         name.textContent = cardName(id);
         row.appendChild(name);
-        const data = window.CARD_REPO?.[String(id)] || {};
+        const data = getCardDef(id);
         if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
           const pt = document.createElement("div");
           pt.className = "inspectorPT";
@@ -1699,7 +1710,9 @@ function mountLegacyBattleInApp() {
         const selected = battleDeckSelections[pk];
         if (!selected) return;
         const deckObj = getDeckById(selected);
-        const cards = Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : [];
+        const cards = typeof window.expandDeckCardIds === "function"
+          ? window.expandDeckCardIds(deckObj)
+          : (Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : []);
         const declaredSize = Number(deckObj?.deckSize || cards.length);
         if (!cards.length || declaredSize !== cards.length) return;
         out[pk] = cards;
@@ -1792,7 +1805,9 @@ function mountLegacyBattleInApp() {
     title.textContent = "Choose Decks";
     panel.appendChild(title);
 
-    const decks = window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks || [];
+    const decks = typeof window.getAllAvailableDecks === "function"
+      ? window.getAllAvailableDecks()
+      : (window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks || []);
     ["p1", "p2"].forEach((pk) => {
       const row = document.createElement("div");
       row.className = "zoneMeta";
@@ -1808,7 +1823,10 @@ function mountLegacyBattleInApp() {
       decks.forEach((deck) => {
         const opt = document.createElement("option");
         opt.value = deck.id || deck.deckId;
-        opt.textContent = `${deck.name} • ${deck.deckSize || deck?.cards?.length || deck?.deck?.size || 0}`;
+        const deckSize = typeof window.expandDeckCardIds === "function"
+          ? window.expandDeckCardIds(deck).length
+          : (deck.deckSize || deck?.cards?.length || deck?.deck?.size || 0);
+        opt.textContent = `${deck.name} • ${deckSize}`;
         if (battleDeckSelections[pk] === opt.value) opt.selected = true;
         select.appendChild(opt);
       });
@@ -1828,7 +1846,7 @@ function mountLegacyBattleInApp() {
           if (!n) return;
           const pill = document.createElement("span");
           pill.className = "dbChip";
-          pill.textContent = `${window.CARD_REPO?.[id]?.name || id} x${n}`;
+          pill.textContent = `${cardName(id)} x${n}`;
           preview.appendChild(pill);
         });
         row.appendChild(preview);
