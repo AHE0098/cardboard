@@ -758,7 +758,7 @@ function onBack() {
 }
 
 
-  function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
+function canDropTo(fromZone, toZone, fromOwner = session.role, toOwner = session.role) {
   if (appMode !== "battle") return true;
 
   if (!ALL_ZONES.includes(fromZone) || !ALL_ZONES.includes(toZone)) return false;
@@ -775,6 +775,19 @@ function onBack() {
   // Otherwise: battlefield + shared zones are free-for-all (by design request)
   return true;
 }
+
+    function canonicalizeZoneTarget(zoneKey, ownerRole, fallbackRole = session.role) {
+      const resolved = resolveZoneBinding(zoneKey, ownerRole || fallbackRole);
+      let zone = resolved.zone;
+      let owner = resolved.owner || fallbackRole || session.role || "p1";
+
+      if (appMode !== "battle") return { zone, owner };
+      if (zone === "stack") return { zone, owner: "shared" };
+
+      if (owner === "shared" || owner === "solo") owner = fallbackRole || session.role || "p1";
+      if (owner !== "p1" && owner !== "p2") owner = fallbackRole || session.role || "p1";
+      return { zone, owner };
+    }
 
 
     function toggleMark(cardId, kind) {
@@ -803,6 +816,9 @@ function onBack() {
 
     function openDeckPlacementChooser({ cardId, from, to, optimistic = true }) {
       if (deckPlacementChoice) return;
+      from = canonicalizeZoneTarget(from.zone, from.owner, session.role);
+      to = canonicalizeZoneTarget(to.zone, to.owner, session.role);
+      if (appMode === "battle") to.owner = session.role;
       const fromArr = [...getZone(from.zone, from.owner)];
       const idx = fromArr.indexOf(cardId);
       if (idx < 0) return;
@@ -831,37 +847,41 @@ function onBack() {
 
     function moveCard(intentPayload, optimistic = true) {
       const { cardId, from, to } = intentPayload;
-      const fromOwner = from.owner || session.role;
-      const toOwner = to.owner || session.role;
+      const fromTarget = canonicalizeZoneTarget(from.zone, from.owner, from.owner || session.role);
+      const toTarget = canonicalizeZoneTarget(to.zone, to.owner, to.owner || session.role);
+      const fromOwner = fromTarget.owner;
+      const toOwner = toTarget.owner;
+      const fromZone = fromTarget.zone;
+      const toZone = toTarget.zone;
       moveDebug("commitAttempt", {
         cardId,
-        fromZoneKey: from.zone,
-        toZoneKey: to.zone,
+        fromZoneKey: fromZone,
+        toZoneKey: toZone,
         fromOwner,
         toOwner
       });
-      if (!ALL_ZONES.includes(from.zone) || !ALL_ZONES.includes(to.zone)) return;
-      if (!canDropTo(from.zone, to.zone, fromOwner, toOwner)) return;
-      if (to.zone === "deck" && from.zone !== "deck") {
-        openDeckPlacementChooser({ cardId, from: { owner: fromOwner, zone: from.zone }, to: { owner: toOwner, zone: to.zone }, optimistic });
+      if (!ALL_ZONES.includes(fromZone) || !ALL_ZONES.includes(toZone)) return;
+      if (!canDropTo(fromZone, toZone, fromOwner, toOwner)) return;
+      if (toZone === "deck" && fromZone !== "deck") {
+        openDeckPlacementChooser({ cardId, from: { owner: fromOwner, zone: fromZone }, to: { owner: toOwner, zone: toZone }, optimistic });
         return;
       }
-      const fromArr = [...getZone(from.zone, fromOwner)];
+      const fromArr = [...getZone(fromZone, fromOwner)];
       const idx = fromArr.indexOf(cardId);
       if (idx < 0) return;
       fromArr.splice(idx, 1);
-      const toArr = [...getZone(to.zone, toOwner), cardId];
-      setZone(from.zone, fromArr, fromOwner);
-      setZone(to.zone, toArr, toOwner);
+      const toArr = [...getZone(toZone, toOwner), cardId];
+      setZone(fromZone, fromArr, fromOwner);
+      setZone(toZone, toArr, toOwner);
       if (appMode === "battle" && optimistic) {
         moveDebug("emitMove", {
           cardId,
-          fromZoneKey: from.zone,
-          toZoneKey: to.zone,
+          fromZoneKey: fromZone,
+          toZoneKey: toZone,
           fromOwner,
           toOwner
         });
-        battleClient.sendIntent("MOVE_CARD", { cardId, from: { owner: fromOwner, zone: from.zone }, to: { owner: toOwner, zone: to.zone } });
+        battleClient.sendIntent("MOVE_CARD", { cardId, from: { owner: fromOwner, zone: fromZone }, to: { owner: toOwner, zone: toZone } });
       }
       renderApp();
     }
