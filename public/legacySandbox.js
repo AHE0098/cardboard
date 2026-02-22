@@ -2214,25 +2214,28 @@ function onPilePointerDown(e) {
 
 
 // Strong mobile back: pointerup works much more reliably than click
-(function bindBackButton() {
-  const btn = document.querySelector(".topBackBtn");
-  if (!btn) return;
+if (opts.bindBackButton !== false) {
+  (function bindBackButton() {
+    const btn = document.querySelector(".topBackBtn");
+    if (!btn) return;
 
-  btn.type = "button";
-  btn.style.touchAction = "manipulation";
+    btn.type = "button";
+    btn.style.touchAction = "manipulation";
 
-  // prevent double-binding if render runs multiple times
-  if (btn.__cbBoundBack) return;
-  btn.__cbBoundBack = true;
+    // prevent double-binding if render runs multiple times
+    if (btn.__cbBoundBack) return;
+    btn.__cbBoundBack = true;
 
-  const onBack = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    goBackToOverview();
-  };
+    const onBack = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      goBackToOverview();
+    };
 
-  btn.addEventListener("pointerup", onBack, { passive: false });
-})();
+    btn.addEventListener("pointerup", onBack, { passive: false });
+  })();
+}
+)();
 
 
 
