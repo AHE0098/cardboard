@@ -1630,6 +1630,8 @@ function onBack() {
   initialState,
   sandboxPlayerId: session.playerId || null,
 
+     bindBackButton: false,
+     
   getMode: () => "solo",
   getActivePlayerKey: () => "p1",
 
@@ -1743,6 +1745,7 @@ function mountLegacyBattleInApp() {
       subtitle,
       dragLayer,
       initialState: battleState,
+      bindBackButton: false,
       getMode: () => "battle",
       getActivePlayerKey: () => (battleViewRole || session.role || "p1"),
       setActivePlayerKey: (pk) => {
