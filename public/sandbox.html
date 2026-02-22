@@ -21,56 +21,12 @@
   </div>
 
   <script src="./demoState.js"></script>
-  <script>
-    (function(){
-      const qs = new URLSearchParams(location.search);
-      const playerId = qs.get('playerId');
-      if (!playerId) return;
-      try {
-        const raw = localStorage.getItem(`cb_legacy_save_${playerId}`);
-        if (!raw) return;
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.sandboxState) {
-          window.DEMO_STATE = parsed.sandboxState;
-        }
-      } catch {}
-      window.__CB_PLAYER_ID = playerId;
-    })();
-  </script>
-
   <script src="./cards.js"></script>
-  <script src="./legacySandbox.js"></script>
-
-  <!-- ✅ Mount legacy sandbox (legacySandbox.js is mountable and does NOT auto-boot) -->
-  <script>
-    (function () {
-      const root = document.getElementById("root");
-      const subtitle = document.getElementById("subtitle");
-      const dragLayer = document.getElementById("dragLayer");
-
-      if (!root || !subtitle || !dragLayer) {
-        console.error("Sandbox: missing required DOM nodes");
-        return;
-      }
-
-      if (!window.LegacySandbox?.mount) {
-        console.error("Sandbox: LegacySandbox.mount is missing");
-        return;
-      }
-
-      window.LegacySandbox.mount({
-        root,
-        subtitle,
-        dragLayer,
-        initialState: window.DEMO_STATE,
-        sandboxPlayerId: window.__CB_PLAYER_ID || null,
-        hosted: false,
-        bindBackButton: true,
-
-        getMode: () => "solo",
-        getActivePlayerKey: () => "p1"
-      });
-    })();
-  </script>
+  <script src="./appMeta.js"></script>
+  <script src="./deckStorage.js"></script>
+  <script src="./decks_library.js"></script>
+  <script src="./decks.paste.js"></script>
+  <script src="./deckbuilder.js"></script>
+  <script src="./app2.js"></script>
 </body>
 </html>
