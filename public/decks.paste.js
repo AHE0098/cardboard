@@ -125,6 +125,11 @@ window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
     const explicit = typeof src.kind === "string" ? src.kind.trim().toLowerCase() : "";
     if (explicit) return explicit;
 
+    const incomingType = typeof src.type === "string" ? src.type.trim().toLowerCase() : "";
+    if (incomingType === "basic_land" || incomingType === "land") return "land";
+    if (incomingType === "creature") return "creature";
+    if (["instant", "sorcery", "spell"].includes(incomingType)) return "spell";
+
     const power = isFiniteOrNull(src.power);
     const toughness = isFiniteOrNull(src.toughness);
     if (power !== null && toughness !== null) return "creature";

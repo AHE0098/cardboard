@@ -1838,8 +1838,21 @@ function mountLegacyBattleInApp() {
 
       const chosen = getDeckById(battleDeckSelections[pk]);
       if (chosen) {
+        const expanded = typeof window.expandDeckCardIds === "function"
+          ? window.expandDeckCardIds(chosen)
+          : (Array.isArray(chosen?.cards) ? chosen.cards.map(String) : []);
+        const previewId = expanded.find((id) => window.CARD_KIND?.(id) !== "land") || expanded[0] || "";
+        const previewSrc = previewId ? getCardImgSrc(previewId, { playerKey: pk }) : "";
         const preview = document.createElement("div");
         preview.className = "dbInline";
+        if (previewSrc) {
+          const art = document.createElement("img");
+          art.className = "dbDeckThumb";
+          art.src = previewSrc;
+          art.alt = "";
+          art.loading = "lazy";
+          preview.appendChild(art);
+        }
         const byLand = chosen?.stats?.byLandType || {};
         Object.keys(byLand).forEach((id) => {
           const n = Number(byLand[id] || 0);

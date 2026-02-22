@@ -674,6 +674,17 @@ const inspected = analyzeCardPool(cardsSource);
     const isLand = !!opts.isLand;
     if (isLand) tile.classList.add("miniLand");
 
+    const src = window.resolveCardImage?.(cardId, { type: cardData?.type }) || "";
+    if (src) {
+      const art = document.createElement("img");
+      art.className = "dbMiniArt";
+      art.src = src;
+      art.alt = "";
+      art.loading = "lazy";
+      art.onerror = () => art.remove();
+      tile.appendChild(art);
+    }
+
     const cost = document.createElement("div");
     cost.className = "miniCost";
     cost.textContent = isLand ? "LAND" : String(cardData?.rawCost || cardData?.cmc || "0");
@@ -1215,6 +1226,20 @@ const pool = getDeckbuilderCardPool(cardsSource);
         const st = saved?.stats || {};
         meta.textContent = `${saved.name} • size ${Number(saved?.deckSize || saved?.cards?.length || 0)} • lands ${Number(st.lands || 0)} • nonlands ${Number(st.nonlands || 0)}`;
 
+        const savedCards = typeof window.expandDeckCardIds === "function"
+          ? window.expandDeckCardIds(saved)
+          : (Array.isArray(saved?.cards) ? saved.cards.map(String) : []);
+        const savedThumbId = savedCards.find((id) => window.CARD_KIND?.(id) !== "land") || savedCards[0] || "";
+        const savedThumbSrc = savedThumbId ? window.resolveCardImage?.(savedThumbId, { playerKey: "p1" }) : "";
+        if (savedThumbSrc) {
+          const thumb = document.createElement("img");
+          thumb.className = "dbDeckThumb";
+          thumb.src = savedThumbSrc;
+          thumb.alt = "";
+          thumb.loading = "lazy";
+          row.appendChild(thumb);
+        }
+
         const pills = document.createElement("div");
         pills.className = "dbInline";
         LAND_IDS.forEach((id) => {
@@ -1327,6 +1352,16 @@ const pool = getDeckbuilderCardPool(cardsSource);
         const meta = document.createElement("div");
         meta.className = "dbHint";
         meta.textContent = `${libDeck.name} (${cardsExpanded.length})`;
+        const libThumbId = cardsExpanded.find((id) => window.CARD_KIND?.(id) !== "land") || cardsExpanded[0] || "";
+        const libThumbSrc = libThumbId ? window.resolveCardImage?.(libThumbId, { playerKey: "p1" }) : "";
+        if (libThumbSrc) {
+          const thumb = document.createElement("img");
+          thumb.className = "dbDeckThumb";
+          thumb.src = libThumbSrc;
+          thumb.alt = "";
+          thumb.loading = "lazy";
+          row.appendChild(thumb);
+        }
         row.appendChild(meta);
 
         const previewBtn = document.createElement("button");
