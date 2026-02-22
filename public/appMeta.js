@@ -17,6 +17,10 @@ function createBattleClient(api) {
   let socket = null;
   let openRooms = [];
   const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
+  const moveDebug = (stage, payload = {}) => {
+    if (!api.moveDebugEnabled?.()) return;
+    api.moveDebug?.(stage, payload);
+  };
 
   const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
 
@@ -27,6 +31,14 @@ function createBattleClient(api) {
       socket = window.io("/battle");
 
       socket.on("room_state", ({ roomId, state, role }) => {
+        moveDebug("recvUpdate", {
+          roomId: roomId || api.getBattleRoomId() || null,
+          toZoneKey: null,
+          fromZoneKey: null,
+          cardId: null,
+          serverRole: role || null,
+          serverVersion: Number(state?.version || 0)
+        });
         const currentSession = api.getSession();
         const pid = currentSession.playerId;
         const prevState = api.getBattleState();
@@ -73,6 +85,14 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           state,
           viewRole: nextViewRole
         });
+        moveDebug("applyUpdate", {
+          roomId: roomId || api.getBattleRoomId() || null,
+          cardId: null,
+          fromZoneKey: null,
+          toZoneKey: null,
+          role: nextRole || null,
+          serverVersion: Number(state?.version || 0)
+        });
 
         if (DEBUG_DND) {
           console.info("[battle:dnd]", { event: "applied", version: nextVersion, role: nextRole || null });
@@ -82,10 +102,15 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
 
       socket.on("room_closed", ({ roomId }) => {
         if (roomId && roomId === api.getBattleRoomId()) {
+          console.info("[ui-exit]", { reason: "room_closed", roomId, playerId: api.getSession()?.playerId || null, playerRole: api.getSession()?.role || null });
           api.setBattleSession({ roomId: "", role: null, state: null, viewRole: "p1" });
           api.onBattleLeaveRoom();
           api.onBattleStateChanged();
         }
+      });
+
+      socket.on("disconnect", (reason) => {
+        console.info("[ui-exit]", { reason: "socket_disconnect", disconnectReason: reason || "unknown", roomId: api.getBattleRoomId() || null, playerId: api.getSession()?.playerId || null, playerRole: api.getSession()?.role || null });
       });
 
       socket.on("rooms_list", ({ rooms }) => {
@@ -93,6 +118,15 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
         api.onRoomsListChanged?.(openRooms);
       });
       socket.on("intent_rejected", ({ error, state }) => {
+        moveDebug("serverAck", {
+          ack: "rejected",
+          error: error || "unknown",
+          roomId: api.getBattleRoomId() || null,
+          cardId: null,
+          fromZoneKey: null,
+          toZoneKey: null,
+          serverVersion: Number(state?.version || 0)
+        });
         if (!DEBUG_DND) return;
         console.warn("[battle:dnd]", {
           event: "intent rejected",
@@ -185,6 +219,17 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       if (DEBUG_DND) {
         console.info("[battle:dnd]", { event: "sent action", type, clientActionId, baseVersion, payload });
       }
+      moveDebug("emitMove", {
+        type,
+        roomId: api.getBattleRoomId() || null,
+        cardId: payload?.cardId ?? null,
+        fromZoneKey: payload?.from?.zone ?? null,
+        toZoneKey: payload?.to?.zone ?? null,
+        fromOwner: payload?.from?.owner ?? null,
+        toOwner: payload?.to?.owner ?? payload?.owner ?? null,
+        clientActionId,
+        baseVersion
+      });
       socket.emit("intent", {
         type,
         roomId: api.getBattleRoomId(),
