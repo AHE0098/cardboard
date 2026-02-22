@@ -2214,7 +2214,8 @@ function onPilePointerDown(e) {
 
 
 // Strong mobile back: pointerup works much more reliably than click
-if (opts?.bindBackButton !== false) {
+const shouldBindLegacyBackButton = opts?.bindBackButton === true || opts?.hosted !== true;
+if (shouldBindLegacyBackButton) {
   (function bindBackButton() {
     const btn = document.querySelector(".topBackBtn");
     if (!btn) return;
@@ -2223,8 +2224,9 @@ if (opts?.bindBackButton !== false) {
     btn.style.touchAction = "manipulation";
 
     // prevent double-binding if render runs multiple times
-    if (btn.__cbBoundBack) return;
-    btn.__cbBoundBack = true;
+    if (btn.__cbLegacyBackHandler) {
+      btn.removeEventListener("pointerup", btn.__cbLegacyBackHandler);
+    }
 
     const onBack = (e) => {
       e.preventDefault();
@@ -2232,10 +2234,10 @@ if (opts?.bindBackButton !== false) {
       goBackToOverview();
     };
 
+    btn.__cbLegacyBackHandler = onBack;
     btn.addEventListener("pointerup", onBack, { passive: false });
   })();
 }
-)();
 
 
 
@@ -2263,6 +2265,13 @@ render();
       },
       unmount() {
         try { if (intervalId) clearInterval(intervalId); } catch {}
+        try {
+          const btn = document.querySelector(".topBackBtn");
+          if (btn?.__cbLegacyBackHandler) {
+            btn.removeEventListener("pointerup", btn.__cbLegacyBackHandler);
+            delete btn.__cbLegacyBackHandler;
+          }
+        } catch {}
         try {
           const io = document.getElementById("inspectorOverlay");
           if (io) io.remove();
