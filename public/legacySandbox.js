@@ -90,6 +90,12 @@
     // DISPATCH SUPPORT (Option A)
     // ============================
     const dispatch = typeof opts.dispatch === "function" ? opts.dispatch : null;
+    const authoritativeDispatch = !!opts.authoritativeDispatch;
+    const debugEnabled = !!opts.debugDnD;
+    const debugLog = (...args) => {
+      if (!debugEnabled) return;
+      console.info("[battle:dnd]", ...args);
+    };
 
     function otherPlayerKey(pk) {
       return pk === "p1" ? "p2" : "p1";
@@ -120,9 +126,11 @@
 
    function emitAction(action, fallbackFn) {
   if (dispatch) {
-    // Dispatch may be "authoritative" (host updates state) OR broken/not wired yet.
-    // We do optimistic fallback so the sandbox still works.
     try { dispatch(action); } catch {}
+
+    if (authoritativeDispatch) {
+      return true;
+    }
 
     if (typeof fallbackFn === "function") {
       fallbackFn();            // ✅ local apply as fallback
@@ -1574,6 +1582,7 @@ function renderFocus(zoneKey) {
       positionGhost(ghost, e.clientX, e.clientY);
 
       dragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
+      debugLog({ event: "dragStart", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
       syncDropTargetHighlights(null);
 
       // little vibration if supported
@@ -1618,6 +1627,7 @@ if (!lifted) {
       ev.preventDefault();
 
       const dropZoneKey = hitTestZone(ev.clientX, ev.clientY);
+      debugLog({ event: "dropCommit", cardId, fromZone: fromZoneKey, toZone: dropZoneKey || null, sourcePlayer: getActivePlayerKey() });
       finalizeDrop(dropZoneKey);
 
       cancelAll();
@@ -1626,6 +1636,7 @@ if (!lifted) {
     const onCancel = (ev) => {
       ev.preventDefault();
       clearTimeout(holdTimer);
+      debugLog({ event: "cancel", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
       if (dragging) finalizeDrop(null);
       cancelAll();
     };
@@ -1780,6 +1791,7 @@ function finalizeDrop(toZoneKey) {
 
   // snap-back if invalid drop or same zone
   if (!toZoneKey || toZoneKey === from) {
+    debugLog({ event: "cancel", cardId, fromZone: from, toZone: toZoneKey || null, sourcePlayer: getActivePlayerKey() });
     dragging = null;
     syncDropTargetHighlights(null);
     return;

@@ -16,6 +16,7 @@
 function createBattleClient(api) {
   let socket = null;
   let openRooms = [];
+  const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
 
   const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
 
@@ -28,6 +29,26 @@ function createBattleClient(api) {
       socket.on("room_state", ({ roomId, state, role }) => {
         const currentSession = api.getSession();
         const pid = currentSession.playerId;
+        const prevState = api.getBattleState();
+        const prevVersion = Number(prevState?.version || 0);
+        const nextVersion = Number(state?.version || 0);
+
+        if (DEBUG_DND) {
+          console.info("[battle:dnd]", {
+            event: "received action",
+            roomId: roomId || api.getBattleRoomId(),
+            prevVersion,
+            nextVersion,
+            role: role || null
+          });
+        }
+
+        if (prevState && nextVersion < prevVersion) {
+          if (DEBUG_DND) {
+            console.warn("[battle:dnd]", { event: "stale room_state ignored", prevVersion, nextVersion });
+          }
+          return;
+        }
 
         let derived = null;
         if (state?.players?.p1?.id === pid) derived = "p1";
@@ -53,6 +74,9 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           viewRole: nextViewRole
         });
 
+        if (DEBUG_DND) {
+          console.info("[battle:dnd]", { event: "applied", version: nextVersion, role: nextRole || null });
+        }
         api.onBattleStateChanged();
       });
 
@@ -67,6 +91,14 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       socket.on("rooms_list", ({ rooms }) => {
         openRooms = Array.isArray(rooms) ? rooms : [];
         api.onRoomsListChanged?.(openRooms);
+      });
+      socket.on("intent_rejected", ({ error, state }) => {
+        if (!DEBUG_DND) return;
+        console.warn("[battle:dnd]", {
+          event: "intent rejected",
+          error: error || "unknown",
+          serverVersion: Number(state?.version || 0)
+        });
       });
 
       return socket;
@@ -148,12 +180,17 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       if (!socket || !api.getBattleRoomId() || !api.getBattleState()) return;
       const currentSession = api.getSession();
       const currentBattle = api.getBattleState();
+      const clientActionId = api.uid();
+      const baseVersion = currentBattle.version || 0;
+      if (DEBUG_DND) {
+        console.info("[battle:dnd]", { event: "sent action", type, clientActionId, baseVersion, payload });
+      }
       socket.emit("intent", {
         type,
         roomId: api.getBattleRoomId(),
         playerId: currentSession.playerId,
-        clientActionId: api.uid(),
-        baseVersion: currentBattle.version || 0,
+        clientActionId,
+        baseVersion,
         payload
       });
     },
