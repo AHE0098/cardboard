@@ -53,7 +53,29 @@ Screen + data architecture:
     let legacyBattleHandle = null;
     let battleLobbyRoomsRequested = false;
     const DEBUG_BATTLE = false;
+    const MOVE_DEBUG = false;
     const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
+    const moveDebug = (stage, payload = {}) => {
+      if (!MOVE_DEBUG) return;
+      console.info("[move]", {
+        stage,
+        roomId: battleRoomId || null,
+        playerId: session.playerId || null,
+        playerRole: session.role || null,
+        ...payload
+      });
+    };
+    const exitDebug = (reason, payload = {}) => {
+      console.info("[ui-exit]", {
+        reason,
+        uiScreen,
+        appMode,
+        roomId: battleRoomId || null,
+        playerId: session.playerId || null,
+        playerRole: session.role || null,
+        ...payload
+      });
+    };
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -150,7 +172,10 @@ Screen + data architecture:
         }
       },
 
-      onBattleLeaveRoom: () => { deckPlacementChoice = null; },
+      onBattleLeaveRoom: () => {
+        exitDebug("battle_leave_room_callback");
+        deckPlacementChoice = null;
+      },
       onRoomsListChanged: (rooms) => {
         openRooms = Array.isArray(rooms) ? rooms : [];
         battleLobbyRoomsRequested = true;
@@ -160,7 +185,9 @@ Screen + data architecture:
         }
         renderApp();
       },
-      uid
+      uid,
+      moveDebug,
+      moveDebugEnabled: () => MOVE_DEBUG
     }) || { connect: async () => null, createRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), joinRoom: async () => ({ ok: false, error: "Missing CardboardMeta" }), refreshRoomsList: async () => [], getOpenRooms: () => [], sendIntent: () => {}, leaveRoom: () => {} };
 
     const topBackBtn = document.createElement("button");
@@ -491,6 +518,7 @@ case "TOGGLE_TAP": {
         p2: String(save?.battleDeckSelections?.p2 || localP2?.id || "")
       };
       appMode = null;
+      exitDebug("set_active_player", { nextScreen: "mainMenu" });
       uiScreen = "mainMenu";
       renderApp();
     }
@@ -522,13 +550,16 @@ function onBack() {
       try { legacyBattleHandle?.unmount?.(); } catch {}
       legacyBattleHandle = null;
 
+      exitDebug("back_from_battle_mode", { nextScreen: "mainMenu" });
       battleClient.leaveRoom();
       battleLobbyRoomsRequested = false;
     }
 
+    exitDebug("back_to_main_menu", { nextScreen: "mainMenu" });
     uiScreen = "mainMenu";
     appMode = null;
   } else if (uiScreen === "mainMenu") {
+    exitDebug("back_to_player_menu", { nextScreen: "playerMenu" });
     uiScreen = "playerMenu";
   }
 
@@ -802,6 +833,13 @@ function onBack() {
       const { cardId, from, to } = intentPayload;
       const fromOwner = from.owner || session.role;
       const toOwner = to.owner || session.role;
+      moveDebug("commitAttempt", {
+        cardId,
+        fromZoneKey: from.zone,
+        toZoneKey: to.zone,
+        fromOwner,
+        toOwner
+      });
       if (!ALL_ZONES.includes(from.zone) || !ALL_ZONES.includes(to.zone)) return;
       if (!canDropTo(from.zone, to.zone, fromOwner, toOwner)) return;
       if (to.zone === "deck" && from.zone !== "deck") {
@@ -815,7 +853,16 @@ function onBack() {
       const toArr = [...getZone(to.zone, toOwner), cardId];
       setZone(from.zone, fromArr, fromOwner);
       setZone(to.zone, toArr, toOwner);
-      if (appMode === "battle" && optimistic) battleClient.sendIntent("MOVE_CARD", { cardId, from: { owner: fromOwner, zone: from.zone }, to: { owner: toOwner, zone: to.zone } });
+      if (appMode === "battle" && optimistic) {
+        moveDebug("emitMove", {
+          cardId,
+          fromZoneKey: from.zone,
+          toZoneKey: to.zone,
+          fromOwner,
+          toOwner
+        });
+        battleClient.sendIntent("MOVE_CARD", { cardId, from: { owner: fromOwner, zone: from.zone }, to: { owner: toOwner, zone: to.zone } });
+      }
       renderApp();
     }
 
@@ -942,6 +989,7 @@ function onBack() {
         card.addEventListener("pointerdown", (e) => {
           if (!canDragFrom(zoneKey, ownerRole)) return;
           e.preventDefault();
+          moveDebug("dragStart", { cardId, fromZoneKey: zoneKey, toZoneKey: null, fromOwner: ownerRole });
           const pointerId = e.pointerId;
           try { card.setPointerCapture(pointerId); } catch {}
           const start = { x: e.clientX, y: e.clientY };
@@ -987,6 +1035,13 @@ function onBack() {
             clearTimeout(holdTimer);
             if (dragging) {
               const drop = hitTestZoneWithOwner(ev.clientX, ev.clientY);
+              moveDebug("dropTarget", {
+                cardId: dragging.cardId,
+                fromZoneKey: dragging.from,
+                toZoneKey: drop?.zone || null,
+                fromOwner: dragging.owner,
+                toOwner: drop?.owner || null
+              });
               if (drop && canDropTo(dragging.from, drop.zone, dragging.owner, drop.owner)) {
                 moveCard({ cardId: dragging.cardId, from: { owner: dragging.owner, zone: dragging.from }, to: { owner: drop.owner, zone: drop.zone } }, true);
               }
