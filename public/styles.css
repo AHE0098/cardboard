@@ -1670,6 +1670,24 @@ body.isFocus #topPiles{
   cursor: pointer;
 }
 
+
+.dbMiniCard .dbMiniArt {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 10px;
+  opacity: 0.72;
+}
+
+.dbDeckThumb {
+  width: 40px;
+  height: 52px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
 .dbMiniCard .miniCost {
   position: absolute;
   top: 4px;

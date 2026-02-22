@@ -641,10 +641,23 @@ window.CARD_REPO = {
 
 window.IMAGE_RULES = window.IMAGE_RULES || {
   global: {
-    // optional: land images by color (safe if empty)
-    landByColor: {},
-    // optional: generic fallback by kind (safe if empty)
-    kindFallback: {},
+    // Deck images by kind/type: point these URLs to your real files under /cards/...
+    landByColor: {
+      white: "/cards/lands/land-red.png",
+      blue: "/cards/lands/land-red.png",
+      black: "/cards/lands/land-red.png",
+      red: "/cards/lands/land-red.png",
+      green: "/cards/lands/land-red.png",
+      colorless: "/cards/lands/land-red.png",
+    },
+    kindFallback: {
+      land: "/cards/lands/land-red.png",
+      creature: "/cards/image40.png",
+      instant: "/cards/image41.png",
+      sorcery: "/cards/image42.png",
+      spell: "/cards/image43.png",
+      unknown: "/cards/image44.png",
+    },
     // optional: final URL fallback; set to null to use silhouette
     fallback: null,
     // optional: if true, try /cards/image<ID>.png as a low-tier fallback
@@ -656,6 +669,7 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
 // Kind detector (safe defaults)
 window.CARD_KIND = window.CARD_KIND || function CARD_KIND(cardId) {
   const data = window.CARD_REPO?.[String(cardId)] || {};
+  if (!data || Object.keys(data).length === 0) return "unknown";
   if (typeof data.kind === "string" && data.kind.trim()) return data.kind.trim().toLowerCase();
   const name = (data.name || "").toLowerCase().trim();
 
@@ -682,6 +696,9 @@ window.resolveCardImage = function resolveCardImage(cardId, opts = {}) {
   const pr = players[playerKey] || {};
   const templates = pr.templates || {};
   const overrides = pr.overridesByCardId || {};
+  const typeRaw = String(opts.type || data.type || "").trim().toLowerCase();
+  const typeKey = typeRaw === "basic_land" ? "land" : typeRaw;
+  const isSpell = kind === "spell";
 
   // A) Global per-card image in CARD_REPO
   if (typeof data.image === "string" && data.image.trim()) return data.image.trim();
@@ -691,6 +708,14 @@ window.resolveCardImage = function resolveCardImage(cardId, opts = {}) {
   if (typeof ov === "string" && ov.trim()) return ov.trim();
 
   // C) Per-player template by kind (e.g. creature)
+  if (isSpell && typeKey === "instant") {
+    const instantTemplate = templates.instant;
+    if (typeof instantTemplate === "string" && instantTemplate.trim()) return instantTemplate.trim();
+  }
+  if (isSpell && typeKey === "sorcery") {
+    const sorceryTemplate = templates.sorcery;
+    if (typeof sorceryTemplate === "string" && sorceryTemplate.trim()) return sorceryTemplate.trim();
+  }
   const t = templates[kind];
   if (typeof t === "string" && t.trim()) return t.trim();
 
@@ -702,7 +727,8 @@ window.resolveCardImage = function resolveCardImage(cardId, opts = {}) {
   }
 
   // E) Global kind fallback (optional)
-  const kfb = (global.kindFallback || {})[kind] || (global.kindFallback || {}).unknown;
+  const kindFallback = global.kindFallback || {};
+  const kfb = (isSpell && kindFallback[typeKey]) || kindFallback[kind] || kindFallback.unknown;
   if (typeof kfb === "string" && kfb.trim()) return kfb.trim();
 
   // F) Conventional local fallback (optional)
