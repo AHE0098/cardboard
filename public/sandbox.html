@@ -64,8 +64,7 @@
         dragLayer,
         initialState: window.DEMO_STATE,
         sandboxPlayerId: window.__CB_PLAYER_ID || null,
-
-        // Standalone page: legacy can own the top back button UX
+        hosted: false,
         bindBackButton: true,
 
         getMode: () => "solo",

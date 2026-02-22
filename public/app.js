@@ -1629,8 +1629,8 @@ function onBack() {
   dragLayer: document.getElementById("dragLayer"),
   initialState,
   sandboxPlayerId: session.playerId || null,
-
-     bindBackButton: false,
+  hosted: true,
+  bindBackButton: false,
      
   getMode: () => "solo",
   getActivePlayerKey: () => "p1",
@@ -1745,6 +1745,7 @@ function mountLegacyBattleInApp() {
       subtitle,
       dragLayer,
       initialState: battleState,
+      hosted: true,
       bindBackButton: false,
       getMode: () => "battle",
       getActivePlayerKey: () => (battleViewRole || session.role || "p1"),
