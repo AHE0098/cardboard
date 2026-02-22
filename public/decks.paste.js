@@ -14,26 +14,62 @@ PASTE R OUTPUT HERE:
 */
 
 window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
-  {
-    id: "r_example_stormtest",
-    name: "Storm Test (Example)",
-    author: "R export",
-    createdAt: "2026-02-22",
-    notes: "Example pasted deck with embedded custom cards.",
-    format: "cardboard",
-    cards: [
-      { cardId: "101", qty: 9 },
-      { cardId: "104", qty: 8 },
-      { cardId: "MANUAL_1_1", qty: 2 },
-      { cardId: "MANUAL_2_1", qty: 1 }
-    ],
-    sideboard: [{ cardId: "MANUAL_3_1", qty: 1 }],
-    embeddedCards: {
-      MANUAL_1_1: { name: "Storm", kind: "spell", type: "instant", cost: "1", color: "blue", value: 1 },
-      MANUAL_2_1: { name: "Greater Storm", kind: "spell", type: "instant", cost: "2", color: "blue", value: 2 },
-      MANUAL_3_1: { name: "Tempest Recall", type: "sorcery", cost: "3", color: "blue", value: 2 }
-    }
+ {
+  id: "r_2026_02_22_stormdeck_1337",
+  name: "R Deck (Storm x6) seed 1337",
+  author: "R export",
+  createdAt: "2026-02-22",
+  notes: "Generated in R; includes 3x Storm (1) and 3x Storm (2).",
+  format: "cardboard",
+
+  // ✅ qty format: stable, no duplicate keys, no instance ids
+  cards: [
+    { cardId: "102", qty: 9 }, // Islands
+    { cardId: "104", qty: 8 }, // Mountains
+
+    // Storms (manual custom IDs) — we include embeddedCards so it works standalone
+    { cardId: "R_STORM_1", qty: 3 },
+    { cardId: "R_STORM_2", qty: 3 },
+
+    // The rest are from your generated creature pool (IDs are in CARD_REPO already)
+    { cardId: "2022_1", qty: 1 },
+    { cardId: "2023_1", qty: 1 },
+    { cardId: "2013_1", qty: 2 },
+    { cardId: "2011_1", qty: 2 },
+    { cardId: "2012_1", qty: 1 },
+
+    { cardId: "2024_2", qty: 3 },
+    { cardId: "2015_2", qty: 2 },
+    { cardId: "2044_2", qty: 1 },
+    { cardId: "2055_2", qty: 1 },
+    { cardId: "2004_2", qty: 1 },
+    { cardId: "2013_2", qty: 1 },
+    { cardId: "2014_2", qty: 1 },
+
+    { cardId: "2088_3", qty: 1 },
+    { cardId: "2055_3", qty: 1 },
+    { cardId: "2007_3", qty: 1 },
+    { cardId: "2066_3", qty: 2 },
+    { cardId: "2026_3", qty: 1 },
+    { cardId: "2045_3", qty: 1 },
+    { cardId: "2017_3", qty: 1 },
+
+    { cardId: "2088_4", qty: 1 },
+    { cardId: "2077_4", qty: 1 },
+    { cardId: "2059_4", qty: 2 },
+    { cardId: "2038_4", qty: 1 },
+
+    { cardId: "2043_6", qty: 1 },
+    { cardId: "2054_7", qty: 1 },
+    { cardId: "2120_10", qty: 1 }
+  ],
+
+  embeddedCards: {
+    // ✅ Self-contained custom cards (not in CARD_REPO)
+    R_STORM_1: { name: "Storm", kind: "spell", type: "instant", cost: "1", color: "U", value: null },
+    R_STORM_2: { name: "Storm", kind: "spell", type: "instant", cost: "2", color: "U", value: null }
   }
+}
 ];
 
 (() => {
