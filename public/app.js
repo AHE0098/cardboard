@@ -132,6 +132,10 @@ Screen + data architecture:
             });
           }
 
+          if (MOVE_DEBUG) {
+            console.info("[move]", { stage: "render", roomId: battleRoomId || null, serverStateVersion: battleState?.version ?? 0 });
+          }
+
           if (legacyBattleHandle?.invalidate && battleState) {
             legacyBattleHandle.invalidate();
             return;
