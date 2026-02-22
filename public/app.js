@@ -53,7 +53,7 @@ Screen + data architecture:
     let legacyBattleHandle = null;
     let battleLobbyRoomsRequested = false;
     const DEBUG_BATTLE = false;
-    const MOVE_DEBUG = false;
+    const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
 
     let session = { playerId: null, playerName: null, role: null };
     let playerRegistry = loadPlayerRegistry();
@@ -1664,6 +1664,18 @@ function mountLegacyBattleInApp() {
 
     const dispatch = (action) => {
       if (!action || !action.type) return;
+      if (DEBUG_DND) {
+        console.info("[battle:dnd]", {
+          event: "sent action",
+          type: action.type,
+          cardId: action.cardId ?? null,
+          fromZone: action.from?.zone ?? null,
+          toZone: action.to?.zone ?? null,
+          sourcePlayer: session.role || null,
+          targetPlayer: action.to?.owner || action.owner || null,
+          baseVersion: battleState?.version ?? 0
+        });
+      }
       if (action.type === "MOVE_CARD") return battleClient.sendIntent("MOVE_CARD", { cardId: action.cardId, from: action.from, to: action.to });
       if (action.type === "DRAW_CARD") return battleClient.sendIntent("DRAW_CARD", { count: 1, owner: action.owner });
       if (action.type === "TOGGLE_TAP") return battleClient.sendIntent("TOGGLE_TAP", { cardId: action.cardId, kind: action.kind });
@@ -1691,7 +1703,7 @@ function mountLegacyBattleInApp() {
 
       dispatch,
       authoritativeDispatch: true,
-      debugDnD: MOVE_DEBUG,
+      debugDnD: DEBUG_DND,
       persistIntervalMs: 0
     });
 

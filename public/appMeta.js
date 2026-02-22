@@ -16,8 +16,7 @@
 function createBattleClient(api) {
   let socket = null;
   let openRooms = [];
-  const MOVE_DEBUG = false;
-  let moveDebugSeq = 0;
+  const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
 
   const normalizeRole = (role) => (role === "p1" || role === "p2" ? role : null);
 
@@ -34,9 +33,9 @@ function createBattleClient(api) {
         const prevVersion = Number(prevState?.version || 0);
         const nextVersion = Number(state?.version || 0);
 
-        if (MOVE_DEBUG) {
-          console.info("[move]", {
-            stage: "recv",
+        if (DEBUG_DND) {
+          console.info("[battle:dnd]", {
+            event: "received action",
             roomId: roomId || api.getBattleRoomId(),
             prevVersion,
             nextVersion,
@@ -45,8 +44,8 @@ function createBattleClient(api) {
         }
 
         if (prevState && nextVersion < prevVersion) {
-          if (MOVE_DEBUG) {
-            console.warn("[move]", { stage: "recv", event: "stale room_state ignored", prevVersion, nextVersion });
+          if (DEBUG_DND) {
+            console.warn("[battle:dnd]", { event: "stale room_state ignored", prevVersion, nextVersion });
           }
           return;
         }
@@ -75,8 +74,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           viewRole: nextViewRole
         });
 
-        if (MOVE_DEBUG) {
-          console.info("[move]", { stage: "apply", roomId: roomId || api.getBattleRoomId(), ownerKey: nextRole || null, serverStateVersion: nextVersion });
+        if (DEBUG_DND) {
+          console.info("[battle:dnd]", { event: "applied", version: nextVersion, role: nextRole || null });
         }
         api.onBattleStateChanged();
       });
@@ -94,9 +93,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
         api.onRoomsListChanged?.(openRooms);
       });
       socket.on("intent_rejected", ({ error, state }) => {
-        if (!MOVE_DEBUG) return;
-        console.warn("[move]", {
-          stage: "apply",
+        if (!DEBUG_DND) return;
+        console.warn("[battle:dnd]", {
           event: "intent rejected",
           error: error || "unknown",
           serverVersion: Number(state?.version || 0)
@@ -184,9 +182,8 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
       const currentBattle = api.getBattleState();
       const clientActionId = api.uid();
       const baseVersion = currentBattle.version || 0;
-      const moveClientActionId = ++moveDebugSeq;
-      if (MOVE_DEBUG) {
-        console.info("[move]", { stage: "emit", type, clientActionId: moveClientActionId, roomId: api.getBattleRoomId(), cardId: payload?.cardId ?? null, fromZoneKey: payload?.from?.zone ?? null, toZoneKey: payload?.to?.zone ?? null, ownerKey: payload?.from?.owner || currentSession.role || null, targetIndex: payload?.to?.index ?? null, serverStateVersion: baseVersion });
+      if (DEBUG_DND) {
+        console.info("[battle:dnd]", { event: "sent action", type, clientActionId, baseVersion, payload });
       }
       socket.emit("intent", {
         type,
