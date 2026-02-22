@@ -2214,7 +2214,7 @@ function onPilePointerDown(e) {
 
 
 // Strong mobile back: pointerup works much more reliably than click
-if (opts.bindBackButton !== false) {
+if (opts?.bindBackButton !== false) {
   (function bindBackButton() {
     const btn = document.querySelector(".topBackBtn");
     if (!btn) return;
