@@ -1583,6 +1583,7 @@ function renderFocus(zoneKey) {
 
       dragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
       debugLog({ event: "dragStart", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
+      renderBoardOverlay();
       syncDropTargetHighlights(null);
 
       // little vibration if supported
@@ -1659,21 +1660,44 @@ function hitTestZone(x, y) {
     if (el.id === "dragLayer" || el.classList?.contains("dragGhost")) continue;
 
     // direct dropArea
-    if (el.classList?.contains("dropArea") && el.dataset?.zoneKey) {
-      return el.dataset.zoneKey;
+    if (el.classList?.contains("dropArea")) {
+      const zoneKey = getDropAreaZoneKey(el);
+      if (zoneKey) return zoneKey;
     }
 
     // nested inside dropArea (common with fixed bars and inner wrappers)
     const parent = el.closest?.(".dropArea");
-    if (parent?.dataset?.zoneKey) return parent.dataset.zoneKey;
+    if (parent) {
+      const zoneKey = getDropAreaZoneKey(parent);
+      if (zoneKey) return zoneKey;
+    }
   }
 
   return null;
 }
+
+function getDropAreaZoneKey(areaEl) {
+  if (!areaEl?.dataset) return null;
+  if (areaEl.dataset.zoneKey) return areaEl.dataset.zoneKey;
+
+  const zone = areaEl.dataset.zone;
+  if (!zone) return null;
+
+  if (zone === "opponentLands" || zone === "opponentPermanents") return zone;
+
+  if (zone === "lands" || zone === "permanents") {
+    const owner = areaEl.dataset.owner;
+    if (getMode() === "battle" && owner && owner !== getActivePlayerKey()) {
+      return zone === "lands" ? "opponentLands" : "opponentPermanents";
+    }
+  }
+
+  return zone;
+}
   
  function syncDropTargetHighlights(activeZoneKey) {
   document.querySelectorAll(".dropArea").forEach(area => {
-    const z = area.dataset.zoneKey;
+    const z = getDropAreaZoneKey(area);
     area.classList.toggle("active", !!activeZoneKey && z === activeZoneKey);
   });
 }
@@ -1785,6 +1809,7 @@ function finalizeDrop(toZoneKey) {
 
   // remove ghost
   if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
+  removeBoardOverlay();
 
   const from = d.fromZoneKey;
   const cardId = d.cardId;
