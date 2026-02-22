@@ -140,8 +140,15 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
 
     async refreshRoomsList() {
       const s = await this.connect();
-      s.emit("rooms_list_request", {});
-      return openRooms;
+      return new Promise((resolve) => {
+        s.emit("rooms_list_request", {}, (res) => {
+          if (Array.isArray(res?.rooms)) {
+            openRooms = res.rooms;
+            api.onRoomsListChanged?.(openRooms);
+          }
+          resolve([...openRooms]);
+        });
+      });
     },
 
     getOpenRooms() {
