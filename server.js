@@ -5,6 +5,7 @@
 const express = require("express");
 const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
 const { Server } = require("socket.io");
 const {
   DEFAULT_BATTLE_DECK_P1,
@@ -73,10 +74,20 @@ function sanitizeDeckCardsByRole(payload) {
   };
 }
 
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = typeof crypto.randomInt === "function"
+      ? crypto.randomInt(i + 1)
+      : Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 function applyDeckToPlayer(player, cards) {
   const deckCards = sanitizeDeckCards(cards);
   if (!deckCards.length) return ensurePlayerZones(player);
-  const nextDeck = [...deckCards];
+  const nextDeck = shuffleInPlace([...deckCards]);
   const hand = [];
   for (let i = 0; i < 3 && nextDeck.length; i += 1) hand.push(nextDeck.shift());
   player.zones = {
@@ -264,7 +275,7 @@ function applyIntent(room, role, intent) {
     if (owner !== role) return { ok: false, error: "Cannot set opponent deck" };
     const cards = Array.isArray(payload.cards) ? payload.cards.map((id) => String(id)) : [];
     if (!cards.length) return { ok: false, error: "Deck list empty" };
-    s.players[owner].zones.deck = cards;
+    s.players[owner].zones.deck = shuffleInPlace(cards);
   } else {
     return { ok: false, error: "Unknown intent" };
   }
@@ -463,5 +474,6 @@ module.exports = {
   SHARED_ZONES,
   validateDeckPlace,
   findCardIndex,
-  sameCardId
+  sameCardId,
+  shuffleInPlace
 };
