@@ -763,7 +763,7 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
 
     // legacy local behavior
     const fromArr = getZoneArray(fromZoneKey);
-    const idx = fromArr.indexOf(cardId);
+    const idx = fromArr.findIndex((id) => String(id) === String(cardId));
     if (idx < 0) return;
     fromArr.splice(idx, 1);
     openDeckPlacementChooser(cardId, fromZoneKey);
@@ -785,7 +785,7 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
       // ✅ local fallback mutation (same as legacy path)
       const fromArr = getZoneArray(fromZoneKey);
       const toArr = getZoneArray(toZoneKey);
-      const idx = fromArr.indexOf(cardId);
+      const idx = fromArr.findIndex((id) => String(id) === String(cardId));
       if (idx < 0) return;
 
       if (toZoneKey === "stack") {
@@ -807,7 +807,7 @@ function moveCard(cardId, fromZoneKey, toZoneKey) {
   const fromArr = getZoneArray(fromZoneKey);
   const toArr = getZoneArray(toZoneKey);
 
-  const idx = fromArr.indexOf(cardId);
+  const idx = fromArr.findIndex((id) => String(id) === String(cardId));
   if (idx < 0) return;
 
   // Special: stack always receives cards "on top"
@@ -972,8 +972,8 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
         // commit new order to state
     if (trackEl) {
       const ids = Array.from(trackEl.querySelectorAll(".inspectorCard"))
-        .map(el => Number(el.dataset.cardId))
-        .filter(n => Number.isFinite(n));
+        .map((el) => String(el.dataset.cardId || "").trim())
+        .filter((id) => id.length > 0);
 
       if (dispatch) {
         const r = resolveOwnerZone(fromZoneKey);
@@ -1564,7 +1564,7 @@ function renderFocus(zoneKey) {
   function onCardPointerDown(e) {
   
     const cardEl = e.currentTarget;
-    const cardId = Number(cardEl.dataset.cardId);
+    const cardId = String(cardEl.dataset.cardId || "").trim();
     const fromZoneKey = cardEl.dataset.fromZoneKey;
 
     // small press-hold before lifting
@@ -2047,7 +2047,7 @@ function openDeckPlacementChooser(cardId, fromZoneKey) {
   // In dispatch mode, we keep state unchanged until commit() emits DECK_PLACE.
   if (!dispatch) {
     const fromArr = getZoneArray(fromZoneKey);
-    const idx = fromArr.indexOf(cardId);
+    const idx = fromArr.findIndex((id) => String(id) === String(cardId));
     if (idx >= 0) fromArr.splice(idx, 1);
   }
 
@@ -2575,7 +2575,7 @@ function getZoneRef(state, owner, zone) {
 }
 
 function removeOnce(arr, cardId) {
-  const idx = arr.indexOf(cardId);
+  const idx = arr.findIndex((id) => String(id) === String(cardId));
   if (idx >= 0) arr.splice(idx, 1);
   return idx >= 0;
 }
@@ -2668,8 +2668,8 @@ case "TOGGLE_TAP": {
       if (!Array.isArray(action.ids)) return;
       if (action.ids.length !== arr.length) return;
       // optional stronger check: same elements (O(n^2) ok for tiny lists)
-      const a = [...arr].sort((x, y) => x - y);
-      const b = [...action.ids].sort((x, y) => x - y);
+      const a = [...arr].map(String).sort();
+      const b = [...action.ids].map(String).sort();
       for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return;
 
       // commit
@@ -3136,7 +3136,7 @@ function onBack() {
     function openDeckPlacementChooser({ cardId, from, to, optimistic = true }) {
       if (deckPlacementChoice) return;
       const fromArr = [...getZone(from.zone, from.owner)];
-      const idx = fromArr.indexOf(cardId);
+      const idx = fromArr.findIndex((id) => String(id) === String(cardId));
       if (idx < 0) return;
       fromArr.splice(idx, 1);
       setZone(from.zone, fromArr, from.owner);
@@ -3179,7 +3179,7 @@ function onBack() {
         return;
       }
       const fromArr = [...getZone(from.zone, fromOwner)];
-      const idx = fromArr.indexOf(cardId);
+      const idx = fromArr.findIndex((id) => String(id) === String(cardId));
       if (idx < 0) return;
       fromArr.splice(idx, 1);
       const toArr = [...getZone(to.zone, toOwner), cardId];
@@ -3651,7 +3651,7 @@ function onBack() {
               draggingEl.style.zIndex = "";
               draggingEl.style.transition = "";
             }
-            const ids = Array.from(trackEl.querySelectorAll(".inspectorCard")).map((el) => Number(el.dataset.cardId)).filter(Number.isFinite);
+            const ids = Array.from(trackEl.querySelectorAll(".inspectorCard")).map((el) => String(el.dataset.cardId || "").trim()).filter((id) => id.length > 0);
             setZone(fromZoneKey, ids, ownerRole);
             reordering = false;
             cleanupOverlay();
