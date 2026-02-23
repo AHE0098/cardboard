@@ -62,7 +62,7 @@ function makePlayer(id = null, name = "") {
 function sanitizeDeckCards(cards) {
   const arr = Array.isArray(cards) ? cards : [];
   return arr
-    .map((id) => String(id || "").trim())
+    .map((id) => (id == null ? "" : String(id).trim()))
     .filter((id) => id.length > 0);
 }
 
@@ -273,7 +273,7 @@ function applyIntent(room, role, intent) {
   } else if (type === "SET_DECK") {
     const owner = payload.owner || role;
     if (owner !== role) return { ok: false, error: "Cannot set opponent deck" };
-    const cards = Array.isArray(payload.cards) ? payload.cards.map((id) => String(id)) : [];
+    const cards = sanitizeDeckCards(payload.cards);
     if (!cards.length) return { ok: false, error: "Deck list empty" };
     s.players[owner].zones.deck = shuffleInPlace(cards);
   } else {

@@ -8,6 +8,11 @@ function mkRoom() {
   return room;
 }
 
+function toNumericIdIfPossible(cardId) {
+  const n = Number(cardId);
+  return Number.isFinite(n) ? n : null;
+}
+
 (function run() {
   const room = mkRoom();
 
@@ -24,7 +29,7 @@ function mkRoom() {
   });
   assert.equal(res.ok, true, 'p1 should move own card to own battlefield');
 
-  const numericMoveCard = Number(room.state.players.p1.zones.hand[0]);
+  const numericMoveCard = toNumericIdIfPossible(room.state.players.p1.zones.hand[0]) ?? room.state.players.p1.zones.hand[0];
   res = applyIntent(room, 'p1', {
     type: 'MOVE_CARD',
     payload: {
@@ -123,7 +128,7 @@ function mkRoom() {
   if (!room.state.players.p1.zones.hand.length) {
     applyIntent(room, 'p1', { type: 'DRAW_CARD', payload: { owner: 'p1' } });
   }
-  const numericDeckPlaceCard = Number(room.state.players.p1.zones.hand[0]);
+  const numericDeckPlaceCard = toNumericIdIfPossible(room.state.players.p1.zones.hand[0]) ?? room.state.players.p1.zones.hand[0];
   res = applyIntent(room, 'p1', {
     type: 'DECK_PLACE',
     payload: {
