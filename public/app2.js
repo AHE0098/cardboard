@@ -2387,6 +2387,15 @@ Screen + data architecture:
     const DEBUG_BATTLE = false;
     const MOVE_DEBUG = false;
     const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
+    const layoutQaEnabled = (() => {
+      try {
+        const q = new URLSearchParams(window.location.search || "");
+        return q.get("debug") === "1" || !!window.DEBUG;
+      } catch {
+        return !!window.DEBUG;
+      }
+    })();
+    let layoutQaEl = null;
     const moveDebug = (stage, payload = {}) => {
       if (!MOVE_DEBUG) return;
       console.info("[move]", {
@@ -4272,7 +4281,81 @@ function mountLegacyBattleInApp() {
 }
 
 
+    function computeBreakpointName(w, h) {
+      if (w >= 1920 && h >= 1080) return "xl";
+      if (w >= 1280) return "lg";
+      if (w >= 900) return "md";
+      return "sm";
+    }
+
+    function isTvIshViewport() {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      const ratio = h ? (w / h) : 0;
+      const ua = (navigator.userAgent || "").toLowerCase();
+      const uaTvHint = /(smart-tv|smarttv|hbbtv|tizen|webos|netcast|viera|bravia|googletv|appletv|aft[bstm]|crkey|roku)/.test(ua);
+      return ((w >= 1600 && h >= 900) || (ratio >= 1.6 && w >= 1920) || (uaTvHint && w >= 1280));
+    }
+
+    function getScrollingElementLabel() {
+      const cands = [document.scrollingElement, document.documentElement, document.body, document.getElementById("root")].filter(Boolean);
+      for (const el of cands) {
+        const style = window.getComputedStyle(el);
+        const canScroll = /(auto|scroll)/.test(style.overflowY || "") || (el.scrollHeight - el.clientHeight > 2);
+        if (canScroll && el.scrollTop > 0) return el.id ? `#${el.id}` : el.tagName.toLowerCase();
+      }
+      const active = cands.find((el) => el.scrollHeight - el.clientHeight > 2);
+      return active ? (active.id ? `#${active.id}` : active.tagName.toLowerCase()) : "none";
+    }
+
+    function mountOrUpdateLayoutQa() {
+      if (!layoutQaEnabled) {
+        if (layoutQaEl) {
+          layoutQaEl.remove();
+          layoutQaEl = null;
+        }
+        return;
+      }
+
+      const w = window.innerWidth || 0;
+      const h = window.innerHeight || 0;
+      const bp = computeBreakpointName(w, h);
+      const tv = document.body.classList.contains("tv-ish");
+      const doc = document.documentElement;
+      const hasOverflowX = doc.scrollWidth > doc.clientWidth;
+      const scrollHost = getScrollingElementLabel();
+      const rootScroll = document.getElementById("root")?.scrollTop || 0;
+
+      if (!layoutQaEl) {
+        layoutQaEl = document.createElement("div");
+        layoutQaEl.className = "layoutQaPanel";
+        layoutQaEl.id = "layoutQaPanel";
+        document.body.appendChild(layoutQaEl);
+      }
+      layoutQaEl.classList.toggle("isOverflowing", hasOverflowX);
+      layoutQaEl.textContent = [
+        `viewport: ${w} x ${h}`,
+        `breakpoint: ${bp}`,
+        `tv-ish: ${tv ? "on" : "off"}`,
+        `scroll host: ${scrollHost}`,
+        `root scrollTop: ${Math.round(rootScroll)}`,
+        `overflow-x: ${hasOverflowX ? "WARNING" : "ok"}`,
+      ].join("\n");
+    }
+
+    function applyLayoutModeClasses() {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      const bp = computeBreakpointName(w, h);
+      const tv = isTvIshViewport();
+      document.body.classList.toggle("tv-ish", tv);
+      document.body.classList.remove("bp-sm", "bp-md", "bp-lg", "bp-xl");
+      document.body.classList.add(`bp-${bp}`);
+      mountOrUpdateLayoutQa();
+    }
+
     function renderApp() {
+      applyLayoutModeClasses();
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||
@@ -4302,6 +4385,10 @@ function mountLegacyBattleInApp() {
         root.replaceChildren(fallback);
       }
     }
+
+    window.addEventListener("resize", applyLayoutModeClasses, { passive: true });
+    window.addEventListener("orientationchange", applyLayoutModeClasses, { passive: true });
+    document.addEventListener("scroll", mountOrUpdateLayoutQa, { passive: true, capture: true });
 
     if (playerRegistry.lastPlayerId) {
       const last = playerRegistry.players.find((p) => p.id === playerRegistry.lastPlayerId);
