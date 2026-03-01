@@ -1,0 +1,6 @@
+out/*.json
+!out/.gitkeep
+!out/README.md
+.Rhistory
+.RData
+.Ruserdata
