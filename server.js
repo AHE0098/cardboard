@@ -16,6 +16,13 @@ const {
   loadSharedDefinitions
 } = require("./shared/loadSharedDefinitions");
 
+const {
+  buildStarterDeck,
+  buildDeckFromList,
+  simulateGame,
+  simulateMany
+} = require("./sim/engine");
+
 const PORT = process.env.PORT || 3000;
 const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
 const BATTLEFIELD_ZONES = ["lands", "permanents"];
@@ -302,6 +309,92 @@ function createServer() {
     if (!loaded.found) return res.status(404).json({ ok: false, error: "shared definitions not found" });
     if (loaded.error) return res.status(500).json({ ok: false, error: loaded.error.message });
     return res.json({ ok: true, preferSharedDefinitions: PREFER_SHARED_DEFINITIONS, data: loaded.data });
+  });
+
+  function parsePositiveInt(raw, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    const i = Math.floor(n);
+    if (i < min || i > max) return fallback;
+    return i;
+  }
+
+  function buildSimDecks(mode) {
+    if (mode === "lands-only") {
+      return {
+        deckA: buildDeckFromList([{ type: "land", name: "Basic Land", qty: 40 }], "RA"),
+        deckB: buildDeckFromList([{ type: "land", name: "Basic Land", qty: 40 }], "RB")
+      };
+    }
+
+    if (mode === "low-land") {
+      return {
+        deckA: buildDeckFromList([
+          { type: "land", name: "Basic Land", qty: 8 },
+          { type: "creature", name: "Greedy 4/4", cost: 4, power: 4, toughness: 4, qty: 16 },
+          { type: "creature", name: "Huge 6/6", cost: 6, power: 6, toughness: 6, qty: 16 }
+        ], "RLA"),
+        deckB: buildDeckFromList([
+          { type: "land", name: "Basic Land", qty: 8 },
+          { type: "creature", name: "Greedy 4/4", cost: 4, power: 4, toughness: 4, qty: 16 },
+          { type: "creature", name: "Huge 6/6", cost: 6, power: 6, toughness: 6, qty: 16 }
+        ], "RLB")
+      };
+    }
+
+    return {
+      deckA: buildStarterDeck("RA"),
+      deckB: buildStarterDeck("RB")
+    };
+  }
+
+  app.get("/api/sim/run", (req, res) => {
+    try {
+      const iterations = parsePositiveInt(req.query.iterations, 100, { min: 1, max: 10000 });
+      const seed = parsePositiveInt(req.query.seed, 1337, { min: 0, max: 0xffffffff });
+      const maxTurns = parsePositiveInt(req.query.maxTurns, 200, { min: 1, max: 10000 });
+      const startingLife = parsePositiveInt(req.query.startingLife, 20, { min: 1, max: 1000 });
+      const deckModeRaw = String(req.query.deckMode || "starter").trim();
+      const deckMode = ["starter", "lands-only", "low-land"].includes(deckModeRaw) ? deckModeRaw : "starter";
+      const logModeRaw = String(req.query.log || "summary").trim();
+      const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
+      const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
+
+      const { deckA, deckB } = buildSimDecks(deckMode);
+      const config = {
+        startingLife,
+        maxTurns,
+        logMode,
+        devAssertions: true
+      };
+
+      const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
+      const batch = simulateMany({ iterations, seedBase: seed, deckA, deckB, config });
+
+      return res.json({
+        ok: true,
+        config: {
+          iterations,
+          seed,
+          maxTurns,
+          startingLife,
+          deckMode,
+          logMode
+        },
+        sampleGame: {
+          seed: sampleGame.seed,
+          winner: sampleGame.winner,
+          turns: sampleGame.turns,
+          endedReason: sampleGame.endedReason,
+          finalLife: sampleGame.finalLife,
+          logLength: sampleGame.log.length,
+          log: includeSampleLog ? sampleGame.log : undefined
+        },
+        summary: batch.summary
+      });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error.message || "simulation_failed" });
+    }
   });
 
   const battle = io.of("/battle");
