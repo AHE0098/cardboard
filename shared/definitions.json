@@ -1,0 +1,85 @@
+{
+  "version": "0.1.0",
+  "schemaVersion": "0.1.0",
+  "_EDIT_HERE_notes": [
+    "=== EDIT HERE === Most manual tuning happens in this file.",
+    "Edit keyword values under definitions.keywords.",
+    "Add or refine card fields under definitions.cardAttributes.",
+    "Adjust deck constraints under definitions.deckRules.",
+    "Keep lowerCamelCase names in this shared file (app-first naming).",
+    "Unknown or extra fields are allowed for forward compatibility."
+  ],
+  "cardDefaults": {
+    "cost": 0,
+    "type": "unit",
+    "tags": [],
+    "meta": {}
+  },
+  "cardAttributes": {
+    "cardId": {
+      "type": "string",
+      "required": true,
+      "desc": "Stable ID used by the app and R harness"
+    },
+    "name": {
+      "type": "string",
+      "required": true,
+      "desc": "Card display name"
+    },
+    "cost": {
+      "type": "number",
+      "required": false,
+      "desc": "Resource cost"
+    },
+    "type": {
+      "type": "string",
+      "required": false,
+      "desc": "Card type"
+    },
+    "tags": {
+      "type": "array",
+      "items": "string",
+      "required": false,
+      "desc": "Optional category tags"
+    },
+    "meta": {
+      "type": "object",
+      "required": false,
+      "desc": "Free-form metadata"
+    }
+  },
+  "keywords": [
+    {
+      "key": "flying",
+      "label": "Flying",
+      "valueDelta": 1,
+      "tags": ["evasion"],
+      "meta": {}
+    },
+    {
+      "key": "ward",
+      "label": "Ward",
+      "valueDelta": 0.6,
+      "tags": ["defense"],
+      "meta": {
+        "tax": 1
+      }
+    }
+  ],
+  "deckRules": {
+    "deckSizeDefault": 40,
+    "maxCopiesDefault": 4,
+    "curveTargets": {
+      "1": 8,
+      "2": 10,
+      "3": 9,
+      "4": 7,
+      "5plus": 6
+    },
+    "meta": {}
+  },
+  "uiLabels": {
+    "deckSize": "Deck Size",
+    "maxCopies": "Max Copies"
+  }
+}

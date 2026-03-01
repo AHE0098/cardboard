@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cardboard.local/schema/card.schema.json",
+  "title": "Card",
+  "type": "object",
+  "required": ["cardId", "name"],
+  "properties": {
+    "cardId": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "cost": { "type": "number" },
+    "type": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

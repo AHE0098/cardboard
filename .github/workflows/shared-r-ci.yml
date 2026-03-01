@@ -1,0 +1,32 @@
+name: shared-r-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shared-and-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: node scripts/validate-shared.js
+      - run: node -e "const {loadSharedDefinitions}=require('./shared/loadSharedDefinitions'); const r=loadSharedDefinitions({rootDir:'./shared'}); if(!r.found||r.error) throw r.error||new Error('definitions missing'); console.log('loaded', r.data.version);"
+      - run: npm test
+
+  r-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: r-lib/actions/setup-r@v2
+      - name: Install R deps
+        run: Rscript -e "install.packages(c('jsonlite','testthat'), repos='https://cloud.r-project.org')"
+      - name: Run harness smoke
+        run: Rscript r/scripts/specificR_run.R --config r/config/example_config.yml
+      - name: Ensure run manifest exists
+        run: test -f r/out/run_manifest.json
+      - name: Run tests
+        run: Rscript r/tests/testthat.R
