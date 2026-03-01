@@ -11,7 +11,9 @@
     "dev": "node server.js",
     "test": "node tests/battle-permissions.test.js && node tests/room-lifecycle.test.js",
     "check:shared": "node scripts/validate-shared.js",
-    "smoke:shared-load": "node -e \"const {loadSharedDefinitions}=require('./shared/loadSharedDefinitions'); const r=loadSharedDefinitions({rootDir:'./shared'}); if(!r.found||r.error) throw r.error||new Error('definitions missing'); console.log('loaded definitions', r.data.version);\""
+    "smoke:shared-load": "node -e \"const {loadSharedDefinitions}=require('./shared/loadSharedDefinitions'); const r=loadSharedDefinitions({rootDir:'./shared'}); if(!r.found||r.error) throw r.error||new Error('definitions missing'); console.log('loaded definitions', r.data.version);\"",
+    "sim": "node sim/run_sim.js",
+    "test:sim": "node sim/tests/run_tests.js"
   },
   "dependencies": {
     "express": "^4.19.2",
