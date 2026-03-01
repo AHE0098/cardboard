@@ -1,0 +1,23 @@
+[
+  {
+    "deckId": "starter-air",
+    "name": "Starter Air",
+    "cards": [
+      { "cardId": "unit-scout", "count": 4 },
+      { "cardId": "spell-gust", "count": 3 },
+      { "cardId": "unit-warden", "count": 2 }
+    ],
+    "maxCopies": 4,
+    "meta": {
+      "theme": "evasion"
+    }
+  },
+  {
+    "deckId": "starter-guard",
+    "name": "Starter Guard",
+    "cards": ["unit-warden", "unit-warden", "spell-gust"],
+    "meta": {
+      "difficulty": "easy"
+    }
+  }
+]

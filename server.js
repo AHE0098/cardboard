@@ -12,6 +12,10 @@ const {
   DEFAULT_BATTLE_DECK_P2
 } = require("./battleDecks");
 
+const {
+  loadSharedDefinitions
+} = require("./shared/loadSharedDefinitions");
+
 const PORT = process.env.PORT || 3000;
 const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
 const BATTLEFIELD_ZONES = ["lands", "permanents"];
@@ -19,6 +23,8 @@ const SHARED_ZONES = ["stack"];
 const rooms = new Map();
 const socketPresence = new Map(); // socket.id -> { roomId, role }
 
+
+const PREFER_SHARED_DEFINITIONS = process.env.PREFER_SHARED_DEFINITIONS === "1";
 
 function normalizeRoomId(raw) {
   const s = String(raw || "").trim().toUpperCase();
@@ -291,6 +297,12 @@ function createServer() {
 
   app.use(express.static(path.join(__dirname, "public")));
   app.get("/health", (_, res) => res.send("ok"));
+  app.get("/api/shared/definitions", (_, res) => {
+    const loaded = loadSharedDefinitions({ rootDir: path.join(__dirname, "shared") });
+    if (!loaded.found) return res.status(404).json({ ok: false, error: "shared definitions not found" });
+    if (loaded.error) return res.status(500).json({ ok: false, error: loaded.error.message });
+    return res.json({ ok: true, preferSharedDefinitions: PREFER_SHARED_DEFINITIONS, data: loaded.data });
+  });
 
   const battle = io.of("/battle");
   battle.on("connection", (socket) => {
