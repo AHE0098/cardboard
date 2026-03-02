@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { buildStarterDeck, buildDeckFromList, simulateGame, simulateMany } = require('../engine');
+const { chooseAttackers, chooseBlocks } = require('../ai');
 
 function digestLog(log) {
   const h = crypto.createHash('sha256');
@@ -143,6 +144,58 @@ function testSummoningSicknessDefaultMatchesExplicitFalse() {
   assert.equal(implicit.turns, explicitFalse.turns);
   assert.equal(digestLog(implicit.log), digestLog(explicitFalse.log));
 }
+
+
+function testSmartAttackingAvoidsPointlessSuicide() {
+  const attackers = [
+    { id: 'a1', power: 2, toughness: 1 },
+    { id: 'a2', power: 2, toughness: 1 }
+  ];
+  const defenders = [
+    { id: 'd1', power: 2, toughness: 3 },
+    { id: 'd2', power: 2, toughness: 3 }
+  ];
+  const choice = chooseAttackers(attackers, defenders, {
+    ai: { smartAttacking: true, certainty: { attack: 100, defend: 100 } },
+    rng: () => 0
+  });
+  assert.equal(choice.attackers.length, 0, 'Expected smart attacking Rule A to prevent pointless attacks');
+}
+
+function testSmartBlockingForcesKillSurvive() {
+  const attackers = [
+    { id: 'a1', power: 3, toughness: 1 },
+    { id: 'a2', power: 3, toughness: 1 }
+  ];
+  const defenders = [
+    { id: 'd1', power: 2, toughness: 3 },
+    { id: 'd2', power: 1, toughness: 4 }
+  ];
+
+  const choice = chooseBlocks(attackers, defenders, {
+    ai: { smartBlocking: true, certainty: { defend: 0 } },
+    rng: () => 0.9
+  });
+
+  assert.ok(choice.meta.forcedBlocks.length >= 1, 'Expected forced smart block count');
+  assert.equal(choice.meta.defendDecisionMode, 'alternative');
+}
+
+function testCertaintyZeroUsesAlternative() {
+  const attackers = [{ id: 'a1', power: 2, toughness: 2 }];
+  const defenders = [{ id: 'd1', power: 2, toughness: 2 }];
+  const atk = chooseAttackers(attackers, defenders, {
+    ai: { certainty: { attack: 0 } },
+    rng: () => 0.5
+  });
+  const blk = chooseBlocks(attackers, defenders, {
+    ai: { certainty: { defend: 0 } },
+    rng: () => 0.5
+  });
+  assert.equal(atk.meta.attackDecisionMode, 'alternative');
+  assert.equal(blk.meta.defendDecisionMode, 'alternative');
+}
+
 function run() {
   testDeterminism();
   testConservation();
@@ -152,6 +205,9 @@ function run() {
   testSnapshotAggregatesShape();
   testSummoningSicknessToggle();
   testSummoningSicknessDefaultMatchesExplicitFalse();
+  testSmartAttackingAvoidsPointlessSuicide();
+  testSmartBlockingForcesKillSurvive();
+  testCertaintyZeroUsesAlternative();
   testNoLegacyWinrateHelperReference();
   console.log('sim tests passed');
 }

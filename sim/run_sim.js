@@ -12,7 +12,12 @@ function parseArgs(argv) {
     startingLife: 20,
     sampleLogFile: 'sim_game_log.txt',
     resultsFile: 'sim_results.json',
-    deckMode: 'starter'
+    deckMode: 'starter',
+    smartBlocking: false,
+    smartAttacking: false,
+    attackCertainty: 100,
+    defendCertainty: 100,
+    aiDebugDecisions: false
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -26,6 +31,11 @@ function parseArgs(argv) {
     else if (token === '--sampleLogFile' && next) out.sampleLogFile = String(next), i += 1;
     else if (token === '--resultsFile' && next) out.resultsFile = String(next), i += 1;
     else if (token === '--deckMode' && next) out.deckMode = String(next), i += 1;
+    else if (token === '--smartBlocking' && next) out.smartBlocking = String(next) === '1', i += 1;
+    else if (token === '--smartAttacking' && next) out.smartAttacking = String(next) === '1', i += 1;
+    else if (token === '--attackCertainty' && next) out.attackCertainty = Number(next), i += 1;
+    else if (token === '--defendCertainty' && next) out.defendCertainty = Number(next), i += 1;
+    else if (token === '--aiDebugDecisions' && next) out.aiDebugDecisions = String(next) === '1', i += 1;
   }
   return out;
 }
@@ -87,7 +97,16 @@ function main() {
     startingLife: args.startingLife,
     maxTurns: args.maxTurns,
     logMode: args.log,
-    devAssertions: true
+    devAssertions: true,
+    ai: {
+      smartBlocking: !!args.smartBlocking,
+      smartAttacking: !!args.smartAttacking,
+      debugDecisions: !!args.aiDebugDecisions,
+      certainty: {
+        attack: Math.max(0, Math.min(100, Number(args.attackCertainty) || 100)),
+        defend: Math.max(0, Math.min(100, Number(args.defendCertainty) || 100))
+      }
+    }
   };
 
   const sample = simulateGame({ seed: args.seed, deckA, deckB, config: { ...config, logMode: 'full' } });

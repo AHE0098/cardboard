@@ -42,7 +42,16 @@ function aggregateResults(results) {
     totalCreaturesDied: { A: 0, B: 0 },
     cardStats: { A: {}, B: {} },
     eotAveragesByTurn: {},
-    deadTurnRateByTurn: {}
+    deadTurnRateByTurn: {},
+    aiCounters: {
+      smartBlockingForcedBlocksCount: 0,
+      smartAttackingForcedAttackersCount: 0,
+      attackHeuristicCount: 0,
+      attackAlternativeCount: 0,
+      defendHeuristicCount: 0,
+      defendAlternativeCount: 0,
+      smartAttackingRuleAPreventedCount: 0
+    }
   };
 
   const turns = [];
@@ -58,6 +67,15 @@ function aggregateResults(results) {
     out.totalCreaturesPlayed.B += game.stats.players[1].creaturesPlayed;
     out.totalCreaturesDied.A += game.stats.players[0].creaturesDied;
     out.totalCreaturesDied.B += game.stats.players[1].creaturesDied;
+
+    const gameAiCounters = game.aiCounters || {};
+    out.aiCounters.smartBlockingForcedBlocksCount += Number(gameAiCounters.smartBlockingForcedBlocksCount || 0);
+    out.aiCounters.smartAttackingForcedAttackersCount += Number(gameAiCounters.smartAttackingForcedAttackersCount || 0);
+    out.aiCounters.attackHeuristicCount += Number(gameAiCounters.attackHeuristicCount || 0);
+    out.aiCounters.attackAlternativeCount += Number(gameAiCounters.attackAlternativeCount || 0);
+    out.aiCounters.defendHeuristicCount += Number(gameAiCounters.defendHeuristicCount || 0);
+    out.aiCounters.defendAlternativeCount += Number(gameAiCounters.defendAlternativeCount || 0);
+    out.aiCounters.smartAttackingRuleAPreventedCount += Number(gameAiCounters.smartAttackingRuleAPreventedCount || 0);
 
     Object.entries(game.turnSummaries || {}).forEach(([turnKey, perPlayer]) => {
       turnBuckets[turnKey] ||= { hand: [], battlefield: [], deadTurns: 0, totalSnapshots: 0 };
