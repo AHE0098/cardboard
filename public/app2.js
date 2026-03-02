@@ -4470,7 +4470,12 @@ function mountLegacyBattleInApp() {
     // Scroll guardrail: this is the SINGLE scroll container for simulator report UI.
     // Do not move overflow ownership elsewhere in the flex chain.
     panel.className = "menuCard simWrap simulatorRoot";
-    panel.innerHTML = "<h2>Simulator</h2>";
+    const simScrollRoot = document.createElement("div");
+    simScrollRoot.id = "sim-scroll-root";
+    simScrollRoot.className = "sim-scroll-root";
+    const heading = document.createElement("h2");
+    heading.textContent = "Simulator";
+    simScrollRoot.appendChild(heading);
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
       ? window.getAllAvailableDecks()
@@ -4634,7 +4639,7 @@ function mountLegacyBattleInApp() {
     numericRow.appendChild(logField);
 
     controls.appendChild(numericRow);
-    panel.appendChild(controls);
+    simScrollRoot.appendChild(controls);
 
     const btnRow = document.createElement("div");
     btnRow.className = "simButtons";
@@ -4741,20 +4746,20 @@ function mountLegacyBattleInApp() {
     };
 
     btnRow.append(copyJsonBtn, copyReportBtn);
-    panel.appendChild(btnRow);
+    simScrollRoot.appendChild(btnRow);
 
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
       running.className = "zoneMeta";
       running.textContent = `Running job ${simulatorState.runId}...`;
-      panel.appendChild(running);
+      simScrollRoot.appendChild(running);
     }
 
     if (simulatorState.lastError) {
       const err = document.createElement("div");
       err.className = "dbWarning";
       err.textContent = simulatorState.lastError;
-      panel.appendChild(err);
+      simScrollRoot.appendChild(err);
     }
 
     if (simulatorState.summary) {
@@ -4787,6 +4792,7 @@ function mountLegacyBattleInApp() {
 
       const winPoints = computeWinrateSeries(simulatorState.runsMeta, simulatorState.iterations);
       const chartWrap = document.createElement("div");
+      chartWrap.id = "sim-winrate-graph";
       chartWrap.className = "simChartWrap";
       if (winPoints.length >= 2) {
         chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateChartSvg(winPoints)}`;
@@ -4794,7 +4800,7 @@ function mountLegacyBattleInApp() {
         chartWrap.innerHTML = '<div class="simChartHead"><strong>Winrate by iteration count</strong></div><div class="zoneMeta">Run at least two checkpoints to render trend lines.</div>';
       }
       reportTop.appendChild(chartWrap);
-      panel.appendChild(reportTop);
+      simScrollRoot.appendChild(reportTop);
 
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
@@ -4811,7 +4817,7 @@ function mountLegacyBattleInApp() {
       });
       table.appendChild(tbody);
       tableWrap.appendChild(table);
-      panel.appendChild(tableWrap);
+      simScrollRoot.appendChild(tableWrap);
 
       if (Array.isArray(simulatorState.runsMeta) && simulatorState.runsMeta.length) {
         const runSelWrap = document.createElement("div");
@@ -4859,7 +4865,7 @@ function mountLegacyBattleInApp() {
           renderApp();
         };
         runSelWrap.append(lbl, select, loadBtn);
-        panel.appendChild(runSelWrap);
+        simScrollRoot.appendChild(runSelWrap);
       }
 
       const reportTools = document.createElement("div");
@@ -4887,6 +4893,7 @@ function mountLegacyBattleInApp() {
       reportTop.appendChild(reportTools);
 
       const report = document.createElement("div");
+      report.id = "sim-report-content";
       report.className = "simStatusReport";
       const pairs = buildStatusPairs(simulatorState.sampleGame || {});
       const searchNeedle = String(simulatorState.reportSearch || "").trim().toLowerCase();
@@ -4994,6 +5001,7 @@ function mountLegacyBattleInApp() {
       panel.appendChild(report);
     }
 
+    panel.appendChild(simScrollRoot);
     wrap.appendChild(panel);
     rootNode.replaceChildren(wrap);
     debugSimulatorScrollChain(rootNode);
@@ -5135,6 +5143,7 @@ function mountLegacyBattleInApp() {
     }
 
     function renderApp() {
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       applyLayoutModeClasses();
       document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
