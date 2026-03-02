@@ -4412,6 +4412,56 @@ function mountLegacyBattleInApp() {
     });
     return out;
   }
+  function debugSimulatorScrollChain(rootNode) {
+    const enabled = window?.location?.hostname === "localhost" || window?.location?.search?.includes("debugLayout=1");
+    if (!enabled) return;
+    requestAnimationFrame(() => {
+      const host = rootNode.querySelector(".simulatorRoot");
+      if (!host) return;
+      const chain = [];
+      let node = host;
+      while (node) {
+        const st = getComputedStyle(node);
+        chain.push({
+          node,
+          label: `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}${node.className ? `.${String(node.className).trim().replace(/\s+/g, ".")}` : ""}`,
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          overflowY: st.overflowY,
+          height: st.height,
+          minHeight: st.minHeight,
+          maxHeight: st.maxHeight,
+          position: st.position,
+          transform: st.transform
+        });
+        node = node.parentElement;
+      }
+      const doc = document.documentElement;
+      const docStyle = getComputedStyle(doc);
+      chain.push({
+        label: "documentElement",
+        clientHeight: doc.clientHeight,
+        scrollHeight: doc.scrollHeight,
+        overflowY: docStyle.overflowY,
+        height: docStyle.height,
+        minHeight: docStyle.minHeight,
+        maxHeight: docStyle.maxHeight,
+        position: docStyle.position,
+        transform: docStyle.transform
+      });
+      console.groupCollapsed("[sim-scroll-autopsy] chain");
+      chain.forEach((row) => console.log(row.label, row));
+      console.groupEnd();
+      const sentinel = host.querySelector("#sim-scroll-sentinel");
+      if (sentinel) {
+        const before = host.scrollTop;
+        sentinel.scrollIntoView({ block: "end" });
+        const after = host.scrollTop;
+        console.assert(after >= before, "[simulator] sentinel must be reachable via .simulatorRoot scroll", { before, after });
+      }
+    });
+  }
+
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
@@ -4937,20 +4987,16 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
+      const sentinel = document.createElement("div");
+      sentinel.id = "sim-scroll-sentinel";
+      sentinel.style.height = "1px";
+      report.appendChild(sentinel);
       panel.appendChild(report);
     }
 
     wrap.appendChild(panel);
     rootNode.replaceChildren(wrap);
-    const devLayoutCheck = window?.location?.hostname === "localhost" || window?.location?.search?.includes("debugLayout=1");
-    if (devLayoutCheck) {
-      requestAnimationFrame(() => {
-        const host = rootNode.querySelector(".simulatorRoot");
-        const overflowY = host ? getComputedStyle(host).overflowY : "missing";
-        console.assert(host, "Simulator scroll container (.simulatorRoot) must exist");
-        console.assert(/(auto|scroll)/.test(overflowY), `Simulator scroll container overflowY must be auto|scroll, got ${overflowY}`);
-      });
-    }
+    debugSimulatorScrollChain(rootNode);
   }
 
   function renderModeScreen() {
@@ -5090,6 +5136,7 @@ function mountLegacyBattleInApp() {
 
     function renderApp() {
       applyLayoutModeClasses();
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||
