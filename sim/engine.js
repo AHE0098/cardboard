@@ -154,6 +154,11 @@ function moveCardBetweenArrays(cardId, from, to) {
   return card;
 }
 
+function canAttackWithCreature(game, creature, config) {
+  if (!config?.rules?.summoningSickness) return true;
+  return Number(creature?.enteredTurn) < Number(game.turn);
+}
+
 function verifyConservation(game) {
   for (const player of game.players) {
     const all = [
@@ -194,7 +199,8 @@ function playMainPhase(game, playerIndex, config) {
 
   for (const creature of chosen) {
     if (creature.cost > player.manaAvailable) continue;
-    moveCardBetweenArrays(creature.id, player.hand, player.battlefieldCreatures);
+    const movedCreature = moveCardBetweenArrays(creature.id, player.hand, player.battlefieldCreatures);
+    if (movedCreature) movedCreature.enteredTurn = game.turn;
     player.manaAvailable -= creature.cost;
     const ps = game.stats.players[playerIndex];
     ps.creaturesPlayed += 1;
@@ -233,7 +239,7 @@ function playMainPhase(game, playerIndex, config) {
 function resolveCombat(game, attackerIndex, defenderIndex, config) {
   const attackerP = game.players[attackerIndex];
   const defenderP = game.players[defenderIndex];
-  const attackers = attackerP.battlefieldCreatures.slice();
+  const attackers = attackerP.battlefieldCreatures.filter((creature) => canAttackWithCreature(game, creature, config));
   if (attackers.length === 0) {
     const event = { turn: game.turn, type: 'combat_skip', attacker: attackerP.name, phase: 'COMBAT_STEP' };
     logEvent(game, event);
@@ -242,6 +248,20 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   }
 
   const defenders = defenderP.battlefieldCreatures.slice();
+  const summoningSick = attackerP.battlefieldCreatures
+    .filter((creature) => !canAttackWithCreature(game, creature, config))
+    .map((creature) => creature.id);
+  if (summoningSick.length) {
+    const sickEvent = {
+      turn: game.turn,
+      type: 'summoning_sickness_prevented',
+      attacker: attackerP.name,
+      creatures: summoningSick,
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, sickEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', sickEvent);
+  }
   const blocks = chooseBlocks(attackers, defenders, config.blockScoring);
   const blockMap = new Map(blocks.map((b) => [b.attackerId, b.defenderId]));
   const defenderById = new Map(defenders.map((d) => [d.id, d]));
@@ -386,7 +406,15 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
     logMode: 'summary',
     devAssertions: true,
     blockScoring: {},
+    rules: {
+      summoningSickness: false,
+      ...(config?.rules || {})
+    },
     ...config
+  };
+  cfg.rules = {
+    summoningSickness: false,
+    ...(cfg.rules || {})
   };
 
   const game = newGame({ seed, deckA, deckB, config: cfg });

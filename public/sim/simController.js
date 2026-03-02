@@ -4,6 +4,22 @@
     try { return new URLSearchParams(global.location.search || "").get("dev") === "1"; } catch { return false; }
   }
 
+  function isSimReportDebugEnabled() {
+    if (global.__SIM_REPORT_DEBUG__ === true) return true;
+    try {
+      return new URLSearchParams(global.location.search || "").get("simReportDebug") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function reportEventBadge(kind) {
+    if (kind === "attack") return "⚔ ATTACK";
+    if (kind === "block") return "🛡 BLOCK";
+    if (kind === "damage") return "✦ DMG";
+    return "•";
+  }
+
   function renderSimulatorMode(rootNode, ctx) {
     const { subtitle, session, savedDecks, simulatorState, persistPlayerSaveDebounced, renderApp, getDeckById, uid, parseManaCost, getCardDef, getAbortController, setAbortController } = ctx;
     subtitle.textContent = `${session.playerName} • simulator`;
@@ -86,6 +102,22 @@
     logSelect.onchange = () => { simulatorState.logMode = logSelect.value; persistPlayerSaveDebounced(); };
     logField.append(logLabel, logSelect);
     numericRow.appendChild(logField);
+
+    const ruleField = document.createElement("div");
+    ruleField.className = "simField";
+    const summoningRuleLabel = document.createElement("label");
+    summoningRuleLabel.className = "zoneMeta";
+    const summoningRuleInput = document.createElement("input");
+    summoningRuleInput.type = "checkbox";
+    summoningRuleInput.checked = !!simulatorState.summoningSickness;
+    summoningRuleInput.onchange = () => {
+      simulatorState.summoningSickness = !!summoningRuleInput.checked;
+      persistPlayerSaveDebounced();
+    };
+    summoningRuleLabel.append(summoningRuleInput, document.createTextNode(" Summoning Sickness"));
+    ruleField.appendChild(summoningRuleLabel);
+    numericRow.appendChild(ruleField);
+
     controls.appendChild(numericRow);
     panel.appendChild(controls);
 
@@ -121,7 +153,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1" });
+        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
         const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
         const data = await resp.json();
         if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -134,6 +166,18 @@
         simulatorState.lastRawResult = data;
         simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
         simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA.name || simulatorState.deckAId, deckBName: deckB.name || simulatorState.deckBId });
+        if (isSimReportDebugEnabled()) {
+          const turnVM = SimUI.buildTurnReportViewModel ? SimUI.buildTurnReportViewModel(simulatorState.sampleGame) : [];
+          console.info("[sim-report-debug] finalized", {
+            turns: turnVM.length,
+            perTurn: turnVM.map((turn) => ({
+              turn: turn.turnNumber,
+              events: (turn.players || []).map((player) => ({ player: player.id, count: (player.actions || []).length })),
+              snapshots: (turn.players || []).map((player) => ({ player: player.id, hasEot: !!player.eot })),
+              hasCombat: (turn.players || []).some((player) => (player.actions || []).some((evt) => evt.kind === "attack" || evt.kind === "block" || evt.kind === "damage"))
+            }))
+          });
+        }
         if (isDevParityEnabled()) {
           const hashBefore = SimUI.buildParityHash(SimUI.normalizeSimResult({ summary: data.summary, sampleGame: data.sampleGame, runsMeta: data.runsMeta }, simulatorState.iterations));
           const hashAfter = SimUI.buildParityHash(SimUI.normalizeSimResult(data, simulatorState.iterations));
@@ -270,7 +314,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1" });
+          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;
@@ -278,6 +322,10 @@
             simulatorState.sampleGame = data.sampleGame || null;
             simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA?.name || simulatorState.deckAId, deckBName: deckB?.name || simulatorState.deckBId });
             simulatorState.lastError = "";
+            if (isSimReportDebugEnabled()) {
+              const turnVM = SimUI.buildTurnReportViewModel ? SimUI.buildTurnReportViewModel(simulatorState.sampleGame) : [];
+              console.info("[sim-report-debug] load-report", { turns: turnVM.length, firstTurnKeys: Object.keys(turnVM[0] || {}) });
+            }
           }
           renderApp();
         };
@@ -306,89 +354,159 @@
       compactChk.checked = !!simulatorState.reportCompactActions;
       compactChk.onchange = () => SimUI.simControls.updateToggle(simulatorState, "reportCompactActions", compactChk.checked, renderApp);
       compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
-      reportTools.append(search, deadOnly, compactOnly);
+      const debugOnly = document.createElement("label");
+      debugOnly.className = "zoneMeta";
+      const debugChk = document.createElement("input");
+      debugChk.type = "checkbox";
+      debugChk.checked = !!simulatorState.reportDebugEnabled;
+      debugChk.setAttribute("aria-label", "Toggle simulator report debug panel");
+      debugChk.onchange = () => {
+        simulatorState.reportDebugEnabled = !!debugChk.checked;
+        global.__SIM_REPORT_DEBUG__ = !!debugChk.checked;
+        renderApp();
+      };
+      debugOnly.append(debugChk, document.createTextNode(" Debug panel"));
+      reportTools.append(search, deadOnly, compactOnly, debugOnly);
       panel.appendChild(reportTools);
 
       const report = document.createElement("div");
       report.className = "simStatusReport";
       const vm = SimUI.normalizeSimResult({ sampleGame: simulatorState.sampleGame, runsMeta: simulatorState.runsMeta, summary: simulatorState.summary }, simulatorState.iterations);
+      const turnVM = SimUI.buildTurnReportViewModel ? SimUI.buildTurnReportViewModel(simulatorState.sampleGame) : [];
       const searchNeedle = String(simulatorState.reportSearch || "").trim().toLowerCase();
-      const filteredPairs = vm.turnRows.filter((pair) => {
-        const snap = pair.summary?.eotSnapshot;
-        if (simulatorState.reportShowOnlyDeadTurns && !snap?.flags?.deadTurn) return false;
+      const filteredTurns = turnVM.filter((turn) => {
+        if (!simulatorState.reportShowOnlyDeadTurns) return !searchNeedle || JSON.stringify(turn).toLowerCase().includes(searchNeedle);
+        const hasDead = (turn.players || []).some((player) => player?.eot?.deadTurn);
+        if (!hasDead) return false;
         if (!searchNeedle) return true;
-        const hay = JSON.stringify(pair.summary || {}).toLowerCase();
-        return hay.includes(searchNeedle);
+        return JSON.stringify(turn).toLowerCase().includes(searchNeedle);
       });
 
-      if (!filteredPairs.length) {
+      if (isSimReportDebugEnabled()) {
+        const debugTurns = filteredTurns.map((turn) => ({
+          turn: turn.turnNumber,
+          players: turn.players.length,
+          eventCount: turn.players.reduce((acc, p) => acc + ((p.actions || []).length), 0),
+          snapshots: turn.players.map((p) => ({ player: p.id, hasEot: !!p.eot })),
+          combat: turn.players.some((p) => (p.actions || []).some((evt) => evt.kind === "attack" || evt.kind === "block" || evt.kind === "damage"))
+        }));
+        console.info("[sim-report-debug] ui-received", {
+          turnCount: filteredTurns.length,
+          firstTurnKeys: Object.keys(filteredTurns[0] || {}),
+          turns: debugTurns
+        });
+      }
+
+      if (!filteredTurns.length) {
         const empty = document.createElement("div");
         empty.className = "zoneMeta";
-        empty.textContent = "No turn rows match current filters.";
+        empty.textContent = "No turns match current filters.";
         report.appendChild(empty);
       } else {
-        filteredPairs.forEach((pair) => {
-          const key = `${pair.turn}:${pair.player}`;
+        filteredTurns.forEach((turn, turnIdx) => {
           const row = document.createElement("section");
-          row.className = "simTurnRow";
-          const head = document.createElement("button");
-          head.className = "simTurnHead";
-          head.type = "button";
-          const snap = pair.summary?.eotSnapshot;
-          head.textContent = `Turn ${pair.turn} • ${pair.player} • ${snap?.flags?.deadTurn ? "dead turn" : "active"}`;
-          head.onclick = () => { simulatorState.reportExpandedTurns[key] = !simulatorState.reportExpandedTurns[key]; renderApp(); };
-          row.appendChild(head);
+          row.className = "simTurnCard";
+          if (turnIdx % 2 === 1) row.classList.add("simTurnCardAlt");
+
+          const title = document.createElement("h2");
+          title.className = "simTurnTitle";
+          title.textContent = `Turn ${turn.turnNumber} — Active: ${turn.activePlayer}`;
+          row.appendChild(title);
 
           const grid = document.createElement("div");
-          grid.className = "simTurnGrid";
-          const left = document.createElement("div");
-          left.className = "simTurnCol";
-          left.innerHTML = '<h4>New Actions</h4>';
-          ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"].forEach((phase) => {
-            const actions = pair.summary?.actionsByPhase?.[phase] || [];
-            if (!actions.length) return;
-            const phaseEl = document.createElement("div");
-            phaseEl.className = "simPhaseGroup";
-            const title = document.createElement("div");
-            title.className = "zoneMeta";
-            title.textContent = phase.replace("_", " ");
-            phaseEl.appendChild(title);
+          grid.className = "simTurnColumns";
+
+          (turn.players || []).forEach((player) => {
+            const col = document.createElement("article");
+            col.className = "simTurnPlayerCol";
+            const h3 = document.createElement("h3");
+            h3.className = "simPlayerTitle";
+            h3.textContent = player.id;
+            col.appendChild(h3);
+
+            const actionSection = document.createElement("section");
+            actionSection.className = "simActionSection";
+            actionSection.innerHTML = "<h4>Actions this turn</h4>";
             const ul = document.createElement("ul");
-            actions.forEach((evt) => { const li = document.createElement("li"); li.textContent = SimUI.simEventLabel(evt, !!simulatorState.reportCompactActions); ul.appendChild(li); });
-            phaseEl.appendChild(ul);
-            left.appendChild(phaseEl);
+            ul.className = "simActionList";
+            (player.actions || []).forEach((evt, evtIdx) => {
+              const li = document.createElement("li");
+              li.className = `simActionItem simAction-${evt.kind || "misc"}`;
+              li.dataset.key = `${turn.turnNumber}:${player.id}:${evtIdx}`;
+              const badge = document.createElement("span");
+              badge.className = "simEventBadge";
+              badge.textContent = reportEventBadge(evt.kind);
+              const txt = document.createElement("span");
+              txt.className = "simEventText";
+              txt.textContent = evt.text || evt.raw?.type || "event";
+              li.append(badge, txt);
+              ul.appendChild(li);
+            });
+            if (!ul.childElementCount) {
+              const emptyEvt = document.createElement("li");
+              emptyEvt.className = "simActionItem simAction-muted";
+              emptyEvt.textContent = "No actions";
+              ul.appendChild(emptyEvt);
+            }
+            actionSection.appendChild(ul);
+            col.appendChild(actionSection);
+
+            const eot = document.createElement("section");
+            eot.className = "simSnapshotSection";
+            eot.innerHTML = "<h4>EoT Snapshot</h4>";
+            if (!player.eot) {
+              const miss = document.createElement("div");
+              miss.className = "dbWarning";
+              miss.textContent = "Snapshot missing";
+              eot.appendChild(miss);
+            } else {
+              const life = document.createElement("div");
+              life.className = "simLifePill";
+              life.textContent = `Life ${player.eot.life}`;
+              eot.appendChild(life);
+
+              const chips = document.createElement("div");
+              chips.className = "simSnapshotChips";
+              [`Hand ${player.eot.hand}`, `Deck ${player.eot.deck}`, `GY ${player.eot.graveyard}`, `Board ${player.eot.battlefield}`, `Trees ${player.eot.lands}`, `Animals ${player.eot.creatures}`].forEach((txt) => {
+                const chip = document.createElement("span");
+                chip.className = "dbChip";
+                chip.textContent = txt;
+                chips.appendChild(chip);
+              });
+              eot.appendChild(chips);
+            }
+            col.appendChild(eot);
+
+            if (isSimReportDebugEnabled()) {
+              const d = document.createElement("details");
+              d.className = "simDebugTurn";
+              const s = document.createElement("summary");
+              s.setAttribute("aria-label", `Toggle debug JSON for turn ${turn.turnNumber} ${player.id}`);
+              s.textContent = "Debug JSON";
+              const pre = document.createElement("pre");
+              pre.className = "simReport";
+              pre.textContent = JSON.stringify(player.summary || {}, null, 2);
+              d.append(s, pre);
+              col.appendChild(d);
+            }
+
+            grid.appendChild(col);
           });
 
-          const right = document.createElement("div");
-          right.className = "simTurnCol";
-          right.innerHTML = '<h4>End-of-Turn Status</h4>';
-          if (!snap) {
-            const miss = document.createElement("div");
-            miss.className = "dbWarning";
-            miss.textContent = "Snapshot missing";
-            right.appendChild(miss);
-          } else {
-            const chips = document.createElement("div");
-            chips.className = "simKpis";
-            [`Life ${snap.life}`, `Hand ${snap.zones.handSize}`, `Deck ${snap.zones.deckSize}`, `Grave ${snap.zones.graveyardSize}`, `Board ${snap.zones.battlefieldCount}`, `Power ${snap.combat.totalCreaturePower}`, `Mana ${snap.tempo.manaSpent}/${snap.tempo.manaAvailable}`].forEach((txt) => {
-              const chip = document.createElement("div"); chip.className = "dbChip"; chip.textContent = txt; chips.appendChild(chip);
-            });
-            right.appendChild(chips);
-
-            const details = document.createElement("details");
-            details.open = !!simulatorState.reportExpandedTurns[key];
-            const summary = document.createElement("summary");
-            summary.textContent = "Show details";
-            const pre = document.createElement("pre");
-            pre.className = "simReport";
-            pre.textContent = JSON.stringify(snap, null, 2);
-            details.append(summary, pre);
-            right.appendChild(details);
-          }
-
-          grid.append(left, right);
           row.appendChild(grid);
           report.appendChild(row);
+        });
+      }
+
+      if (isSimReportDebugEnabled()) {
+        console.info("[sim-report-debug] sim-output", {
+          metrics: vm.metrics,
+          turns: (turnVM || []).map((turn) => ({
+            turn: turn.turnNumber,
+            events: (turn.players || []).map((player) => ({ player: player.id, events: (player.actions || []).length })),
+            snapshots: (turn.players || []).map((player) => ({ player: player.id, hasEot: !!player.eot })),
+            hasCombat: (turn.players || []).some((player) => (player.actions || []).some((evt) => evt.kind === "attack" || evt.kind === "block" || evt.kind === "damage"))
+          }))
         });
       }
       panel.appendChild(report);
