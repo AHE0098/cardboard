@@ -56,11 +56,39 @@ function testBatchStatsShape() {
   assert.equal(typeof batch.summary.cardStats.A, 'object');
 }
 
+
+function testEotSnapshotsCapturedOnce() {
+  const deckA = buildStarterDeck('A');
+  const deckB = buildStarterDeck('B');
+  const result = simulateGame({ seed: 123, deckA, deckB, config: { logMode: 'full', maxTurns: 30, devAssertions: true } });
+  const turnSummaries = result.turnSummaries || {};
+  Object.entries(turnSummaries).forEach(([turn, perPlayer]) => {
+    Object.entries(perPlayer || {}).forEach(([player, entry]) => {
+      const turnEndEvents = (entry.actionsByPhase?.END_STEP || []).filter((e) => e.type === 'turn_end');
+      if (entry.eotSnapshot) {
+        assert.equal(turnEndEvents.length, 1, `Expected exactly one turn_end for ${player} turn ${turn}`);
+      } else {
+        assert.ok((entry.warnings || []).some((w) => String(w).includes('Snapshot missing')), `Missing snapshot warning for ${player} turn ${turn}`);
+      }
+    });
+  });
+}
+
+function testSnapshotAggregatesShape() {
+  const deckA = buildStarterDeck('A');
+  const deckB = buildStarterDeck('B');
+  const batch = simulateMany({ iterations: 5, seedBase: 77, deckA, deckB, config: { logMode: 'none' } });
+  assert.equal(typeof batch.summary.eotAveragesByTurn, 'object');
+  assert.equal(typeof batch.summary.deadTurnRateByTurn, 'object');
+}
+
 function run() {
   testDeterminism();
   testConservation();
   testCombatResolution();
   testBatchStatsShape();
+  testEotSnapshotsCapturedOnce();
+  testSnapshotAggregatesShape();
   console.log('sim tests passed');
 }
 

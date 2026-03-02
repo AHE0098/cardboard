@@ -1761,3 +1761,50 @@ body.isFocus #topPiles{
 .simTable{width:100%;border-collapse:collapse;font-size:12px}
 .simTable th,.simTable td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
 .simReport{max-height:380px;overflow:auto;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;font-size:12px;line-height:1.4;white-space:pre-wrap}
+.simReportTools{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;background:linear-gradient(180deg,rgba(8,10,16,.95),rgba(8,10,16,.7) 80%,transparent)}
+.simStatusReport{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+.simTurnRow{border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.03);overflow:hidden}
+.simTurnHead{width:100%;text-align:left;border:none;background:rgba(255,255,255,.04);color:var(--text);padding:10px 12px;font-weight:600;cursor:pointer}
+.simTurnGrid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px;padding:12px}
+.simTurnCol{min-width:0}
+.simTurnCol h4{margin:0 0 8px;font-size:13px;letter-spacing:.02em;color:var(--muted)}
+.simPhaseGroup{padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}
+.simPhaseGroup ul{margin:6px 0 0 16px;padding:0;display:grid;gap:4px}
+@media (max-width: 880px){.simTurnGrid{grid-template-columns:1fr}}
+.simWrap{
+  --sim-a:#5eb1ff;
+  --sim-b:#ff7aa2;
+  --phase-draw:#5ecbff;
+  --phase-main:#8f7cff;
+  --phase-combat:#ff9d5b;
+  --phase-end:#6ce4a1;
+}
+.simChartWrap{margin:10px 0 14px;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.02)}
+.simChartHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px}
+.simLegend{display:flex;gap:8px}.simLegend span{padding:2px 8px;border-radius:999px;font-size:11px;background:rgba(255,255,255,.06)}
+.simLegendA{color:var(--sim-a);border:1px solid color-mix(in oklab,var(--sim-a),transparent 55%)}
+.simLegendB{color:var(--sim-b);border:1px solid color-mix(in oklab,var(--sim-b),transparent 55%)}
+.simChart{width:100%;height:auto}.simChartGrid{stroke:rgba(255,255,255,.12);stroke-width:1}
+.simChartAxis{fill:rgba(214,225,245,.75);font-size:10px}.simChartLineA{fill:none;stroke:var(--sim-a);stroke-width:2}
+.simChartLineB{fill:none;stroke:var(--sim-b);stroke-width:2}.simChartDotA{fill:var(--sim-a)}.simChartDotB{fill:var(--sim-b)}
+.simTurnRowV2{border-radius:14px;overflow:hidden}
+.simTurnHeadV2{padding:8px 12px;font-size:13px;letter-spacing:.02em;background:rgba(255,255,255,.05);font-weight:700}
+.simTurnAlt{background:rgba(255,255,255,.015)}
+.simTurnGridV2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+.simPlayerCol{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px;background:rgba(0,0,0,.18)}
+.simPlayerA{box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--sim-a),transparent 76%)}
+.simPlayerB{box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--sim-b),transparent 76%)}
+.simPlayerHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:rgba(235,241,252,.95)}
+.simPhaseBand{padding:6px 8px 8px;border-left:3px solid var(--phase-main);background:rgba(255,255,255,.02);border-radius:8px;margin-bottom:7px}
+.simPhaseDRAW_STEP{border-left-color:var(--phase-draw)}.simPhaseMAIN_PHASE{border-left-color:var(--phase-main)}
+.simPhaseCOMBAT_STEP{border-left-color:var(--phase-combat)}.simPhaseEND_STEP{border-left-color:var(--phase-end)}
+.simPhaseBandFlat{border-left-color:rgba(255,255,255,.22)}
+.simPhaseLabel{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:rgba(206,220,245,.74);margin-bottom:6px}
+.simEventChips{display:flex;flex-wrap:wrap;gap:6px}
+.simEventChip{font-size:12px;line-height:1;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--text);padding:6px 8px;border-radius:999px;cursor:pointer}
+.simEventChip:hover{background:rgba(255,255,255,.1)}
+.simStatusCard{margin-top:8px;padding:8px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(8,14,22,.55)}
+.simStatusGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.simStatusGrid>div{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:6px;align-items:center;background:rgba(255,255,255,.04);border-radius:8px;padding:5px 6px}
+.simStatusGrid span{grid-row:1/3;opacity:.85}.simStatusGrid strong{font-size:13px}.simStatusGrid small{font-size:10px;color:rgba(200,214,238,.72)}
+@media (max-width: 900px){.simTurnGridV2{grid-template-columns:1fr}.simChartHead{flex-direction:column;align-items:flex-start;gap:6px}}
+@media (prefers-reduced-motion: reduce){.simEventChip{transition:none}}
