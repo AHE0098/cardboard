@@ -1,5 +1,7 @@
 const assert = require('assert');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { buildStarterDeck, buildDeckFromList, simulateGame, simulateMany } = require('../engine');
 
 function digestLog(log) {
@@ -82,6 +84,16 @@ function testSnapshotAggregatesShape() {
   assert.equal(typeof batch.summary.deadTurnRateByTurn, 'object');
 }
 
+function testNoLegacyWinrateHelperReference() {
+  const app2Path = path.join(__dirname, '..', '..', 'public', 'app2.js');
+  const app2Source = fs.readFileSync(app2Path, 'utf8');
+  assert.equal(
+    app2Source.includes('buildWinrateCheckpoints'),
+    false,
+    'public/app2.js must not reference legacy buildWinrateCheckpoints helper'
+  );
+}
+
 function run() {
   testDeterminism();
   testConservation();
@@ -89,6 +101,7 @@ function run() {
   testBatchStatsShape();
   testEotSnapshotsCapturedOnce();
   testSnapshotAggregatesShape();
+  testNoLegacyWinrateHelperReference();
   console.log('sim tests passed');
 }
 
