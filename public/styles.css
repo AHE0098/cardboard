@@ -1750,61 +1750,194 @@ body.isFocus #topPiles{
   justify-content: space-between;
 }
 
-/* Simulator mode */
-.simWrap{max-width:min(980px,96vw)}
-.simControls{display:flex;flex-direction:column;gap:10px}
-.simGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
-.simField{display:flex;flex-direction:column;gap:6px;margin:4px 0}
-.simButtons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.simKpis{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-.simTableWrap{overflow:auto;max-width:100%;border:1px solid rgba(255,255,255,.1);border-radius:10px}
-.simTable{width:100%;border-collapse:collapse;font-size:12px}
-.simTable th,.simTable td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
-.simReport{max-height:380px;overflow:auto;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;font-size:12px;line-height:1.4;white-space:pre-wrap}
-.simReportTools{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;background:linear-gradient(180deg,rgba(8,10,16,.95),rgba(8,10,16,.7) 80%,transparent)}
-.simStatusReport{display:flex;flex-direction:column;gap:12px;margin-top:8px}
-.simTurnRow{border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.03);overflow:hidden}
-.simTurnHead{width:100%;text-align:left;border:none;background:rgba(255,255,255,.04);color:var(--text);padding:10px 12px;font-weight:600;cursor:pointer}
-.simTurnGrid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px;padding:12px}
-.simTurnCol{min-width:0}
-.simTurnCol h4{margin:0 0 8px;font-size:13px;letter-spacing:.02em;color:var(--muted)}
-.simPhaseGroup{padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}
-.simPhaseGroup ul{margin:6px 0 0 16px;padding:0;display:grid;gap:4px}
-@media (max-width: 880px){.simTurnGrid{grid-template-columns:1fr}}
-.simWrap{
-  --sim-a:#5eb1ff;
-  --sim-b:#ff7aa2;
-  --phase-draw:#5ecbff;
-  --phase-main:#8f7cff;
-  --phase-combat:#ff9d5b;
-  --phase-end:#6ce4a1;
+/* ===== Responsive + TV safe hardening ===== */
+:root{
+  --app-side-pad: clamp(12px, 2.2vw, 28px);
+  --app-top-pad: clamp(10px, 2vh, 22px);
+  --app-bottom-pad: clamp(12px, 2.4vh, 28px);
+  --font-base: clamp(14px, 0.42vw + 12px, 18px);
+  --title-size: clamp(1.15rem, 1.1vw + 0.8rem, 1.75rem);
+  --subtitle-size: clamp(0.78rem, 0.3vw + 0.65rem, 1rem);
 }
-.simChartWrap{margin:10px 0 14px;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.02)}
-.simChartHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px}
-.simLegend{display:flex;gap:8px}.simLegend span{padding:2px 8px;border-radius:999px;font-size:11px;background:rgba(255,255,255,.06)}
-.simLegendA{color:var(--sim-a);border:1px solid color-mix(in oklab,var(--sim-a),transparent 55%)}
-.simLegendB{color:var(--sim-b);border:1px solid color-mix(in oklab,var(--sim-b),transparent 55%)}
-.simChart{width:100%;height:auto}.simChartGrid{stroke:rgba(255,255,255,.12);stroke-width:1}
-.simChartAxis{fill:rgba(214,225,245,.75);font-size:10px}.simChartLineA{fill:none;stroke:var(--sim-a);stroke-width:2}
-.simChartLineB{fill:none;stroke:var(--sim-b);stroke-width:2}.simChartDotA{fill:var(--sim-a)}.simChartDotB{fill:var(--sim-b)}
-.simTurnRowV2{border-radius:14px;overflow:hidden}
-.simTurnHeadV2{padding:8px 12px;font-size:13px;letter-spacing:.02em;background:rgba(255,255,255,.05);font-weight:700}
-.simTurnAlt{background:rgba(255,255,255,.015)}
-.simTurnGridV2{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
-.simPlayerCol{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:8px;background:rgba(0,0,0,.18)}
-.simPlayerA{box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--sim-a),transparent 76%)}
-.simPlayerB{box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--sim-b),transparent 76%)}
-.simPlayerHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;color:rgba(235,241,252,.95)}
-.simPhaseBand{padding:6px 8px 8px;border-left:3px solid var(--phase-main);background:rgba(255,255,255,.02);border-radius:8px;margin-bottom:7px}
-.simPhaseDRAW_STEP{border-left-color:var(--phase-draw)}.simPhaseMAIN_PHASE{border-left-color:var(--phase-main)}
-.simPhaseCOMBAT_STEP{border-left-color:var(--phase-combat)}.simPhaseEND_STEP{border-left-color:var(--phase-end)}
-.simPhaseBandFlat{border-left-color:rgba(255,255,255,.22)}
-.simPhaseLabel{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:rgba(206,220,245,.74);margin-bottom:6px}
-.simEventChips{display:flex;flex-wrap:wrap;gap:6px}
-.simEventChip{font-size:12px;line-height:1;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--text);padding:6px 8px;border-radius:999px;cursor:pointer}
-.simEventChip:hover{background:rgba(255,255,255,.1)}
-.simStatusCard{margin-top:8px;padding:8px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:rgba(8,14,22,.55)}
-.simStatusGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.simStatusGrid>div{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:6px;align-items:center;background:rgba(255,255,255,.04);border-radius:8px;padding:5px 6px}
-.simStatusGrid span{grid-row:1/3;opacity:.85}.simStatusGrid strong{font-size:13px}.simStatusGrid small{font-size:10px;color:rgba(200,214,238,.72)}
-@media (max-width: 900px){.simTurnGridV2{grid-template-columns:1fr}.simChartHead{flex-direction:column;align-items:flex-start;gap:6px}}
-@media (prefers-reduced-motion: reduce){.simEventChip{transition:none}}
+
+html, body{
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+body{
+  font-size: var(--font-base);
+  line-height: 1.35;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+.app{
+  width: min(100%, 1680px);
+  max-width: 1680px;
+  height: 100vh;
+  height: 100dvh;
+  margin: 0 auto;
+  padding:
+    max(var(--app-top-pad), env(safe-area-inset-top))
+    max(var(--app-side-pad), env(safe-area-inset-right))
+    max(var(--app-bottom-pad), env(safe-area-inset-bottom))
+    max(var(--app-side-pad), env(safe-area-inset-left));
+  overflow: hidden;
+}
+
+.title{ font-size: var(--title-size); }
+.subtitle{ font-size: var(--subtitle-size); }
+
+.topbar{
+  min-height: clamp(44px, 6vh, 68px);
+}
+
+.view,
+#root{
+  min-height: 0;
+}
+
+#root{
+  width: 100%;
+  overflow: hidden;
+}
+
+.menuCard,
+.dbPanel,
+.cbPanel,
+.dbSavedDecks{
+  max-width: min(100%, 1200px);
+}
+
+.cbOverlay,
+.inspectorOverlay,
+.deckChoiceOverlay,
+.boardOverlay{
+  padding:
+    max(12px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+}
+
+.cbOverlay{ align-items: center; }
+
+.cbPanel,
+.inspectorTrack,
+.deckChoiceCard,
+.boardOverlayInner{
+  max-height: calc(100dvh - 32px);
+}
+
+.cbPanel{
+  width: min(100%, 980px);
+  border-radius: 16px;
+}
+
+.inspectorOverlay{
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.inspectorTrack{
+  width: min(100%, 1200px);
+  max-width: 1200px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.inspectorCard{
+  max-width: min(420px, 78vw);
+  max-height: calc(100dvh - 110px);
+  overflow: auto;
+}
+
+.inspectorCloseBtn,
+.menuBtn,
+.deckChoiceBtn,
+.topBackBtn{
+  min-height: 44px;
+}
+
+.deckChoiceOverlay{
+  justify-content: center;
+}
+
+.deckChoiceCard{
+  width: min(430px, 84vw);
+}
+
+/* Breakpoints */
+body.bp-sm .app{ max-width: 100%; }
+
+@media (min-width: 900px){
+  .view{ gap: clamp(12px, 1.8vh, 20px); }
+  .overview{ gap: clamp(12px, 1.8vh, 20px); }
+  .zoneTiles{ gap: clamp(12px, 1.8vh, 20px); }
+}
+
+@media (min-width: 1280px){
+  .app{ --app-side-pad: clamp(18px, 2.6vw, 40px); }
+  .menuCard,
+  .dbPanel{ padding: clamp(14px, 1.4vw, 24px); }
+  .battleTopPrivate{ gap: clamp(8px, 1vw, 16px); }
+}
+
+@media (min-width: 1600px) and (min-height: 900px){
+  .app{
+    --app-side-pad: clamp(24px, 2.8vw, 52px);
+    --app-top-pad: clamp(16px, 2.2vh, 36px);
+    --app-bottom-pad: clamp(20px, 2.2vh, 42px);
+  }
+}
+
+/* TV-ish mode (set by JS heuristics) */
+body.tv-ish{
+  --font-base: clamp(18px, 0.45vw + 14px, 26px);
+  --title-size: clamp(1.5rem, 1.2vw + 1rem, 2.35rem);
+  --subtitle-size: clamp(0.95rem, 0.34vw + 0.72rem, 1.25rem);
+}
+
+body.tv-ish .app{
+  --app-side-pad: clamp(26px, 3vw, 64px);
+  --app-top-pad: clamp(16px, 2.2vh, 36px);
+  --app-bottom-pad: clamp(24px, 2.4vh, 52px);
+}
+
+body.tv-ish .menuBtn,
+body.tv-ish .deckChoiceBtn,
+body.tv-ish .topBackBtn,
+body.tv-ish .dockZone{
+  min-height: 52px;
+  padding: 12px 16px;
+}
+
+body.tv-ish .inspectorCard{
+  max-width: min(520px, 80vw);
+}
+
+/* Debug layout harness */
+.layoutQaPanel{
+  position: fixed;
+  left: max(8px, env(safe-area-inset-left));
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 13000;
+  width: min(92vw, 360px);
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #d7f5ff;
+  background: rgba(8, 16, 28, 0.88);
+  border: 1px solid rgba(151, 199, 255, 0.32);
+  border-radius: 10px;
+  padding: 8px 10px;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+.layoutQaPanel.isOverflowing{
+  border-color: rgba(255, 135, 135, 0.8);
+  color: #ffd1d1;
+}
