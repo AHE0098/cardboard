@@ -1975,3 +1975,102 @@ body.deckbuilder-active #deck-scroll-root {
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
 }
+
+/* Simulator report: turn cards */
+:root {
+  --report-attack: #d7b36a;
+  --report-block: #82a6df;
+  --report-damage: #f28e8e;
+  --report-muted: #99a3b3;
+}
+
+.simStatusReport {
+  display: grid;
+  gap: 12px;
+}
+
+.simTurnCard {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: clamp(10px, 1vw, 18px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+}
+
+.simTurnCardAlt {
+  background: linear-gradient(180deg, rgba(130, 180, 255, 0.09), rgba(255, 255, 255, 0.01));
+}
+
+.simTurnTitle {
+  margin: 0 0 10px;
+  font-size: clamp(15px, 0.7vw + 12px, 22px);
+}
+
+.simTurnColumns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.simTurnPlayerCol {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.simPlayerTitle { margin: 0; font-size: clamp(14px, 0.4vw + 12px, 19px); }
+.simActionSection h4,
+.simSnapshotSection h4 { margin: 0 0 6px; font-size: 13px; color: var(--report-muted); letter-spacing: 0.03em; }
+
+.simActionList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.simActionItem {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.simEventBadge { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
+.simEventText { overflow-wrap: anywhere; }
+.simAction-attack .simEventBadge { color: var(--report-attack); }
+.simAction-block .simEventBadge { color: var(--report-block); }
+.simAction-damage .simEventBadge { color: var(--report-damage); }
+.simAction-damage { border-color: rgba(242,142,142,0.45); }
+.simAction-muted { color: var(--report-muted); }
+
+.simLifePill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 88px;
+  background: rgba(242, 142, 142, 0.16);
+  border: 1px solid rgba(242, 142, 142, 0.4);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 800;
+}
+
+.simSnapshotChips {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.simDebugTurn summary { cursor: pointer; color: var(--report-muted); }
+
+@media (max-width: 900px) {
+  .simTurnColumns { grid-template-columns: minmax(0, 1fr); }
+}
