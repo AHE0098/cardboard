@@ -4415,9 +4415,13 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view simulatorRoot";
+    wrap.className = "view";
+    wrap.style.justifyContent = "flex-start";
+    wrap.style.overflow = "hidden";
     const panel = document.createElement("div");
-    panel.className = "menuCard simWrap simulatorPanel";
+    panel.className = "menuCard simWrap";
+    panel.style.maxHeight = "100%";
+    panel.style.overflow = "auto";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
@@ -4761,7 +4765,7 @@ function mountLegacyBattleInApp() {
         const chartWrap = document.createElement("div");
         chartWrap.className = "simChartWrap";
         chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateChartSvg(winPoints)}`;
-        reportScroll.appendChild(chartWrap);
+        panel.appendChild(chartWrap);
       }
 
       const tableWrap = document.createElement("div");
