@@ -66,6 +66,79 @@
     return { summary, sampleGame, runsMeta, winPoints, turnRows, metrics: { turnCount, rowCount: turnRows.length, snapshotCount, winPointCount: winPoints.length } };
   }
 
+  function eventKindFromType(type) {
+    const t = String(type || "").toLowerCase();
+    if (t.includes("attack") || t === "combat_start") return "attack";
+    if (t.includes("block")) return "block";
+    if (t.includes("damage")) return "damage";
+    if (t.includes("draw")) return "draw";
+    if (t.includes("discard")) return "discard";
+    if (t.includes("play")) return "play";
+    if (t.includes("cast") || t.includes("activate")) return "activate";
+    if (t.includes("turn") || t.includes("phase")) return "state";
+    return "misc";
+  }
+
+  function flattenActions(summaryRow) {
+    const phases = ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"];
+    const actions = [];
+    phases.forEach((phase) => {
+      const phaseActions = summaryRow?.actionsByPhase?.[phase] || [];
+      phaseActions.forEach((evt, idx) => {
+        actions.push({
+          id: `${phase}:${idx}:${evt?.type || "event"}`,
+          phase,
+          kind: eventKindFromType(evt?.type),
+          raw: evt,
+          text: SimUI.simEventLabel ? SimUI.simEventLabel(evt, false) : (evt?.type || "event")
+        });
+      });
+    });
+    return actions;
+  }
+
+  function snapshotView(snap) {
+    if (!snap) return null;
+    return {
+      life: snap.life,
+      hand: snap?.zones?.handSize,
+      deck: snap?.zones?.deckSize,
+      graveyard: snap?.zones?.graveyardSize,
+      battlefield: snap?.zones?.battlefieldCount,
+      creatures: snap?.zones?.creaturesInPlay,
+      lands: snap?.zones?.landsInPlay,
+      power: snap?.combat?.totalCreaturePower,
+      manaSpent: snap?.tempo?.manaSpent,
+      manaAvailable: snap?.tempo?.manaAvailable,
+      deadTurn: !!snap?.flags?.deadTurn
+    };
+  }
+
+  function buildTurnReportViewModel(sampleGame) {
+    const turns = sampleGame?.turnSummaries || {};
+    const players = Object.keys(sampleGame?.finalLife || {}).sort();
+    return Object.keys(turns).sort((a, b) => Number(a) - Number(b)).map((turnKey) => {
+      const perPlayer = turns[turnKey] || {};
+      const playersThisTurn = Object.keys(perPlayer).sort();
+      const orderedPlayers = playersThisTurn.length ? playersThisTurn : players;
+      const activePlayer = playersThisTurn[0] || orderedPlayers[0] || "A";
+      return {
+        id: `turn:${turnKey}`,
+        turnNumber: Number(turnKey),
+        activePlayer,
+        players: orderedPlayers.map((playerId) => {
+          const summaryRow = perPlayer[playerId] || {};
+          return {
+            id: playerId,
+            actions: flattenActions(summaryRow),
+            eot: snapshotView(summaryRow?.eotSnapshot),
+            summary: summaryRow
+          };
+        })
+      };
+    });
+  }
+
   function buildParityHash(vm) {
     if (!vm) return "sim-parity:none";
     const payload = { turns: vm.metrics?.turnCount || 0, rows: vm.metrics?.rowCount || 0, snapshots: vm.metrics?.snapshotCount || 0, winPoints: vm.metrics?.winPointCount || 0, events: (vm.turnRows || []).map((r) => [r.turn, r.player, r.events, r.hasSnapshot ? 1 : 0]) };
@@ -74,5 +147,6 @@
 
   SimUI.resolveDeckToSimCards = resolveDeckToSimCards;
   SimUI.normalizeSimResult = normalizeSimResult;
+  SimUI.buildTurnReportViewModel = buildTurnReportViewModel;
   SimUI.buildParityHash = buildParityHash;
 })(window);
