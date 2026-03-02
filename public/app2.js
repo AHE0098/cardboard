@@ -4931,6 +4931,11 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
+      const sentinel = document.createElement("div");
+      sentinel.id = "sim-scroll-sentinel";
+      sentinel.setAttribute("aria-hidden", "true");
+      sentinel.style.height = "1px";
+      report.appendChild(sentinel);
       reportScroll.appendChild(report);
     }
 
@@ -4941,28 +4946,34 @@ function mountLegacyBattleInApp() {
       reportScroll.appendChild(sentinel);
       const cs = getComputedStyle(reportScroll);
       const shouldScroll = reportScroll.scrollHeight > reportScroll.clientHeight;
-      if (shouldScroll && !/(auto|scroll)/.test(cs.overflowY || "")) {
-        const ancestors = [];
-        let node = reportScroll;
-        while (node) {
-          const st = getComputedStyle(node);
-          ancestors.push({
-            tag: node.tagName.toLowerCase(),
-            id: node.id || "",
-            className: node.className || "",
-            overflowY: st.overflowY,
-            height: st.height,
-            minHeight: st.minHeight,
-            maxHeight: st.maxHeight,
-            position: st.position,
-            transform: st.transform,
-            clientHeight: node.clientHeight,
-            scrollHeight: node.scrollHeight
-          });
-          if (node === document.documentElement) break;
-          node = node.parentElement;
+      console.assert(!shouldScroll || /(auto|scroll)/.test(cs.overflowY || ""), "[sim-layout] report scroller overflow misconfigured");
+      const chain = [];
+      let node = reportScroll;
+      while (node) {
+        const style = getComputedStyle(node);
+        chain.push({
+          tag: node.tagName,
+          id: node.id || "",
+          className: node.className || "",
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          overflowY: style.overflowY,
+          height: style.height,
+          minHeight: style.minHeight,
+          maxHeight: style.maxHeight,
+          position: style.position,
+          transform: style.transform
+        });
+        node = node.parentElement;
+      }
+      console.info("[sim-layout] ancestor chain", chain);
+      const sentinel = reportScroll.querySelector("#sim-scroll-sentinel");
+      if (sentinel) {
+        sentinel.scrollIntoView({ block: "end" });
+        const after = reportScroll.scrollTop;
+        if (reportScroll.scrollHeight > reportScroll.clientHeight && after <= 0) {
+          console.error("[sim-layout] report bottom unreachable; check ancestor overflow/height chain", chain);
         }
-        console.error("[sim-layout] report scroller overflow misconfigured", ancestors);
       }
     }
 
