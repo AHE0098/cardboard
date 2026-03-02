@@ -1749,3 +1749,15 @@ body.isFocus #topPiles{
   align-items: center;
   justify-content: space-between;
 }
+
+/* Simulator mode */
+.simWrap{max-width:min(980px,96vw)}
+.simControls{display:flex;flex-direction:column;gap:10px}
+.simGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.simField{display:flex;flex-direction:column;gap:6px;margin:4px 0}
+.simButtons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.simKpis{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.simTableWrap{overflow:auto;max-width:100%;border:1px solid rgba(255,255,255,.1);border-radius:10px}
+.simTable{width:100%;border-collapse:collapse;font-size:12px}
+.simTable th,.simTable td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
+.simReport{max-height:380px;overflow:auto;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;font-size:12px;line-height:1.4;white-space:pre-wrap}
