@@ -12,6 +12,12 @@
  */
 
 (() => {
+  const SIM_UI_BUILD = "2026-03-02-winrate-scope-fix";
+  console.info("[app2] loaded version:", SIM_UI_BUILD, new Date().toISOString(), "path:", location.pathname);
+  window.addEventListener("error", (e) => {
+    console.error("GLOBAL_ERROR", e?.message, e?.filename, e?.lineno);
+  });
+
   // Mountable sandbox module (no auto-boot).
   // app.js (or any host) calls: window.LegacySandbox.mount({...})
   // Returns: { unmount() }
@@ -4409,9 +4415,9 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view";
+    wrap.className = "view simulatorRoot";
     const panel = document.createElement("div");
-    panel.className = "menuCard simWrap";
+    panel.className = "menuCard simWrap simulatorPanel";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
@@ -4420,6 +4426,66 @@ function mountLegacyBattleInApp() {
 
     const controls = document.createElement("div");
     controls.className = "simControls";
+
+    const computeWinrateSeries = (runsMeta, iterations) => {
+      if (!Array.isArray(runsMeta) || !runsMeta.length) return [];
+      const totalRuns = Math.max(1, Math.min(Number(iterations) || runsMeta.length, runsMeta.length));
+      const checkpoints = new Set([
+        1,
+        2,
+        5,
+        10,
+        20,
+        50,
+        100,
+        200,
+        500,
+        1000,
+        totalRuns
+      ].filter((n) => n <= totalRuns));
+      let winsA = 0;
+      let winsB = 0;
+      const series = [];
+      for (let i = 0; i < totalRuns; i += 1) {
+        const winner = runsMeta[i]?.winner;
+        if (winner === "A") winsA += 1;
+        else if (winner === "B") winsB += 1;
+        const n = i + 1;
+        if (checkpoints.has(n)) {
+          series.push({
+            n,
+            a: Number(((winsA / n) * 100).toFixed(2)),
+            b: Number(((winsB / n) * 100).toFixed(2))
+          });
+        }
+      }
+      return series;
+    };
+
+    const renderWinrateChartSvg = (series) => {
+      if (!Array.isArray(series) || series.length < 2) return "";
+      const width = 620;
+      const height = 240;
+      const pad = { left: 48, right: 16, top: 18, bottom: 28 };
+      const xMin = series[0].n;
+      const xMax = series[series.length - 1].n;
+      const innerWidth = width - pad.left - pad.right;
+      const innerHeight = height - pad.top - pad.bottom;
+      const xAt = (n) => pad.left + (((n - xMin) / Math.max(1, xMax - xMin)) * innerWidth);
+      const yAt = (pct) => pad.top + ((100 - pct) / 100) * innerHeight;
+      const pathFor = (key) => series.map((p, idx) => `${idx === 0 ? "M" : "L"}${xAt(p.n).toFixed(2)},${yAt(p[key]).toFixed(2)}`).join(" ");
+      const yTicks = [0, 25, 50, 75, 100];
+      const xTicks = Array.from(new Set([xMin, ...series.slice(1, -1).map((p) => p.n), xMax])).slice(0, 7);
+      return `<svg viewBox="0 0 ${width} ${height}" class="simChart" role="img" aria-label="Winrate chart">
+        ${yTicks.map((v) => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" stroke="rgba(255,255,255,0.08)" />`).join("")}
+        ${xTicks.map((n) => `<line x1="${xAt(n)}" x2="${xAt(n)}" y1="${pad.top}" y2="${height - pad.bottom}" stroke="rgba(255,255,255,0.05)" />`).join("")}
+        <path d="${pathFor("a")}" fill="none" stroke="#56d1ff" stroke-width="2.5" />
+        <path d="${pathFor("b")}" fill="none" stroke="#ff7c8f" stroke-width="2.5" />
+        ${yTicks.map((v) => `<text x="${pad.left - 8}" y="${yAt(v) + 4}" text-anchor="end" fill="rgba(255,255,255,0.7)" font-size="11">${v}%</text>`).join("")}
+        ${xTicks.map((n) => `<text x="${xAt(n)}" y="${height - 8}" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">${n}</text>`).join("")}
+      </svg>`;
+    };
+    console.assert(typeof computeWinrateSeries === "function", "computeWinrateSeries must be defined");
 
     function mkDeckSelect(labelText, key) {
       const row = document.createElement("div");
@@ -4620,18 +4686,49 @@ function mountLegacyBattleInApp() {
     btnRow.append(copyJsonBtn, copyReportBtn);
     panel.appendChild(btnRow);
 
+    const reportScroll = document.createElement("div");
+    reportScroll.className = "simulatorReportScroll";
+    panel.appendChild(reportScroll);
+
+    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
+      const nodes = [
+        ["html", document.documentElement],
+        ["body", document.body],
+        [".app", document.querySelector(".app")],
+        ["#root", rootNode],
+        [".simulatorRoot", wrap],
+        [".simulatorPanel", panel],
+        [".simulatorReportScroll", reportScroll]
+      ].filter(([, el]) => !!el);
+      console.groupCollapsed("[sim-layout]");
+      nodes.forEach(([name, el]) => {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        console.log(name, {
+          h: Math.round(r.height),
+          sh: el.scrollHeight,
+          ch: el.clientHeight,
+          overflowY: cs.overflowY,
+          minHeight: cs.minHeight,
+          maxHeight: cs.maxHeight,
+          position: cs.position
+        });
+      });
+      console.groupEnd();
+    }
+
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
       running.className = "zoneMeta";
       running.textContent = `Running job ${simulatorState.runId}...`;
-      panel.appendChild(running);
+      reportScroll.appendChild(running);
     }
 
     if (simulatorState.lastError) {
       const err = document.createElement("div");
       err.className = "dbWarning";
       err.textContent = simulatorState.lastError;
-      panel.appendChild(err);
+      reportScroll.appendChild(err);
     }
 
     if (simulatorState.summary) {
@@ -4657,14 +4754,14 @@ function mountLegacyBattleInApp() {
         chip.textContent = txt;
         kpis.appendChild(chip);
       });
-      panel.appendChild(kpis);
+      reportScroll.appendChild(kpis);
 
-      const winPoints = buildWinrateCheckpoints(simulatorState.runsMeta, simulatorState.iterations);
+      const winPoints = computeWinrateSeries(simulatorState.runsMeta, simulatorState.iterations);
       if (winPoints.length >= 2) {
         const chartWrap = document.createElement("div");
         chartWrap.className = "simChartWrap";
-        chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateSvg(winPoints)}`;
-        panel.appendChild(chartWrap);
+        chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateChartSvg(winPoints)}`;
+        reportScroll.appendChild(chartWrap);
       }
 
       const tableWrap = document.createElement("div");
@@ -4682,7 +4779,7 @@ function mountLegacyBattleInApp() {
       });
       table.appendChild(tbody);
       tableWrap.appendChild(table);
-      panel.appendChild(tableWrap);
+      reportScroll.appendChild(tableWrap);
 
       if (Array.isArray(simulatorState.runsMeta) && simulatorState.runsMeta.length) {
         const runSelWrap = document.createElement("div");
@@ -4730,7 +4827,7 @@ function mountLegacyBattleInApp() {
           renderApp();
         };
         runSelWrap.append(lbl, select, loadBtn);
-        panel.appendChild(runSelWrap);
+        reportScroll.appendChild(runSelWrap);
       }
 
       const reportTools = document.createElement("div");
@@ -4755,7 +4852,7 @@ function mountLegacyBattleInApp() {
       compactChk.onchange = () => { simulatorState.reportCompactActions = compactChk.checked; renderApp(); };
       compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
       reportTools.append(search, deadOnly, compactOnly);
-      panel.appendChild(reportTools);
+      reportScroll.appendChild(reportTools);
 
       const report = document.createElement("div");
       report.className = "simStatusReport";
@@ -4858,7 +4955,13 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
-      panel.appendChild(report);
+      reportScroll.appendChild(report);
+    }
+
+    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
+      const cs = getComputedStyle(reportScroll);
+      const shouldScroll = reportScroll.scrollHeight > reportScroll.clientHeight;
+      console.assert(!shouldScroll || /(auto|scroll)/.test(cs.overflowY || ""), "[sim-layout] report scroller overflow misconfigured");
     }
 
     wrap.appendChild(panel);
