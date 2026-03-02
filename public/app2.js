@@ -4418,12 +4418,8 @@ function mountLegacyBattleInApp() {
     wrap.className = "view";
     wrap.style.justifyContent = "flex-start";
     wrap.style.overflow = "hidden";
-    wrap.style.height = "100%";
-    wrap.style.minHeight = "0";
     const panel = document.createElement("div");
     panel.className = "menuCard simWrap";
-    panel.style.flex = "1 1 auto";
-    panel.style.minHeight = "0";
     panel.style.maxHeight = "100%";
     panel.style.overflow = "auto";
     panel.innerHTML = "<h2>Simulator</h2>";
