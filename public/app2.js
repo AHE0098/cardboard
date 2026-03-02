@@ -4415,9 +4415,11 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view";
+    wrap.className = "view simulatorView";
     const panel = document.createElement("div");
-    panel.className = "menuCard simWrap";
+    // Scroll guardrail: this is the SINGLE scroll container for simulator report UI.
+    // Do not move overflow ownership elsewhere in the flex chain.
+    panel.className = "menuCard simWrap simulatorRoot";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
@@ -4466,7 +4468,7 @@ function mountLegacyBattleInApp() {
       if (!Array.isArray(series) || series.length < 2) return "";
       const width = 620;
       const height = 240;
-      const pad = { left: 48, right: 16, top: 18, bottom: 28 };
+      const pad = { left: 48, right: 16, top: 18, bottom: 30 };
       const xMin = series[0].n;
       const xMax = series[series.length - 1].n;
       const innerWidth = width - pad.left - pad.right;
@@ -4476,13 +4478,18 @@ function mountLegacyBattleInApp() {
       const pathFor = (key) => series.map((p, idx) => `${idx === 0 ? "M" : "L"}${xAt(p.n).toFixed(2)},${yAt(p[key]).toFixed(2)}`).join(" ");
       const yTicks = [0, 25, 50, 75, 100];
       const xTicks = Array.from(new Set([xMin, ...series.slice(1, -1).map((p) => p.n), xMax])).slice(0, 7);
+      const pointsFor = (key, cls) => series.map((p) => `<circle class="${cls}" cx="${xAt(p.n).toFixed(2)}" cy="${yAt(p[key]).toFixed(2)}" r="2.6" />`).join("");
       return `<svg viewBox="0 0 ${width} ${height}" class="simChart" role="img" aria-label="Winrate chart">
+        <text x="${pad.left}" y="12" fill="rgba(255,255,255,0.72)" font-size="11">Winrate %</text>
         ${yTicks.map((v) => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" stroke="rgba(255,255,255,0.08)" />`).join("")}
         ${xTicks.map((n) => `<line x1="${xAt(n)}" x2="${xAt(n)}" y1="${pad.top}" y2="${height - pad.bottom}" stroke="rgba(255,255,255,0.05)" />`).join("")}
-        <path d="${pathFor("a")}" fill="none" stroke="#56d1ff" stroke-width="2.5" />
-        <path d="${pathFor("b")}" fill="none" stroke="#ff7c8f" stroke-width="2.5" />
+        <path d="${pathFor("a")}" fill="none" stroke="var(--sim-accent-a, #56d1ff)" stroke-width="2.5" />
+        <path d="${pathFor("b")}" fill="none" stroke="var(--sim-accent-b, #ff7c8f)" stroke-width="2.5" />
+        <g fill="var(--sim-accent-a, #56d1ff)">${pointsFor("a", "simPointA")}</g>
+        <g fill="var(--sim-accent-b, #ff7c8f)">${pointsFor("b", "simPointB")}</g>
         ${yTicks.map((v) => `<text x="${pad.left - 8}" y="${yAt(v) + 4}" text-anchor="end" fill="rgba(255,255,255,0.7)" font-size="11">${v}%</text>`).join("")}
         ${xTicks.map((n) => `<text x="${xAt(n)}" y="${height - 8}" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">${n}</text>`).join("")}
+        <text x="${width - pad.right}" y="${height - 8}" text-anchor="end" fill="rgba(255,255,255,0.72)" font-size="11">Iterations</text>
       </svg>`;
     };
     console.assert(typeof computeWinrateSeries === "function", "computeWinrateSeries must be defined");
@@ -4704,6 +4711,9 @@ function mountLegacyBattleInApp() {
       const sum = simulatorState.summary;
       const winRateA = sum.games ? ((sum.winsA / sum.games) * 100).toFixed(2) : "0.00";
       const winRateB = sum.games ? ((sum.winsB / sum.games) * 100).toFixed(2) : "0.00";
+      const reportTop = document.createElement("section");
+      reportTop.className = "simReportTop";
+
       const kpis = document.createElement("div");
       kpis.className = "simKpis";
       const turn1Avg = sum?.eotAveragesByTurn?.["1"];
@@ -4723,15 +4733,18 @@ function mountLegacyBattleInApp() {
         chip.textContent = txt;
         kpis.appendChild(chip);
       });
-      panel.appendChild(kpis);
+      reportTop.appendChild(kpis);
 
       const winPoints = computeWinrateSeries(simulatorState.runsMeta, simulatorState.iterations);
+      const chartWrap = document.createElement("div");
+      chartWrap.className = "simChartWrap";
       if (winPoints.length >= 2) {
-        const chartWrap = document.createElement("div");
-        chartWrap.className = "simChartWrap";
         chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateChartSvg(winPoints)}`;
-        panel.appendChild(chartWrap);
+      } else {
+        chartWrap.innerHTML = '<div class="simChartHead"><strong>Winrate by iteration count</strong></div><div class="zoneMeta">Run at least two checkpoints to render trend lines.</div>';
       }
+      reportTop.appendChild(chartWrap);
+      panel.appendChild(reportTop);
 
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
@@ -4821,7 +4834,7 @@ function mountLegacyBattleInApp() {
       compactChk.onchange = () => { simulatorState.reportCompactActions = compactChk.checked; renderApp(); };
       compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
       reportTools.append(search, deadOnly, compactOnly);
-      panel.appendChild(reportTools);
+      reportTop.appendChild(reportTools);
 
       const report = document.createElement("div");
       report.className = "simStatusReport";
@@ -4929,6 +4942,15 @@ function mountLegacyBattleInApp() {
 
     wrap.appendChild(panel);
     rootNode.replaceChildren(wrap);
+    const devLayoutCheck = window?.location?.hostname === "localhost" || window?.location?.search?.includes("debugLayout=1");
+    if (devLayoutCheck) {
+      requestAnimationFrame(() => {
+        const host = rootNode.querySelector(".simulatorRoot");
+        const overflowY = host ? getComputedStyle(host).overflowY : "missing";
+        console.assert(host, "Simulator scroll container (.simulatorRoot) must exist");
+        console.assert(/(auto|scroll)/.test(overflowY), `Simulator scroll container overflowY must be auto|scroll, got ${overflowY}`);
+      });
+    }
   }
 
   function renderModeScreen() {
