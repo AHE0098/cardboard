@@ -164,6 +164,38 @@
     btnRow.append(copyJsonBtn, copyReportBtn);
     panel.appendChild(btnRow);
 
+    if (global.DEBUG_SCROLL) {
+      const debugRow = document.createElement("div");
+      debugRow.className = "simButtons";
+      const jumpBtn = document.createElement("button");
+      jumpBtn.className = "menuBtn";
+      jumpBtn.textContent = "DEBUG: scroll down 200px";
+      jumpBtn.onclick = () => {
+        panel.scrollTop += 200;
+        console.info("[scroll-debug:simulator] jump", { scrollTop: panel.scrollTop });
+      };
+      const probeBtn = document.createElement("button");
+      probeBtn.className = "menuBtn";
+      probeBtn.textContent = "DEBUG: probe center overlay";
+      probeBtn.onclick = () => {
+        const r = panel.getBoundingClientRect();
+        const x = Math.round(r.left + r.width / 2);
+        const y = Math.round(r.top + r.height / 2);
+        const el = document.elementFromPoint(x, y);
+        const inside = !!el && panel.contains(el);
+        const cs = el ? window.getComputedStyle(el) : null;
+        console.info("[scroll-debug:simulator] overlay-probe", {
+          point: { x, y },
+          insideScrollRoot: inside,
+          hit: el ? `${el.tagName.toLowerCase()}#${el.id || ""}.${(el.className || "").toString().replace(/\s+/g, ".")}` : null,
+          zIndex: cs?.zIndex || null,
+          pointerEvents: cs?.pointerEvents || null
+        });
+      };
+      debugRow.append(jumpBtn, probeBtn);
+      panel.appendChild(debugRow);
+    }
+
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
       running.className = "zoneMeta";
@@ -365,6 +397,7 @@
     wrap.appendChild(panel);
     rootNode.replaceChildren(wrap);
     SimUI.assertScrollRoot();
+    SimUI.installScrollDebug?.("simulator", panel);
   }
 
   SimUI.mountSimulator = ({ containerEl, apiBaseUrl, initialDeckId, devFlags, context }) => {

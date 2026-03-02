@@ -793,6 +793,37 @@ const inspected = analyzeCardPool(cardsSource);
     return hints;
   }
 
+
+  function installScrollDebug(modeName, scrollRootEl) {
+    if (!window.DEBUG_SCROLL || !scrollRootEl) return;
+    const tagEl = (el) => {
+      if (!el || !el.tagName) return String(el);
+      const id = el.id ? `#${el.id}` : "";
+      const cls = el.classList?.length ? `.${Array.from(el.classList).slice(0, 2).join(".")}` : "";
+      return `${el.tagName.toLowerCase()}${id}${cls}`;
+    };
+    const samplePath = (e) => {
+      const p = e.composedPath ? e.composedPath() : [];
+      return p.slice(0, 4).map(tagEl).join(" > ");
+    };
+    const rect = scrollRootEl.getBoundingClientRect();
+    const cs = window.getComputedStyle(scrollRootEl);
+    console.info(`[scroll-debug:${modeName}] mount`, {
+      rect: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) },
+      clientHeight: scrollRootEl.clientHeight,
+      scrollHeight: scrollRootEl.scrollHeight,
+      overflowY: cs.overflowY,
+      pointerEvents: cs.pointerEvents,
+      position: cs.position,
+      zIndex: cs.zIndex
+    });
+    scrollRootEl.addEventListener('wheel', (e) => console.info(`[scroll-debug:${modeName}] wheel`, { deltaY: e.deltaY, defaultPrevented: e.defaultPrevented, path: samplePath(e) }), { capture: true, passive: true });
+    scrollRootEl.addEventListener('touchmove', (e) => console.info(`[scroll-debug:${modeName}] touchmove`, { defaultPrevented: e.defaultPrevented, path: samplePath(e) }), { capture: true, passive: true });
+    scrollRootEl.addEventListener('scroll', () => console.info(`[scroll-debug:${modeName}] scroll`, { scrollTop: scrollRootEl.scrollTop }), { passive: true });
+    window.addEventListener('wheel', (e) => { if (e.defaultPrevented) console.warn(`[scroll-debug:${modeName}] global wheel prevented`, { path: samplePath(e) }); }, { capture: true, passive: true });
+    window.addEventListener('touchmove', (e) => { if (e.defaultPrevented) console.warn(`[scroll-debug:${modeName}] global touchmove prevented`, { path: samplePath(e) }); }, { capture: true, passive: true });
+  }
+
   function renderDeckbuilder(rootNode, state, deps = {}) {
     const workingState = normalizeState(state);
     const qaStatus = workingState.qaStatus || {};
@@ -838,8 +869,12 @@ const pool = getDeckbuilderCardPool(cardsSource);
       workingState.settings.targetValueSum = Math.round(avgValue * Math.max(0, workingState.settings.deckSize - workingState.settings.lands));
     }
 
+    const shell = document.createElement("div");
+    shell.className = "deckbuilderShell";
+
     const wrap = document.createElement("div");
     wrap.className = "deckbuilderWrap dbPanel";
+    wrap.id = "deck-scroll-root";
 
     const controls = document.createElement("div");
     controls.className = "menuCard dbControls";
@@ -1483,8 +1518,63 @@ Nonlands: ${summary.nonlands}`);
     }
 
     out.append(savedWrap);
+
+    if (window.DEBUG_SCROLL) {
+      const debugRow = document.createElement("div");
+      debugRow.className = "dbInline";
+      const jumpBtn = document.createElement("button");
+      jumpBtn.className = "menuBtn";
+      jumpBtn.textContent = "DEBUG: scroll down 200px";
+      jumpBtn.onclick = () => {
+        wrap.scrollTop += 200;
+        console.info("[scroll-debug:deckbuilder] jump", { scrollTop: wrap.scrollTop });
+      };
+      const probeBtn = document.createElement("button");
+      probeBtn.className = "menuBtn";
+      probeBtn.textContent = "DEBUG: probe center overlay";
+      probeBtn.onclick = () => {
+        const r = wrap.getBoundingClientRect();
+        const x = Math.round(r.left + r.width / 2);
+        const y = Math.round(r.top + r.height / 2);
+        const el = document.elementFromPoint(x, y);
+        const inside = !!el && wrap.contains(el);
+        const cs = el ? window.getComputedStyle(el) : null;
+        console.info("[scroll-debug:deckbuilder] overlay-probe", {
+          point: { x, y },
+          insideScrollRoot: inside,
+          hit: el ? `${el.tagName.toLowerCase()}#${el.id || ""}.${(el.className || "").toString().replace(/\s+/g, ".")}` : null,
+          zIndex: cs?.zIndex || null,
+          pointerEvents: cs?.pointerEvents || null
+        });
+      };
+      debugRow.append(jumpBtn, probeBtn);
+      out.appendChild(debugRow);
+    }
     wrap.appendChild(out);
-    rootNode.replaceChildren(wrap);
+    shell.appendChild(wrap);
+    rootNode.replaceChildren(shell);
+
+    installScrollDebug("deckbuilder", wrap);
+
+    requestAnimationFrame(() => {
+      const scrollRoot = rootNode.querySelector("#deck-scroll-root");
+      if (!scrollRoot) return;
+      const cs = window.getComputedStyle(scrollRoot);
+      const canOverflow = scrollRoot.scrollHeight > scrollRoot.clientHeight;
+      if (!canOverflow || cs.overflowY === "visible") return;
+      const prev = scrollRoot.scrollTop;
+      scrollRoot.scrollTop = prev + 1;
+      const moved = scrollRoot.scrollTop !== prev;
+      scrollRoot.scrollTop = prev;
+      if (!moved) {
+        console.warn("[deckbuilder] overflow content but non-scrollable", {
+          id: "deck-scroll-root",
+          overflowY: cs.overflowY,
+          clientHeight: scrollRoot.clientHeight,
+          scrollHeight: scrollRoot.scrollHeight
+        });
+      }
+    });
   }
 
 

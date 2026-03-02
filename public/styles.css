@@ -1941,3 +1941,46 @@ body.tv-ish .inspectorCard{
   border-color: rgba(255, 135, 135, 0.8);
   color: #ffd1d1;
 }
+
+
+/* Mode-owned scroll roots: page remains locked; simulator/deckbuilder scroll internally. */
+body.simulator-active .app,
+body.simulator-active #root,
+body.simulator-active .view,
+body.simulator-active .simulatorShell,
+body.simulator-active .simWrap,
+body.deckbuilder-active .app,
+body.deckbuilder-active #root,
+body.deckbuilder-active .view,
+body.deckbuilder-active .deckbuilderShell,
+body.deckbuilder-active .deckbuilderWrap {
+  min-height: 0;
+}
+
+body.simulator-active #root,
+body.deckbuilder-active #root,
+body.simulator-active .view,
+body.deckbuilder-active .view,
+body.simulator-active .simulatorShell,
+body.deckbuilder-active .deckbuilderShell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+body.simulator-active .simulatorShell,
+body.deckbuilder-active .deckbuilderShell {
+  height: 100%;
+  max-height: 100%;
+}
+
+body.simulator-active #sim-scroll-root,
+body.deckbuilder-active #deck-scroll-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  pointer-events: auto;
+  -webkit-overflow-scrolling: touch;
+}
