@@ -2069,6 +2069,17 @@ body.simulator-active .view.simulatorView .simWrap{
   overflow: hidden;
 }
 
+/* Simulator scroll fix: global shell is overflow-locked, so simulator owns an internal scroller. */
+body.simulator-active .view.simulatorView{
+  flex: 1;
+  min-height: 0;
+}
+
+body.simulator-active .view.simulatorView .simWrap{
+  flex: 1;
+  min-height: 0;
+}
+
 @media (max-width: 900px){
   .simulatorRoot .simTurnGrid{ grid-template-columns: 1fr; }
 }
