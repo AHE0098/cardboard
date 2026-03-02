@@ -4415,7 +4415,7 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view";
+    wrap.className = "view simulatorView";
     const panel = document.createElement("div");
     // Scroll guardrail: this is the SINGLE scroll container for simulator report UI.
     // Do not move overflow ownership elsewhere in the flex chain.
