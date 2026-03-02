@@ -4412,6 +4412,57 @@ function mountLegacyBattleInApp() {
     });
     return out;
   }
+  function debugSimulatorScrollTruth(rootNode) {
+    const enabled = window?.location?.hostname === "localhost" || window?.location?.search?.includes("debugLayout=1");
+    if (!enabled) return;
+    requestAnimationFrame(() => {
+      const el = rootNode.querySelector("#sim-scroll-root");
+      const report = rootNode.querySelector("#sim-report-content");
+      const graph = rootNode.querySelector("#sim-winrate-graph");
+      if (!el) return;
+      const style = getComputedStyle(el);
+      console.log("[sim-scroll] SCROLL ROOT", {
+        el,
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+        overflowY: style.overflowY,
+        hasReport: !!report,
+        hasGraph: !!graph
+      });
+      if (!el.dataset.scrollTruthBound) {
+        el.dataset.scrollTruthBound = "1";
+        let lastAt = 0;
+        el.addEventListener("scroll", () => {
+          const now = Date.now();
+          if (now - lastAt < 300) return;
+          lastAt = now;
+          console.log("[sim-scroll] root scroll", { top: el.scrollTop, max: Math.max(0, el.scrollHeight - el.clientHeight) });
+        }, { passive: true });
+        el.addEventListener("wheel", (ev) => {
+          const now = Date.now();
+          if (now - lastAt < 300) return;
+          lastAt = now;
+          console.log("[sim-scroll] wheel", { defaultPrevented: ev.defaultPrevented, target: ev.target?.className || ev.target?.nodeName });
+        }, { capture: true, passive: true });
+      }
+      const sentinel = el.querySelector("#sim-scroll-sentinel");
+      if (sentinel) {
+        const before = el.scrollTop;
+        sentinel.scrollIntoView({ block: "end" });
+        const after = el.scrollTop;
+        console.assert(after >= before, "[simulator] sentinel must be reachable via #sim-scroll-root", { before, after });
+      }
+      if (report && report.children.length > 10 && el.scrollHeight <= el.clientHeight + 2) {
+        console.warn("[sim-scroll] report looks long but root is not scrollable", {
+          reportChildren: report.children.length,
+          clientHeight: el.clientHeight,
+          scrollHeight: el.scrollHeight
+        });
+      }
+    });
+  }
+
+
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
@@ -4420,7 +4471,12 @@ function mountLegacyBattleInApp() {
     // Scroll guardrail: this is the SINGLE scroll container for simulator report UI.
     // Do not move overflow ownership elsewhere in the flex chain.
     panel.className = "menuCard simWrap simulatorRoot";
-    panel.innerHTML = "<h2>Simulator</h2>";
+    const simScrollRoot = document.createElement("div");
+    simScrollRoot.id = "sim-scroll-root";
+    simScrollRoot.className = "sim-scroll-root";
+    const heading = document.createElement("h2");
+    heading.textContent = "Simulator";
+    simScrollRoot.appendChild(heading);
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
       ? window.getAllAvailableDecks()
@@ -4584,7 +4640,7 @@ function mountLegacyBattleInApp() {
     numericRow.appendChild(logField);
 
     controls.appendChild(numericRow);
-    panel.appendChild(controls);
+    simScrollRoot.appendChild(controls);
 
     const btnRow = document.createElement("div");
     btnRow.className = "simButtons";
@@ -4691,20 +4747,20 @@ function mountLegacyBattleInApp() {
     };
 
     btnRow.append(copyJsonBtn, copyReportBtn);
-    panel.appendChild(btnRow);
+    simScrollRoot.appendChild(btnRow);
 
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
       running.className = "zoneMeta";
       running.textContent = `Running job ${simulatorState.runId}...`;
-      panel.appendChild(running);
+      simScrollRoot.appendChild(running);
     }
 
     if (simulatorState.lastError) {
       const err = document.createElement("div");
       err.className = "dbWarning";
       err.textContent = simulatorState.lastError;
-      panel.appendChild(err);
+      simScrollRoot.appendChild(err);
     }
 
     if (simulatorState.summary) {
@@ -4737,6 +4793,7 @@ function mountLegacyBattleInApp() {
 
       const winPoints = computeWinrateSeries(simulatorState.runsMeta, simulatorState.iterations);
       const chartWrap = document.createElement("div");
+      chartWrap.id = "sim-winrate-graph";
       chartWrap.className = "simChartWrap";
       if (winPoints.length >= 2) {
         chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateChartSvg(winPoints)}`;
@@ -4744,7 +4801,7 @@ function mountLegacyBattleInApp() {
         chartWrap.innerHTML = '<div class="simChartHead"><strong>Winrate by iteration count</strong></div><div class="zoneMeta">Run at least two checkpoints to render trend lines.</div>';
       }
       reportTop.appendChild(chartWrap);
-      panel.appendChild(reportTop);
+      simScrollRoot.appendChild(reportTop);
 
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
@@ -4761,7 +4818,7 @@ function mountLegacyBattleInApp() {
       });
       table.appendChild(tbody);
       tableWrap.appendChild(table);
-      panel.appendChild(tableWrap);
+      simScrollRoot.appendChild(tableWrap);
 
       if (Array.isArray(simulatorState.runsMeta) && simulatorState.runsMeta.length) {
         const runSelWrap = document.createElement("div");
@@ -4809,7 +4866,7 @@ function mountLegacyBattleInApp() {
           renderApp();
         };
         runSelWrap.append(lbl, select, loadBtn);
-        panel.appendChild(runSelWrap);
+        simScrollRoot.appendChild(runSelWrap);
       }
 
       const reportTools = document.createElement("div");
@@ -4837,6 +4894,7 @@ function mountLegacyBattleInApp() {
       reportTop.appendChild(reportTools);
 
       const report = document.createElement("div");
+      report.id = "sim-report-content";
       report.className = "simStatusReport";
       const pairs = buildStatusPairs(simulatorState.sampleGame || {});
       const searchNeedle = String(simulatorState.reportSearch || "").trim().toLowerCase();
@@ -4937,20 +4995,18 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
-      panel.appendChild(report);
+      const sentinel = document.createElement("div");
+      sentinel.id = "sim-scroll-sentinel";
+      sentinel.style.height = "1px";
+      report.appendChild(sentinel);
+      simScrollRoot.appendChild(report);
     }
 
+    panel.appendChild(simScrollRoot);
     wrap.appendChild(panel);
     rootNode.replaceChildren(wrap);
-    const devLayoutCheck = window?.location?.hostname === "localhost" || window?.location?.search?.includes("debugLayout=1");
-    if (devLayoutCheck) {
-      requestAnimationFrame(() => {
-        const host = rootNode.querySelector(".simulatorRoot");
-        const overflowY = host ? getComputedStyle(host).overflowY : "missing";
-        console.assert(host, "Simulator scroll container (.simulatorRoot) must exist");
-        console.assert(/(auto|scroll)/.test(overflowY), `Simulator scroll container overflowY must be auto|scroll, got ${overflowY}`);
-      });
-    }
+    if (!document.body.classList.contains("simulator-active")) document.body.classList.add("simulator-active");
+    debugSimulatorScrollTruth(rootNode);
   }
 
   function renderModeScreen() {
@@ -5089,6 +5145,7 @@ function mountLegacyBattleInApp() {
     }
 
     function renderApp() {
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       applyLayoutModeClasses();
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =

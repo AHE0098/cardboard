@@ -1958,10 +1958,24 @@ body.tv-ish .inspectorCard{
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
   line-height: 1.45;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
+.sim-scroll-root{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sim-gap);
+}
+
+.sim-scroll-root > h2{ margin: 0 0 2px; letter-spacing: .01em; }
 .simulatorRoot h2{ margin: 0 0 2px; letter-spacing: .01em; }
 .simulatorRoot .zoneMeta{ color: var(--sim-muted); }
 .simulatorRoot .simField,
@@ -2028,9 +2042,32 @@ body.tv-ish .inspectorCard{
   outline-offset: 2px;
 }
 
-.simulatorRoot::-webkit-scrollbar{ width: 10px; }
-.simulatorRoot::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.24); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
-.simulatorRoot::-webkit-scrollbar-track{ background: rgba(255,255,255,0.06); border-radius: 99px; }
+.sim-scroll-root::-webkit-scrollbar{ width: 10px; }
+.sim-scroll-root::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.24); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+.sim-scroll-root::-webkit-scrollbar-track{ background: rgba(255,255,255,0.06); border-radius: 99px; }
+
+/* Simulator scroll fix: global shell is overflow-locked, so simulator owns an internal scroller. */
+body.simulator-active .view.simulatorView{
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  height: 100dvh;
+  min-height: 0;
+}
+
+body.simulator-active #root,
+body.simulator-active .view.simulatorView,
+body.simulator-active .view.simulatorView .simWrap,
+body.simulator-active #sim-scroll-root{
+  min-height: 0;
+}
+
+body.simulator-active .view.simulatorView .simWrap{
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
 
 @media (max-width: 900px){
   .simulatorRoot .simTurnGrid{ grid-template-columns: 1fr; }
