@@ -1941,3 +1941,109 @@ body.tv-ish .inspectorCard{
   border-color: rgba(255, 135, 135, 0.8);
   color: #ffd1d1;
 }
+
+/* Simulator report polish (scoped): preserve .simWrap as the single scroll owner. */
+.simulatorRoot{
+  --sim-bg: #0f1115;
+  --sim-panel: rgba(255,255,255,0.045);
+  --sim-panel-2: rgba(255,255,255,0.03);
+  --sim-border: rgba(255,255,255,0.10);
+  --sim-muted: rgba(231,236,247,0.70);
+  --sim-accent-a: #63d5ff;
+  --sim-accent-b: #ff8496;
+  --sim-radius: 14px;
+  --sim-shadow: 0 10px 30px rgba(0,0,0,.24);
+  --sim-gap: 10px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
+  line-height: 1.45;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.simulatorRoot h2{ margin: 0 0 2px; letter-spacing: .01em; }
+.simulatorRoot .zoneMeta{ color: var(--sim-muted); }
+.simulatorRoot .simField,
+.simulatorRoot .simReportTop,
+.simulatorRoot .simTableWrap,
+.simulatorRoot .simTurnRow{
+  background: linear-gradient(180deg, var(--sim-panel), var(--sim-panel-2));
+  border: 1px solid var(--sim-border);
+  border-radius: var(--sim-radius);
+  box-shadow: var(--sim-shadow);
+}
+
+.simulatorRoot .simField{ padding: 10px 12px; }
+.simulatorRoot .simControls,
+.simulatorRoot .simReportTop,
+.simulatorRoot .simReportTools,
+.simulatorRoot .simStatusReport{ display:flex; flex-direction:column; gap: var(--sim-gap); }
+.simulatorRoot .simReportTop{
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  padding: 10px;
+  backdrop-filter: blur(10px);
+}
+
+.simulatorRoot .simKpis{ display:flex; flex-wrap:wrap; gap:8px; }
+.simulatorRoot .dbChip{
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+}
+
+.simulatorRoot .simChartWrap{ padding: 10px; border-radius: 12px; background: rgba(7,10,17,.55); border:1px solid rgba(255,255,255,0.08); }
+.simulatorRoot .simChartHead{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom: 8px; }
+.simulatorRoot .simLegend{ display:flex; gap:10px; font-size:12px; color:var(--sim-muted); }
+.simulatorRoot .simLegendA::before,
+.simulatorRoot .simLegendB::before{ content:""; display:inline-block; width:8px; height:8px; border-radius:999px; margin-right:5px; }
+.simulatorRoot .simLegendA::before{ background: var(--sim-accent-a); }
+.simulatorRoot .simLegendB::before{ background: var(--sim-accent-b); }
+.simulatorRoot .simChart{ width:100%; min-height:120px; height:clamp(120px, 24vh, 176px); display:block; }
+
+.simulatorRoot .simReportTools{ padding: 2px 0 0; }
+.simulatorRoot .simReportTools .menuInput{ background: rgba(7,10,17,0.72); }
+.simulatorRoot .simReportTools label{ display:flex; align-items:center; gap:8px; }
+
+.simulatorRoot .simTurnRow{ padding: 10px; }
+.simulatorRoot .simTurnHead{
+  width:100%; text-align:left; border:1px solid rgba(255,255,255,0.08); border-radius:10px;
+  background: rgba(255,255,255,0.03); color: var(--text); padding: 8px 10px; font-weight: 700;
+}
+.simulatorRoot .simTurnGrid{ display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap:10px; margin-top: 10px; }
+.simulatorRoot .simTurnCol{ background: rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.07); border-radius: 12px; padding: 10px; }
+.simulatorRoot .simTurnCol h4{ margin:0 0 8px; font-size: 13px; }
+.simulatorRoot .simPhaseGroup{ border-left: 3px solid rgba(99,213,255,0.55); padding-left: 8px; margin: 8px 0; }
+.simulatorRoot .simPhaseGroup ul{ margin: 6px 0 0 14px; padding:0; }
+
+.simulatorRoot .menuBtn:focus-visible,
+.simulatorRoot .menuInput:focus-visible,
+.simulatorRoot .simTurnHead:focus-visible{
+  outline: 2px solid rgba(99,213,255,0.72);
+  outline-offset: 2px;
+}
+
+.simulatorRoot::-webkit-scrollbar{ width: 10px; }
+.simulatorRoot::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.24); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+.simulatorRoot::-webkit-scrollbar-track{ background: rgba(255,255,255,0.06); border-radius: 99px; }
+
+@media (max-width: 900px){
+  .simulatorRoot .simTurnGrid{ grid-template-columns: 1fr; }
+}
+
+
+/* Simulator scroll-chain fix: keep .simWrap as the single vertical scroll host. */
+.simulatorView{min-height:0; flex:1;}
+.simulatorView .simWrap{
+  width: min(980px, 96vw);
+  max-width: min(980px, 96vw);
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
