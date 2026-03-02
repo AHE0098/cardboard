@@ -4690,18 +4690,49 @@ function mountLegacyBattleInApp() {
     btnRow.append(copyJsonBtn, copyReportBtn);
     panel.appendChild(btnRow);
 
+    const reportScroll = document.createElement("div");
+    reportScroll.className = "simulatorReportScroll";
+    panel.appendChild(reportScroll);
+
+    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
+      const nodes = [
+        ["html", document.documentElement],
+        ["body", document.body],
+        [".app", document.querySelector(".app")],
+        ["#root", rootNode],
+        [".simulatorRoot", wrap],
+        [".simulatorPanel", panel],
+        [".simulatorReportScroll", reportScroll]
+      ].filter(([, el]) => !!el);
+      console.groupCollapsed("[sim-layout]");
+      nodes.forEach(([name, el]) => {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        console.log(name, {
+          h: Math.round(r.height),
+          sh: el.scrollHeight,
+          ch: el.clientHeight,
+          overflowY: cs.overflowY,
+          minHeight: cs.minHeight,
+          maxHeight: cs.maxHeight,
+          position: cs.position
+        });
+      });
+      console.groupEnd();
+    }
+
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
       running.className = "zoneMeta";
       running.textContent = `Running job ${simulatorState.runId}...`;
-      panel.appendChild(running);
+      reportScroll.appendChild(running);
     }
 
     if (simulatorState.lastError) {
       const err = document.createElement("div");
       err.className = "dbWarning";
       err.textContent = simulatorState.lastError;
-      panel.appendChild(err);
+      reportScroll.appendChild(err);
     }
 
     if (simulatorState.summary) {
@@ -4727,7 +4758,7 @@ function mountLegacyBattleInApp() {
         chip.textContent = txt;
         kpis.appendChild(chip);
       });
-      panel.appendChild(kpis);
+      reportScroll.appendChild(kpis);
 
       const winPoints = computeWinrateSeries(simulatorState.runsMeta, simulatorState.iterations);
       if (winPoints.length >= 2) {
@@ -4752,7 +4783,7 @@ function mountLegacyBattleInApp() {
       });
       table.appendChild(tbody);
       tableWrap.appendChild(table);
-      panel.appendChild(tableWrap);
+      reportScroll.appendChild(tableWrap);
 
       if (Array.isArray(simulatorState.runsMeta) && simulatorState.runsMeta.length) {
         const runSelWrap = document.createElement("div");
@@ -4800,7 +4831,7 @@ function mountLegacyBattleInApp() {
           renderApp();
         };
         runSelWrap.append(lbl, select, loadBtn);
-        panel.appendChild(runSelWrap);
+        reportScroll.appendChild(runSelWrap);
       }
 
       const reportTools = document.createElement("div");
@@ -4825,7 +4856,7 @@ function mountLegacyBattleInApp() {
       compactChk.onchange = () => { simulatorState.reportCompactActions = compactChk.checked; renderApp(); };
       compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
       reportTools.append(search, deadOnly, compactOnly);
-      panel.appendChild(reportTools);
+      reportScroll.appendChild(reportTools);
 
       const report = document.createElement("div");
       report.className = "simStatusReport";
@@ -4928,7 +4959,13 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
-      panel.appendChild(report);
+      reportScroll.appendChild(report);
+    }
+
+    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
+      const cs = getComputedStyle(reportScroll);
+      const shouldScroll = reportScroll.scrollHeight > reportScroll.clientHeight;
+      console.assert(!shouldScroll || /(auto|scroll)/.test(cs.overflowY || ""), "[sim-layout] report scroller overflow misconfigured");
     }
 
     wrap.appendChild(panel);
