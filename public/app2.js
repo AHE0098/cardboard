@@ -4415,13 +4415,10 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view";
+    wrap.className = "view simulatorRoot";
     wrap.style.justifyContent = "flex-start";
-    wrap.style.overflow = "hidden";
     const panel = document.createElement("div");
-    panel.className = "menuCard simWrap";
-    panel.style.maxHeight = "100%";
-    panel.style.overflow = "auto";
+    panel.className = "menuCard simWrap simulatorPanel";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
@@ -4959,6 +4956,11 @@ function mountLegacyBattleInApp() {
           report.appendChild(row);
         });
       }
+      const sentinel = document.createElement("div");
+      sentinel.id = "sim-scroll-sentinel";
+      sentinel.setAttribute("aria-hidden", "true");
+      sentinel.style.height = "1px";
+      report.appendChild(sentinel);
       reportScroll.appendChild(report);
     }
 
@@ -4966,6 +4968,34 @@ function mountLegacyBattleInApp() {
       const cs = getComputedStyle(reportScroll);
       const shouldScroll = reportScroll.scrollHeight > reportScroll.clientHeight;
       console.assert(!shouldScroll || /(auto|scroll)/.test(cs.overflowY || ""), "[sim-layout] report scroller overflow misconfigured");
+      const chain = [];
+      let node = reportScroll;
+      while (node) {
+        const style = getComputedStyle(node);
+        chain.push({
+          tag: node.tagName,
+          id: node.id || "",
+          className: node.className || "",
+          clientHeight: node.clientHeight,
+          scrollHeight: node.scrollHeight,
+          overflowY: style.overflowY,
+          height: style.height,
+          minHeight: style.minHeight,
+          maxHeight: style.maxHeight,
+          position: style.position,
+          transform: style.transform
+        });
+        node = node.parentElement;
+      }
+      console.info("[sim-layout] ancestor chain", chain);
+      const sentinel = reportScroll.querySelector("#sim-scroll-sentinel");
+      if (sentinel) {
+        sentinel.scrollIntoView({ block: "end" });
+        const after = reportScroll.scrollTop;
+        if (reportScroll.scrollHeight > reportScroll.clientHeight && after <= 0) {
+          console.error("[sim-layout] report bottom unreachable; check ancestor overflow/height chain", chain);
+        }
+      }
     }
 
     wrap.appendChild(panel);
@@ -5109,6 +5139,7 @@ function mountLegacyBattleInApp() {
 
     function renderApp() {
       applyLayoutModeClasses();
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||
