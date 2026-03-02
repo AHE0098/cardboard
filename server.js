@@ -370,15 +370,6 @@ function createServer() {
 
       const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
       const batch = simulateMany({ iterations, seedBase: seed, deckA, deckB, config });
-      const runsMeta = Array.isArray(batch.games)
-        ? batch.games.map((g, idx) => ({
-            index: idx,
-            seed: g.seed,
-            winner: g.winner,
-            turns: g.turns,
-            endedReason: g.endedReason
-          }))
-        : [];
 
       return res.json({
         ok: true,
@@ -399,8 +390,7 @@ function createServer() {
           logLength: sampleGame.log.length,
           log: includeSampleLog ? sampleGame.log : undefined
         },
-        summary: batch.summary,
-        runsMeta
+        summary: batch.summary
       });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message || "simulation_failed" });
