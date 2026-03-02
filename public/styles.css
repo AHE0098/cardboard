@@ -1957,22 +1957,14 @@ body.deckbuilder-active .deckbuilderWrap {
   min-height: 0;
 }
 
-body.simulator-active #root,
-body.deckbuilder-active #root,
-body.simulator-active .view,
-body.deckbuilder-active .view,
 body.simulator-active .simulatorShell,
 body.deckbuilder-active .deckbuilderShell {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
+  height: 100vh;
+  height: 100dvh;
   min-height: 0;
-}
-
-body.simulator-active .simulatorShell,
-body.deckbuilder-active .deckbuilderShell {
-  height: 100%;
-  max-height: 100%;
 }
 
 body.simulator-active #sim-scroll-root,
@@ -1981,6 +1973,5 @@ body.deckbuilder-active #deck-scroll-root {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  pointer-events: auto;
   -webkit-overflow-scrolling: touch;
 }

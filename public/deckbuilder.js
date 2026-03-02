@@ -1554,8 +1554,6 @@ Nonlands: ${summary.nonlands}`);
     shell.appendChild(wrap);
     rootNode.replaceChildren(shell);
 
-    installScrollDebug("deckbuilder", wrap);
-
     requestAnimationFrame(() => {
       const scrollRoot = rootNode.querySelector("#deck-scroll-root");
       if (!scrollRoot) return;
