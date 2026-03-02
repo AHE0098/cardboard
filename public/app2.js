@@ -2384,6 +2384,7 @@ Screen + data architecture:
     let legacySandboxHandle = null;
     let legacyBattleHandle = null;
     let battleLobbyRoomsRequested = false;
+    let simulatorAbortController = null;
     const DEBUG_BATTLE = false;
     const MOVE_DEBUG = false;
     const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
@@ -2418,6 +2419,30 @@ Screen + data architecture:
     let savedDecks = [];
     let lastSelectedDeckId = "";
     let battleDeckSelections = { p1: "", p2: "" };
+    let simulatorState = {
+      deckAId: "",
+      deckBId: "",
+      iterations: 200,
+      seed: 1337,
+      maxTurns: 200,
+      startingLife: 20,
+      logMode: "summary",
+      isRunning: false,
+      runId: "",
+      startedAt: 0,
+      finishedAt: 0,
+      elapsedMs: 0,
+      summary: null,
+      runsMeta: [],
+      sampleGame: null,
+      selectedRunSeed: null,
+      selectedReportText: "",
+      lastRawResult: null,
+      lastError: "",
+      warnings: [],
+      ruleStamp: null,
+      rulesText: ""
+    };
 
     let battleState = null;
     let battleRoomId = "";
@@ -2821,6 +2846,13 @@ case "TOGGLE_TAP": {
           savedDecks: window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks,
           lastSelectedDeckId,
           battleDeckSelections,
+          simulatorState: {
+            ...simulatorState,
+            isRunning: false,
+            startedAt: 0,
+            finishedAt: 0,
+            runId: ""
+          },
           lastBattleRoomId: battleRoomId || prev.lastBattleRoomId || "",
           updatedAt: Date.now()
         };
@@ -2848,6 +2880,30 @@ case "TOGGLE_TAP": {
       battleDeckSelections = {
         p1: String(save?.battleDeckSelections?.p1 || localP1?.id || ""),
         p2: String(save?.battleDeckSelections?.p2 || localP2?.id || "")
+      };
+      const savedSim = save?.simulatorState || {};
+      simulatorState = {
+        ...simulatorState,
+        deckAId: String(savedSim.deckAId || ""),
+        deckBId: String(savedSim.deckBId || ""),
+        iterations: Number.isFinite(Number(savedSim.iterations)) ? Number(savedSim.iterations) : simulatorState.iterations,
+        seed: Number.isFinite(Number(savedSim.seed)) ? Number(savedSim.seed) : simulatorState.seed,
+        maxTurns: Number.isFinite(Number(savedSim.maxTurns)) ? Number(savedSim.maxTurns) : simulatorState.maxTurns,
+        startingLife: Number.isFinite(Number(savedSim.startingLife)) ? Number(savedSim.startingLife) : simulatorState.startingLife,
+        logMode: ["none", "summary", "full"].includes(savedSim.logMode) ? savedSim.logMode : simulatorState.logMode,
+        isRunning: false,
+        runId: "",
+        startedAt: 0,
+        finishedAt: 0,
+        elapsedMs: 0,
+        summary: null,
+        runsMeta: [],
+        sampleGame: null,
+        selectedRunSeed: null,
+        selectedReportText: "",
+        lastRawResult: null,
+        lastError: "",
+        warnings: []
       };
       appMode = null;
       exitDebug("set_active_player", { nextScreen: "mainMenu" });
@@ -2885,6 +2941,11 @@ function onBack() {
       exitDebug("back_from_battle_mode", { nextScreen: "mainMenu" });
       battleClient.leaveRoom();
       battleLobbyRoomsRequested = false;
+    }
+
+    if (appMode === "simulator") {
+      if (simulatorAbortController) simulatorAbortController.abort();
+      simulatorState.isRunning = false;
     }
 
     exitDebug("back_to_main_menu", { nextScreen: "mainMenu" });
@@ -3923,7 +3984,12 @@ function onBack() {
       deckBtn.textContent = "Deckbuilder Mode";
       deckBtn.onclick = () => { appMode = "deckbuilder"; uiScreen = "mode"; renderApp(); };
 
-      card.append(sandboxBtn, battleBtn, deckBtn);
+      const simBtn = document.createElement("button");
+      simBtn.className = "menuBtn";
+      simBtn.textContent = "Simulator Mode";
+      simBtn.onclick = () => { appMode = "simulator"; uiScreen = "mode"; renderApp(); };
+
+      card.append(sandboxBtn, battleBtn, deckBtn, simBtn);
       root.replaceChildren(card);
     }
 
@@ -4215,6 +4281,429 @@ function mountLegacyBattleInApp() {
     return panel;
   }
 
+  function toSimCost(raw) {
+    if (Number.isFinite(Number(raw))) return Number(raw);
+    const tokens = parseManaCost(raw);
+    let cost = 0;
+    tokens.forEach((tok) => {
+      if (/^\d+$/.test(tok)) cost += Number(tok);
+      else if (/^[WUBRGX]$/.test(tok)) cost += 1;
+    });
+    return cost;
+  }
+
+  function resolveDeckToSimCards(deckObj, sideLabel = "A") {
+    const ids = typeof window.expandDeckCardIds === "function"
+      ? window.expandDeckCardIds(deckObj)
+      : (Array.isArray(deckObj?.cards) ? deckObj.cards.map(String) : []);
+    const out = [];
+    const unsupported = [];
+
+    ids.forEach((cardId, idx) => {
+      const data = getCardDef(cardId);
+      const kind = typeof window.CARD_KIND === "function"
+        ? window.CARD_KIND(cardId)
+        : (String(data?.kind || data?.type || "").toLowerCase());
+      const name = String(data?.name || `Card ${cardId}`);
+      if (kind === "land") {
+        out.push({ id: `${sideLabel}_${idx}_${cardId}`, type: "land", name });
+        return;
+      }
+      if (kind === "creature") {
+        const power = Number(data?.power);
+        const toughness = Number(data?.toughness);
+        const cost = toSimCost(data?.cost ?? data?.costs ?? data?.cmc ?? 0);
+        if (!Number.isFinite(power) || !Number.isFinite(toughness) || !Number.isFinite(cost)) {
+          unsupported.push(`${name} (missing P/T/cost)`);
+          return;
+        }
+        out.push({
+          id: `${sideLabel}_${idx}_${cardId}`,
+          type: "creature",
+          name,
+          cost,
+          power,
+          toughness
+        });
+        return;
+      }
+      unsupported.push(`${name} (${kind || "unknown"})`);
+    });
+
+    return { cards: out, unsupported };
+  }
+
+  function formatSimGameReport(game, meta = {}) {
+    if (typeof window.formatSimulationReport === "function") {
+      return window.formatSimulationReport(game, {
+        ...meta,
+        rulePath: simulatorState?.ruleStamp?.path,
+        ruleHash: simulatorState?.ruleStamp?.hash
+      });
+    }
+    return "Report formatter unavailable.";
+  }
+
+  function renderSimulatorMode(rootNode) {
+    subtitle.textContent = `${session.playerName} • simulator`;
+    const wrap = document.createElement("div");
+    wrap.className = "view";
+    const panel = document.createElement("div");
+    panel.className = "menuCard simWrap";
+    panel.innerHTML = "<h2>Simulator</h2>";
+
+    if (!simulatorState.ruleStamp) {
+      fetch('/api/sim/rules').then((r) => r.json()).then((data) => {
+        if (data?.ok) {
+          simulatorState.ruleStamp = {
+            path: data.rules.path,
+            hash: data.rules.hash,
+            mtimeMs: data.rules.mtimeMs
+          };
+          simulatorState.rulesText = String(data.rules.text || '');
+          renderApp();
+        }
+      }).catch(() => {});
+    }
+
+
+    const allDecks = typeof window.getAllAvailableDecks === "function"
+      ? window.getAllAvailableDecks()
+      : (window.CardboardDeckStorage?.getSavedDecks?.() || savedDecks || []);
+
+    const controls = document.createElement("div");
+    controls.className = "simControls";
+
+    function mkDeckSelect(labelText, key) {
+      const row = document.createElement("div");
+      row.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = labelText;
+      const select = document.createElement("select");
+      select.className = "menuInput";
+      select.dataset.stickyMenu = "1";
+      const ph = document.createElement("option");
+      ph.value = "";
+      ph.textContent = "Select deck";
+      select.appendChild(ph);
+      allDecks.forEach((deck) => {
+        const opt = document.createElement("option");
+        const id = String(deck.id || deck.deckId || "");
+        opt.value = id;
+        const n = typeof window.expandDeckCardIds === "function"
+          ? window.expandDeckCardIds(deck).length
+          : (Array.isArray(deck?.cards) ? deck.cards.length : 0);
+        opt.textContent = `${deck.name || id} • ${n}`;
+        if (simulatorState[key] === id) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.onchange = () => {
+        simulatorState[key] = select.value;
+        simulatorState.lastError = "";
+        persistPlayerSaveDebounced();
+      };
+      row.append(label, select);
+      return row;
+    }
+
+    controls.append(
+      mkDeckSelect("Deck A", "deckAId"),
+      mkDeckSelect("Deck B", "deckBId")
+    );
+
+    const numericRow = document.createElement("div");
+    numericRow.className = "simGrid";
+    const inputs = [
+      ["Iterations", "iterations", 1, 5000],
+      ["Seed", "seed", 0, 0xffffffff],
+      ["Max turns", "maxTurns", 1, 1000],
+      ["Starting life", "startingLife", 1, 200]
+    ];
+    inputs.forEach(([labelText, key, min, max]) => {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = labelText;
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.type = "number";
+      input.min = String(min);
+      input.max = String(max);
+      input.value = String(simulatorState[key]);
+      input.onchange = () => {
+        const v = Number(input.value);
+        if (Number.isFinite(v)) simulatorState[key] = Math.max(min, Math.min(max, Math.floor(v)));
+        input.value = String(simulatorState[key]);
+        persistPlayerSaveDebounced();
+      };
+      field.append(label, input);
+      numericRow.appendChild(field);
+    });
+
+    const logField = document.createElement("div");
+    logField.className = "simField";
+    const logLabel = document.createElement("label");
+    logLabel.className = "zoneMeta";
+    logLabel.textContent = "Batch log mode";
+    const logSelect = document.createElement("select");
+    logSelect.className = "menuInput";
+    ["none", "summary", "full"].forEach((mode) => {
+      const opt = document.createElement("option");
+      opt.value = mode;
+      opt.textContent = mode;
+      if (simulatorState.logMode === mode) opt.selected = true;
+      logSelect.appendChild(opt);
+    });
+    logSelect.onchange = () => {
+      simulatorState.logMode = logSelect.value;
+      persistPlayerSaveDebounced();
+    };
+    logField.append(logLabel, logSelect);
+    numericRow.appendChild(logField);
+
+    controls.appendChild(numericRow);
+    panel.appendChild(controls);
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "simButtons";
+    const runBtn = document.createElement("button");
+    runBtn.className = "menuBtn";
+    runBtn.textContent = simulatorState.isRunning ? "Running..." : "Run Simulation";
+    runBtn.disabled = simulatorState.isRunning;
+    const stopBtn = document.createElement("button");
+    stopBtn.className = "menuBtn";
+    stopBtn.textContent = "Cancel";
+    stopBtn.disabled = !simulatorState.isRunning;
+
+    runBtn.onclick = async () => {
+      const deckA = getDeckById(simulatorState.deckAId);
+      const deckB = getDeckById(simulatorState.deckBId);
+      if (!deckA || !deckB) {
+        simulatorState.lastError = "Please select both Deck A and Deck B.";
+        renderApp();
+        return;
+      }
+      const mappedA = resolveDeckToSimCards(deckA, "A");
+      const mappedB = resolveDeckToSimCards(deckB, "B");
+      const unsupported = [...mappedA.unsupported, ...mappedB.unsupported];
+      if (unsupported.length) {
+        simulatorState.lastError = `Unsupported cards for sim: ${unsupported.slice(0, 12).join(", ")}${unsupported.length > 12 ? " ..." : ""}`;
+        renderApp();
+        return;
+      }
+      if (!mappedA.cards.length || !mappedB.cards.length) {
+        simulatorState.lastError = "Selected decks could not be resolved into simulator cards.";
+        renderApp();
+        return;
+      }
+
+      simulatorState.isRunning = true;
+      simulatorState.lastError = "";
+      simulatorState.selectedReportText = "";
+      simulatorState.runId = uid();
+      simulatorState.startedAt = Date.now();
+      renderApp();
+
+      if (simulatorAbortController) simulatorAbortController.abort();
+      simulatorAbortController = new AbortController();
+
+      try {
+        const qs = new URLSearchParams({
+          iterations: String(simulatorState.iterations),
+          seed: String(simulatorState.seed),
+          maxTurns: String(simulatorState.maxTurns),
+          startingLife: String(simulatorState.startingLife),
+          log: simulatorState.logMode,
+          includeSampleLog: "1"
+        });
+        const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: simulatorAbortController.signal });
+        const data = await resp.json();
+        if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+
+        simulatorState.finishedAt = Date.now();
+        simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
+        simulatorState.summary = data.summary || null;
+        simulatorState.sampleGame = data.sampleGame || null;
+        simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
+        simulatorState.lastRawResult = data;
+        simulatorState.ruleStamp = data.ruleStamp || simulatorState.ruleStamp;
+        simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
+        simulatorState.selectedReportText = formatSimGameReport(data.sampleGame, {
+          deckAName: deckA.name || simulatorState.deckAId,
+          deckBName: deckB.name || simulatorState.deckBId
+        });
+      } catch (err) {
+        if (err?.name === "AbortError") simulatorState.lastError = "Simulation cancelled.";
+        else simulatorState.lastError = String(err?.message || err || "simulation failed");
+      } finally {
+        simulatorState.isRunning = false;
+        simulatorAbortController = null;
+        persistPlayerSaveDebounced();
+        renderApp();
+      }
+    };
+
+    stopBtn.onclick = () => {
+      if (simulatorAbortController) simulatorAbortController.abort();
+      simulatorState.isRunning = false;
+      simulatorState.lastError = "Simulation cancelled.";
+      renderApp();
+    };
+
+    btnRow.append(runBtn, stopBtn);
+
+    const copyJsonBtn = document.createElement("button");
+    copyJsonBtn.className = "menuBtn";
+    copyJsonBtn.textContent = "Copy JSON";
+    copyJsonBtn.onclick = async () => {
+      if (!simulatorState.lastRawResult) return;
+      const txt = JSON.stringify(simulatorState.lastRawResult, null, 2);
+      try { await navigator.clipboard.writeText(txt); } catch {}
+    };
+
+    const copyReportBtn = document.createElement("button");
+    copyReportBtn.className = "menuBtn";
+    copyReportBtn.textContent = "Copy Report";
+    copyReportBtn.onclick = async () => {
+      if (!simulatorState.selectedReportText) return;
+      try { await navigator.clipboard.writeText(simulatorState.selectedReportText); } catch {}
+    };
+
+    btnRow.append(copyJsonBtn, copyReportBtn);
+    panel.appendChild(btnRow);
+
+    if (simulatorState.isRunning) {
+      const running = document.createElement("div");
+      running.className = "zoneMeta";
+      running.textContent = `Running job ${simulatorState.runId}...`;
+      panel.appendChild(running);
+    }
+
+    if (simulatorState.lastError) {
+      const err = document.createElement("div");
+      err.className = "dbWarning";
+      err.textContent = simulatorState.lastError;
+      panel.appendChild(err);
+    }
+
+    if (simulatorState.ruleStamp) {
+      const rulesMeta = document.createElement('div');
+      rulesMeta.className = 'zoneMeta';
+      rulesMeta.textContent = `Rules: ${simulatorState.ruleStamp.path} • ${simulatorState.ruleStamp.hash}`;
+      panel.appendChild(rulesMeta);
+    }
+
+    if (simulatorState.rulesText) {
+      const rulesDetails = document.createElement('details');
+      const sm = document.createElement('summary');
+      sm.textContent = 'View canonical simulation rules';
+      const pre = document.createElement('pre');
+      pre.className = 'simReport';
+      pre.style.maxHeight = '220px';
+      pre.textContent = simulatorState.rulesText;
+      rulesDetails.append(sm, pre);
+      panel.appendChild(rulesDetails);
+    }
+
+    if (simulatorState.summary) {
+      const sum = simulatorState.summary;
+      const winRateA = sum.games ? ((sum.winsA / sum.games) * 100).toFixed(2) : "0.00";
+      const winRateB = sum.games ? ((sum.winsB / sum.games) * 100).toFixed(2) : "0.00";
+      const kpis = document.createElement("div");
+      kpis.className = "simKpis";
+      [
+        `Games: ${sum.games}`,
+        `A wins: ${sum.winsA} (${winRateA}%)`,
+        `B wins: ${sum.winsB} (${winRateB}%)`,
+        `Draws: ${sum.draws}`,
+        `Avg turns: ${Number(sum.avgTurns || 0).toFixed(2)}`,
+        `Median turns: ${sum.medianTurns}`,
+        `Elapsed: ${simulatorState.elapsedMs}ms`
+      ].forEach((txt) => {
+        const chip = document.createElement("div");
+        chip.className = "dbChip";
+        chip.textContent = txt;
+        kpis.appendChild(chip);
+      });
+      panel.appendChild(kpis);
+
+      const tableWrap = document.createElement("div");
+      tableWrap.className = "simTableWrap";
+      const table = document.createElement("table");
+      table.className = "simTable";
+      table.innerHTML = `<thead><tr><th>Side</th><th>Card</th><th>Drawn</th><th>Played</th><th>Died</th><th>Kills</th><th>Damage</th></tr></thead>`;
+      const tbody = document.createElement("tbody");
+      [["A", sum.cardStats?.A || {}], ["B", sum.cardStats?.B || {}]].forEach(([side, map]) => {
+        Object.entries(map).forEach(([name, stat]) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${side}</td><td>${name}</td><td>${stat.timesDrawn || 0}</td><td>${stat.timesPlayed || 0}</td><td>${stat.timesDied || 0}</td><td>${stat.killsMade || 0}</td><td>${stat.damageToPlayer || 0}</td>`;
+          tbody.appendChild(tr);
+        });
+      });
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      panel.appendChild(tableWrap);
+
+      if (Array.isArray(simulatorState.runsMeta) && simulatorState.runsMeta.length) {
+        const runSelWrap = document.createElement("div");
+        runSelWrap.className = "simField";
+        const lbl = document.createElement("label");
+        lbl.className = "zoneMeta";
+        lbl.textContent = "Single game report";
+        const select = document.createElement("select");
+        select.className = "menuInput";
+        simulatorState.runsMeta.slice(0, 200).forEach((run) => {
+          const opt = document.createElement("option");
+          opt.value = String(run.seed);
+          opt.textContent = `#${run.index} seed=${run.seed} winner=${run.winner} turns=${run.turns}`;
+          if (Number(simulatorState.selectedRunSeed) === Number(run.seed)) opt.selected = true;
+          select.appendChild(opt);
+        });
+        const loadBtn = document.createElement("button");
+        loadBtn.className = "menuBtn";
+        loadBtn.textContent = "Load report";
+        loadBtn.onclick = async () => {
+          const seedVal = Number(select.value);
+          simulatorState.selectedRunSeed = seedVal;
+          const deckA = getDeckById(simulatorState.deckAId);
+          const deckB = getDeckById(simulatorState.deckBId);
+          const qs = new URLSearchParams({
+            iterations: "1",
+            seed: String(seedVal),
+            maxTurns: String(simulatorState.maxTurns),
+            startingLife: String(simulatorState.startingLife),
+            log: simulatorState.logMode,
+            includeSampleLog: "1"
+          });
+          const resp = await fetch(`/api/sim/run?${qs.toString()}`);
+          const data = await resp.json();
+          if (!resp.ok || !data?.ok) {
+            simulatorState.lastError = data?.error || `HTTP ${resp.status}`;
+          } else {
+            simulatorState.selectedReportText = formatSimGameReport(data.sampleGame, {
+              deckAName: deckA?.name || simulatorState.deckAId,
+              deckBName: deckB?.name || simulatorState.deckBId
+            });
+            simulatorState.lastError = "";
+          }
+          renderApp();
+        };
+        runSelWrap.append(lbl, select, loadBtn);
+        panel.appendChild(runSelWrap);
+      }
+
+      const pre = document.createElement("pre");
+      pre.className = "simReport";
+      pre.textContent = simulatorState.selectedReportText || "Run a simulation to view report.";
+      panel.appendChild(pre);
+    }
+
+    wrap.appendChild(panel);
+    rootNode.replaceChildren(wrap);
+  }
+
   function renderModeScreen() {
   if (appMode === "battle") {
     if (!battleState && !battleLobbyRoomsRequested) {
@@ -4238,6 +4727,11 @@ function mountLegacyBattleInApp() {
 
   if (appMode === "deckbuilder") {
     renderDeckbuilder(root, deckbuilderState);
+    return;
+  }
+
+  if (appMode === "simulator") {
+    renderSimulatorMode(root);
     return;
   }
 
