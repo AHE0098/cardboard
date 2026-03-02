@@ -1761,3 +1761,13 @@ body.isFocus #topPiles{
 .simTable{width:100%;border-collapse:collapse;font-size:12px}
 .simTable th,.simTable td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.08);text-align:left;white-space:nowrap}
 .simReport{max-height:380px;overflow:auto;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px;font-size:12px;line-height:1.4;white-space:pre-wrap}
+.simReportTools{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 0;background:linear-gradient(180deg,rgba(8,10,16,.95),rgba(8,10,16,.7) 80%,transparent)}
+.simStatusReport{display:flex;flex-direction:column;gap:12px;margin-top:8px}
+.simTurnRow{border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.03);overflow:hidden}
+.simTurnHead{width:100%;text-align:left;border:none;background:rgba(255,255,255,.04);color:var(--text);padding:10px 12px;font-weight:600;cursor:pointer}
+.simTurnGrid{display:grid;grid-template-columns:1.2fr 1fr;gap:12px;padding:12px}
+.simTurnCol{min-width:0}
+.simTurnCol h4{margin:0 0 8px;font-size:13px;letter-spacing:.02em;color:var(--muted)}
+.simPhaseGroup{padding:6px 0;border-top:1px solid rgba(255,255,255,.08)}
+.simPhaseGroup ul{margin:6px 0 0 16px;padding:0;display:grid;gap:4px}
+@media (max-width: 880px){.simTurnGrid{grid-template-columns:1fr}}
