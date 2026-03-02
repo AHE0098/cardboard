@@ -2388,6 +2388,15 @@ Screen + data architecture:
     const DEBUG_BATTLE = false;
     const MOVE_DEBUG = false;
     const DEBUG_DND = !!window.CARDBOARD_DEBUG_DND;
+    const layoutQaEnabled = (() => {
+      try {
+        const q = new URLSearchParams(window.location.search || "");
+        return q.get("debug") === "1" || !!window.DEBUG;
+      } catch {
+        return !!window.DEBUG;
+      }
+    })();
+    let layoutQaEl = null;
     const moveDebug = (stage, payload = {}) => {
       if (!MOVE_DEBUG) return;
       console.info("[move]", {
@@ -2440,8 +2449,6 @@ Screen + data architecture:
       reportSearch: "",
       reportShowOnlyDeadTurns: false,
       reportCompactActions: true,
-      reportShowPhaseBands: true,
-      reportShowStatusCards: true,
       reportExpandedTurns: {},
       lastRawResult: null,
       lastError: "",
@@ -4375,77 +4382,29 @@ function mountLegacyBattleInApp() {
     return lines.join("\n");
   }
 
-  const SIM_REPORT_V2 = window.SIM_REPORT_V2 !== false;
-
-  function simEventLabel(evt, compact = true) {
+  function simEventLabel(evt, compact) {
     if (!evt) return "";
-    const type = String(evt.type || "");
-    if (type === "draw") return evt.card || "Draw";
-    if (type === "play_land") return compact ? `＋ ${evt.card || "Land"}` : `Play land ${evt.card || ""}`.trim();
-    if (type === "cast_creature") return compact ? `▶ ${evt.card || "Creature"}` : `${evt.card || "Creature"} (cost ${evt.cost ?? "?"})`;
-    if (type === "combat_start") return compact ? `⚔ ${(evt.attackers || []).length} atk` : `Attackers: ${(evt.attackers || []).length}`;
-    if (type === "blocked_combat") return compact ? `🛡 Block` : `${evt.attacker || "attacker"} blocked by ${evt.defender || "defender"}`;
-    if (type === "unblocked_damage") return compact ? `💥 ${evt.amount || 0}` : `${evt.amount || 0} damage`;
-    if (type === "main_phase_end") return compact ? "Main done" : "Main phase end";
-    if (type === "combat_skip") return compact ? "No attack" : "No attackers";
-    if (type === "turn_end") return "EoT snapshot";
-    return type || "event";
+    if (compact) return evt.type || "event";
+    if (evt.type === "draw") return `${evt.player} draws ${evt.card}`;
+    if (evt.type === "play_land") return `${evt.player} plays ${evt.card}`;
+    if (evt.type === "cast_creature") return `${evt.player} casts ${evt.card} (cost ${evt.cost})`;
+    if (evt.type === "combat_start") return `${evt.attacker} attacks (${evt.attackers?.length || 0})`;
+    if (evt.type === "blocked_combat") return `Block ${evt.attacker} vs ${evt.defender}`;
+    if (evt.type === "unblocked_damage") return `${evt.attacker} -> ${evt.playerDamaged} for ${evt.amount}`;
+    if (evt.type === "turn_end") return `${evt.player} end step snapshot`;
+    return evt.type || "event";
   }
 
-  function normalizeTurnRows(game) {
-    const rows = [];
+  function buildStatusPairs(game) {
+    const out = [];
     const turns = game?.turnSummaries || {};
     Object.keys(turns).sort((a, b) => Number(a) - Number(b)).forEach((turnKey) => {
-      const per = turns[turnKey] || {};
-      rows.push({
-        turn: Number(turnKey),
-        A: per.A || null,
-        B: per.B || null
+      const perPlayer = turns[turnKey] || {};
+      Object.keys(perPlayer).sort().forEach((player) => {
+        out.push({ turn: Number(turnKey), player, summary: perPlayer[player] });
       });
     });
-    return rows;
-  }
-
-  function buildWinrateCheckpoints(runsMeta = [], preferredN) {
-    if (!Array.isArray(runsMeta) || !runsMeta.length) return [];
-    const wanted = [10, 20, 50, 100, 200, 500, 1000, Number(preferredN || 0)].filter((n) => Number.isFinite(n) && n > 0);
-    const points = [...new Set(wanted.map((n) => Math.min(runsMeta.length, Math.floor(n))))].sort((a, b) => a - b);
-    const out = [];
-    let winsA = 0;
-    let winsB = 0;
-    for (let i = 0; i < runsMeta.length; i += 1) {
-      const winner = runsMeta[i]?.winner;
-      if (winner === "A") winsA += 1;
-      else if (winner === "B") winsB += 1;
-      const n = i + 1;
-      if (!points.includes(n)) continue;
-      out.push({ n, a: (winsA / n) * 100, b: (winsB / n) * 100 });
-    }
-    if (out[out.length - 1]?.n !== runsMeta.length) {
-      const n = runsMeta.length;
-      out.push({ n, a: (winsA / n) * 100, b: (winsB / n) * 100 });
-    }
     return out;
-  }
-
-  function renderWinrateSvg(points) {
-    if (!points.length) return "";
-    const w = 720;
-    const h = 180;
-    const pad = { l: 34, r: 12, t: 10, b: 24 };
-    const innerW = w - pad.l - pad.r;
-    const innerH = h - pad.t - pad.b;
-    const maxN = points[points.length - 1].n || 1;
-    const toX = (n) => pad.l + (n / maxN) * innerW;
-    const toY = (v) => pad.t + ((100 - v) / 100) * innerH;
-    const pathFor = (k) => points.map((p, i) => `${i ? "L" : "M"}${toX(p.n).toFixed(2)} ${toY(p[k]).toFixed(2)}`).join(" ");
-    const dotsFor = (k, cls) => points.map((p) => `<circle class="${cls}" cx="${toX(p.n).toFixed(2)}" cy="${toY(p[k]).toFixed(2)}" r="2.5"/>`).join("");
-    const yTicks = [0, 25, 50, 75, 100].map((v) => {
-      const y = toY(v).toFixed(2);
-      return `<line class="simChartGrid" x1="${pad.l}" y1="${y}" x2="${w - pad.r}" y2="${y}"/><text class="simChartAxis" x="4" y="${Number(y) + 4}">${v}%</text>`;
-    }).join("");
-    const xTicks = points.map((p) => `<text class="simChartAxis" x="${toX(p.n).toFixed(2)}" y="${h - 6}" text-anchor="middle">${p.n}</text>`).join("");
-    return `<svg viewBox="0 0 ${w} ${h}" class="simChart" role="img" aria-label="Winrate by iteration count"><g>${yTicks}</g><path class="simChartLineA" d="${pathFor("a")}"/><path class="simChartLineB" d="${pathFor("b")}"/>${dotsFor("a", "simChartDotA")}${dotsFor("b", "simChartDotB")}<g>${xTicks}</g></svg>`;
   }
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
@@ -4781,132 +4740,120 @@ function mountLegacyBattleInApp() {
       search.placeholder = "Search actions/status";
       search.value = simulatorState.reportSearch || "";
       search.oninput = () => { simulatorState.reportSearch = search.value; renderApp(); };
-
       const deadOnly = document.createElement("label");
       deadOnly.className = "zoneMeta";
       const deadChk = document.createElement("input");
       deadChk.type = "checkbox";
       deadChk.checked = !!simulatorState.reportShowOnlyDeadTurns;
       deadChk.onchange = () => { simulatorState.reportShowOnlyDeadTurns = deadChk.checked; renderApp(); };
-      deadOnly.append(deadChk, document.createTextNode(" Dead turns"));
-
+      deadOnly.append(deadChk, document.createTextNode(" Dead turns only"));
       const compactOnly = document.createElement("label");
       compactOnly.className = "zoneMeta";
       const compactChk = document.createElement("input");
       compactChk.type = "checkbox";
       compactChk.checked = !!simulatorState.reportCompactActions;
       compactChk.onchange = () => { simulatorState.reportCompactActions = compactChk.checked; renderApp(); };
-      compactOnly.append(compactChk, document.createTextNode(" Compact"));
-
-      const bandsOnly = document.createElement("label");
-      bandsOnly.className = "zoneMeta";
-      const bandsChk = document.createElement("input");
-      bandsChk.type = "checkbox";
-      bandsChk.checked = !!simulatorState.reportShowPhaseBands;
-      bandsChk.onchange = () => { simulatorState.reportShowPhaseBands = bandsChk.checked; renderApp(); };
-      bandsOnly.append(bandsChk, document.createTextNode(" Phase bands"));
-
-      const statusOnly = document.createElement("label");
-      statusOnly.className = "zoneMeta";
-      const statusChk = document.createElement("input");
-      statusChk.type = "checkbox";
-      statusChk.checked = !!simulatorState.reportShowStatusCards;
-      statusChk.onchange = () => { simulatorState.reportShowStatusCards = statusChk.checked; renderApp(); };
-      statusOnly.append(statusChk, document.createTextNode(" Status"));
-
-      reportTools.append(search, deadOnly, compactOnly, bandsOnly, statusOnly);
+      compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
+      reportTools.append(search, deadOnly, compactOnly);
       panel.appendChild(reportTools);
 
       const report = document.createElement("div");
       report.className = "simStatusReport";
-      if (!SIM_REPORT_V2) report.classList.add("simStatusReportLegacy");
-      const rows = normalizeTurnRows(simulatorState.sampleGame || {});
+      const pairs = buildStatusPairs(simulatorState.sampleGame || {});
       const searchNeedle = String(simulatorState.reportSearch || "").trim().toLowerCase();
-      const filteredRows = rows.filter((row) => {
-        const snaps = [row.A?.eotSnapshot, row.B?.eotSnapshot].filter(Boolean);
-        if (simulatorState.reportShowOnlyDeadTurns && !snaps.some((s) => s?.flags?.deadTurn)) return false;
+      const filteredPairs = pairs.filter((pair) => {
+        const snap = pair.summary?.eotSnapshot;
+        if (simulatorState.reportShowOnlyDeadTurns && !snap?.flags?.deadTurn) return false;
         if (!searchNeedle) return true;
-        return JSON.stringify(row).toLowerCase().includes(searchNeedle);
+        const hay = JSON.stringify(pair.summary || {}).toLowerCase();
+        return hay.includes(searchNeedle);
       });
 
-      if (!filteredRows.length) {
+      if (!filteredPairs.length) {
         const empty = document.createElement("div");
         empty.className = "zoneMeta";
         empty.textContent = "No turn rows match current filters.";
         report.appendChild(empty);
       } else {
-        filteredRows.forEach((rowData, idx) => {
+        filteredPairs.forEach((pair) => {
+          const key = `${pair.turn}:${pair.player}`;
           const row = document.createElement("section");
-          row.className = "simTurnRow simTurnRowV2";
-          if (idx % 2 === 1) row.classList.add("simTurnAlt");
-          const head = document.createElement("div");
-          head.className = "simTurnHead simTurnHeadV2";
-          head.textContent = `Turn ${rowData.turn}`;
+          row.className = "simTurnRow";
+          const head = document.createElement("button");
+          head.className = "simTurnHead";
+          head.type = "button";
+          const snap = pair.summary?.eotSnapshot;
+          head.textContent = `Turn ${pair.turn} • ${pair.player} • ${snap?.flags?.deadTurn ? "dead turn" : "active"}`;
+          head.onclick = () => {
+            simulatorState.reportExpandedTurns[key] = !simulatorState.reportExpandedTurns[key];
+            renderApp();
+          };
           row.appendChild(head);
 
           const grid = document.createElement("div");
-          grid.className = "simTurnGridV2";
+          grid.className = "simTurnGrid";
 
-          [["A", rowData.A], ["B", rowData.B]].forEach(([playerKey, summary]) => {
-            const col = document.createElement("article");
-            col.className = `simPlayerCol simPlayer${playerKey}`;
-            const colHeader = document.createElement("div");
-            colHeader.className = "simPlayerHead";
-            colHeader.innerHTML = `<strong>Player ${playerKey}</strong>`;
-            col.appendChild(colHeader);
-
-            const phaseOrder = ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"];
-            phaseOrder.forEach((phase) => {
-              const actions = summary?.actionsByPhase?.[phase] || [];
-              if (!actions.length) return;
-              const phaseBand = document.createElement("section");
-              phaseBand.className = `simPhaseBand simPhase${phase}`;
-              if (!simulatorState.reportShowPhaseBands) phaseBand.classList.add("simPhaseBandFlat");
-              const title = document.createElement("div");
-              title.className = "simPhaseLabel";
-              title.textContent = phase.replace("_STEP", "").replace("_PHASE", "").replace("_", " ");
-              phaseBand.appendChild(title);
-
-              const chips = document.createElement("div");
-              chips.className = "simEventChips";
-              actions.forEach((evt) => {
-                const chip = document.createElement("button");
-                chip.type = "button";
-                chip.className = "simEventChip";
-                chip.textContent = simEventLabel(evt, !!simulatorState.reportCompactActions);
-                chip.title = JSON.stringify(evt);
-                const dkey = `evt:${rowData.turn}:${playerKey}:${phase}:${chip.textContent}`;
-                chip.onclick = () => {
-                  simulatorState.reportExpandedTurns[dkey] = !simulatorState.reportExpandedTurns[dkey];
-                  renderApp();
-                };
-                chips.appendChild(chip);
-                if (simulatorState.reportExpandedTurns[dkey]) {
-                  const detail = document.createElement("pre");
-                  detail.className = "simReport";
-                  detail.textContent = JSON.stringify(evt, null, 2);
-                  chips.appendChild(detail);
-                }
-              });
-              phaseBand.appendChild(chips);
-              col.appendChild(phaseBand);
+          const left = document.createElement("div");
+          left.className = "simTurnCol";
+          left.innerHTML = '<h4>New Actions</h4>';
+          ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"].forEach((phase) => {
+            const actions = pair.summary?.actionsByPhase?.[phase] || [];
+            if (!actions.length) return;
+            const phaseEl = document.createElement("div");
+            phaseEl.className = "simPhaseGroup";
+            const title = document.createElement("div");
+            title.className = "zoneMeta";
+            title.textContent = phase.replace("_", " ");
+            phaseEl.appendChild(title);
+            const ul = document.createElement("ul");
+            actions.forEach((evt) => {
+              const li = document.createElement("li");
+              li.textContent = simEventLabel(evt, !!simulatorState.reportCompactActions);
+              ul.appendChild(li);
             });
-
-            if (simulatorState.reportShowStatusCards) {
-              const snap = summary?.eotSnapshot;
-              const status = document.createElement("div");
-              status.className = "simStatusCard";
-              if (!snap) {
-                status.innerHTML = '<div class="dbWarning">Snapshot missing</div>';
-              } else {
-                status.innerHTML = `<div class="simStatusGrid">                  <div><span>❤</span><strong>${snap.life}</strong><small>Life</small></div>                  <div><span>✋</span><strong>${snap.zones.handSize}</strong><small>Hand</small></div>                  <div><span>📚</span><strong>${snap.zones.deckSize}</strong><small>Deck</small></div>                  <div><span>🪦</span><strong>${snap.zones.graveyardSize}</strong><small>GY</small></div>                  <div><span>🛡</span><strong>${snap.zones.battlefieldCount}</strong><small>Board</small></div>                  <div><span>⚡</span><strong>${snap.tempo.manaSpent}/${snap.tempo.manaAvailable}</strong><small>Mana</small></div>                </div>`;
-              }
-              col.appendChild(status);
-            }
-
-            grid.appendChild(col);
+            phaseEl.appendChild(ul);
+            left.appendChild(phaseEl);
           });
 
+          const right = document.createElement("div");
+          right.className = "simTurnCol";
+          right.innerHTML = '<h4>End-of-Turn Status</h4>';
+          if (!snap) {
+            const miss = document.createElement("div");
+            miss.className = "dbWarning";
+            miss.textContent = "Snapshot missing";
+            right.appendChild(miss);
+          } else {
+            const chips = document.createElement("div");
+            chips.className = "simKpis";
+            [
+              `Life ${snap.life}`,
+              `Hand ${snap.zones.handSize}`,
+              `Deck ${snap.zones.deckSize}`,
+              `Grave ${snap.zones.graveyardSize}`,
+              `Board ${snap.zones.battlefieldCount}`,
+              `Power ${snap.combat.totalCreaturePower}`,
+              `Mana ${snap.tempo.manaSpent}/${snap.tempo.manaAvailable}`
+            ].forEach((txt) => {
+              const chip = document.createElement("div");
+              chip.className = "dbChip";
+              chip.textContent = txt;
+              chips.appendChild(chip);
+            });
+            right.appendChild(chips);
+
+            const details = document.createElement("details");
+            details.open = !!simulatorState.reportExpandedTurns[key];
+            const summary = document.createElement("summary");
+            summary.textContent = "Show details";
+            const pre = document.createElement("pre");
+            pre.className = "simReport";
+            pre.textContent = JSON.stringify(snap, null, 2);
+            details.append(summary, pre);
+            right.appendChild(details);
+          }
+
+          grid.append(left, right);
           row.appendChild(grid);
           report.appendChild(row);
         });
@@ -4980,7 +4927,81 @@ function mountLegacyBattleInApp() {
 }
 
 
+    function computeBreakpointName(w, h) {
+      if (w >= 1920 && h >= 1080) return "xl";
+      if (w >= 1280) return "lg";
+      if (w >= 900) return "md";
+      return "sm";
+    }
+
+    function isTvIshViewport() {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      const ratio = h ? (w / h) : 0;
+      const ua = (navigator.userAgent || "").toLowerCase();
+      const uaTvHint = /(smart-tv|smarttv|hbbtv|tizen|webos|netcast|viera|bravia|googletv|appletv|aft[bstm]|crkey|roku)/.test(ua);
+      return ((w >= 1600 && h >= 900) || (ratio >= 1.6 && w >= 1920) || (uaTvHint && w >= 1280));
+    }
+
+    function getScrollingElementLabel() {
+      const cands = [document.scrollingElement, document.documentElement, document.body, document.getElementById("root")].filter(Boolean);
+      for (const el of cands) {
+        const style = window.getComputedStyle(el);
+        const canScroll = /(auto|scroll)/.test(style.overflowY || "") || (el.scrollHeight - el.clientHeight > 2);
+        if (canScroll && el.scrollTop > 0) return el.id ? `#${el.id}` : el.tagName.toLowerCase();
+      }
+      const active = cands.find((el) => el.scrollHeight - el.clientHeight > 2);
+      return active ? (active.id ? `#${active.id}` : active.tagName.toLowerCase()) : "none";
+    }
+
+    function mountOrUpdateLayoutQa() {
+      if (!layoutQaEnabled) {
+        if (layoutQaEl) {
+          layoutQaEl.remove();
+          layoutQaEl = null;
+        }
+        return;
+      }
+
+      const w = window.innerWidth || 0;
+      const h = window.innerHeight || 0;
+      const bp = computeBreakpointName(w, h);
+      const tv = document.body.classList.contains("tv-ish");
+      const doc = document.documentElement;
+      const hasOverflowX = doc.scrollWidth > doc.clientWidth;
+      const scrollHost = getScrollingElementLabel();
+      const rootScroll = document.getElementById("root")?.scrollTop || 0;
+
+      if (!layoutQaEl) {
+        layoutQaEl = document.createElement("div");
+        layoutQaEl.className = "layoutQaPanel";
+        layoutQaEl.id = "layoutQaPanel";
+        document.body.appendChild(layoutQaEl);
+      }
+      layoutQaEl.classList.toggle("isOverflowing", hasOverflowX);
+      layoutQaEl.textContent = [
+        `viewport: ${w} x ${h}`,
+        `breakpoint: ${bp}`,
+        `tv-ish: ${tv ? "on" : "off"}`,
+        `scroll host: ${scrollHost}`,
+        `root scrollTop: ${Math.round(rootScroll)}`,
+        `overflow-x: ${hasOverflowX ? "WARNING" : "ok"}`,
+      ].join("\n");
+    }
+
+    function applyLayoutModeClasses() {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      const bp = computeBreakpointName(w, h);
+      const tv = isTvIshViewport();
+      document.body.classList.toggle("tv-ish", tv);
+      document.body.classList.remove("bp-sm", "bp-md", "bp-lg", "bp-xl");
+      document.body.classList.add(`bp-${bp}`);
+      mountOrUpdateLayoutQa();
+    }
+
     function renderApp() {
+      applyLayoutModeClasses();
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||
@@ -5010,6 +5031,10 @@ function mountLegacyBattleInApp() {
         root.replaceChildren(fallback);
       }
     }
+
+    window.addEventListener("resize", applyLayoutModeClasses, { passive: true });
+    window.addEventListener("orientationchange", applyLayoutModeClasses, { passive: true });
+    document.addEventListener("scroll", mountOrUpdateLayoutQa, { passive: true, capture: true });
 
     if (playerRegistry.lastPlayerId) {
       const last = playerRegistry.players.find((p) => p.id === playerRegistry.lastPlayerId);
