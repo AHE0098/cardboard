@@ -2437,6 +2437,10 @@ Screen + data architecture:
       sampleGame: null,
       selectedRunSeed: null,
       selectedReportText: "",
+      reportSearch: "",
+      reportShowOnlyDeadTurns: false,
+      reportCompactActions: true,
+      reportExpandedTurns: {},
       lastRawResult: null,
       lastError: "",
       warnings: []
@@ -4340,27 +4344,22 @@ function mountLegacyBattleInApp() {
     lines.push(`Final Life: A=${game?.finalLife?.A ?? "?"} B=${game?.finalLife?.B ?? "?"}`);
     lines.push("");
 
-    const byTurn = new Map();
-    (game.log || []).forEach((evt) => {
-      const t = Number(evt.turn || 0);
-      if (!byTurn.has(t)) byTurn.set(t, []);
-      byTurn.get(t).push(evt);
-    });
-
-    [...byTurn.keys()].sort((a, b) => a - b).forEach((turn) => {
-      lines.push(`Turn ${turn}`);
-      const events = byTurn.get(turn) || [];
-      events.forEach((evt) => {
-        if (evt.type === "turn_start") lines.push(`  - ${evt.player} turn starts`);
-        else if (evt.type === "draw") lines.push(`  - ${evt.player} draws ${evt.card}`);
-        else if (evt.type === "play_land") lines.push(`  - ${evt.player} plays land ${evt.card}`);
-        else if (evt.type === "cast_creature") lines.push(`  - ${evt.player} casts ${evt.card} (cost ${evt.cost})`);
-        else if (evt.type === "combat_start") lines.push(`  - Combat: ${evt.attacker} attacks with ${evt.attackers?.length || 0} creatures`);
-        else if (evt.type === "blocked_combat") lines.push(`  - Block: ${evt.attacker} vs ${evt.defender} (${evt.attackerDies ? "attacker dies" : "attacker lives"}, ${evt.defenderDies ? "defender dies" : "defender lives"})`);
-        else if (evt.type === "unblocked_damage") lines.push(`  - Unblocked: ${evt.attacker} deals ${evt.amount} to ${evt.playerDamaged} (life ${evt.lifeAfter})`);
-        else if (evt.type === "deck_out") lines.push(`  - ${evt.player} loses by deck-out`);
-        else if (evt.type === "game_end_life_zero") lines.push(`  - ${evt.winner} wins by reducing ${evt.loser} to 0 life`);
-        else if (evt.type === "game_end_max_turns") lines.push(`  - Game ends in draw (max turns)`);
+    const byTurn = game.turnSummaries || {};
+    Object.keys(byTurn).sort((a, b) => Number(a) - Number(b)).forEach((turnKey) => {
+      lines.push(`Turn ${turnKey}`);
+      const perPlayer = byTurn[turnKey] || {};
+      Object.keys(perPlayer).sort().forEach((player) => {
+        const row = perPlayer[player] || {};
+        lines.push(`  ${player}`);
+        ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"].forEach((phase) => {
+          const actions = row?.actionsByPhase?.[phase] || [];
+          if (!actions.length) return;
+          lines.push(`    ${phase}:`);
+          actions.forEach((evt) => lines.push(`      - ${evt.type}`));
+        });
+        const snap = row.eotSnapshot;
+        if (!snap) lines.push("    Snapshot missing");
+        else lines.push(`    EoT hand=${snap.zones.handSize} deck=${snap.zones.deckSize} grave=${snap.zones.graveyardSize} board=${snap.zones.battlefieldCount} life=${snap.life}`);
       });
       lines.push("");
     });
@@ -4368,6 +4367,30 @@ function mountLegacyBattleInApp() {
     return lines.join("\n");
   }
 
+  function simEventLabel(evt, compact) {
+    if (!evt) return "";
+    if (compact) return evt.type || "event";
+    if (evt.type === "draw") return `${evt.player} draws ${evt.card}`;
+    if (evt.type === "play_land") return `${evt.player} plays ${evt.card}`;
+    if (evt.type === "cast_creature") return `${evt.player} casts ${evt.card} (cost ${evt.cost})`;
+    if (evt.type === "combat_start") return `${evt.attacker} attacks (${evt.attackers?.length || 0})`;
+    if (evt.type === "blocked_combat") return `Block ${evt.attacker} vs ${evt.defender}`;
+    if (evt.type === "unblocked_damage") return `${evt.attacker} -> ${evt.playerDamaged} for ${evt.amount}`;
+    if (evt.type === "turn_end") return `${evt.player} end step snapshot`;
+    return evt.type || "event";
+  }
+
+  function buildStatusPairs(game) {
+    const out = [];
+    const turns = game?.turnSummaries || {};
+    Object.keys(turns).sort((a, b) => Number(a) - Number(b)).forEach((turnKey) => {
+      const perPlayer = turns[turnKey] || {};
+      Object.keys(perPlayer).sort().forEach((player) => {
+        out.push({ turn: Number(turnKey), player, summary: perPlayer[player] });
+      });
+    });
+    return out;
+  }
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
@@ -4602,6 +4625,7 @@ function mountLegacyBattleInApp() {
       const winRateB = sum.games ? ((sum.winsB / sum.games) * 100).toFixed(2) : "0.00";
       const kpis = document.createElement("div");
       kpis.className = "simKpis";
+      const turn1Avg = sum?.eotAveragesByTurn?.["1"];
       [
         `Games: ${sum.games}`,
         `A wins: ${sum.winsA} (${winRateA}%)`,
@@ -4609,6 +4633,8 @@ function mountLegacyBattleInApp() {
         `Draws: ${sum.draws}`,
         `Avg turns: ${Number(sum.avgTurns || 0).toFixed(2)}`,
         `Median turns: ${sum.medianTurns}`,
+        `T1 EoT hand avg: ${turn1Avg ? Number(turn1Avg.avgHandSize || 0).toFixed(2) : "n/a"}`,
+        `T1 dead-turn rate: ${sum?.deadTurnRateByTurn?.["1"] != null ? `${(Number(sum.deadTurnRateByTurn["1"]) * 100).toFixed(1)}%` : "n/a"}`,
         `Elapsed: ${simulatorState.elapsedMs}ms`
       ].forEach((txt) => {
         const chip = document.createElement("div");
@@ -4671,6 +4697,7 @@ function mountLegacyBattleInApp() {
           if (!resp.ok || !data?.ok) {
             simulatorState.lastError = data?.error || `HTTP ${resp.status}`;
           } else {
+            simulatorState.sampleGame = data.sampleGame || null;
             simulatorState.selectedReportText = formatSimGameReport(data.sampleGame, {
               deckAName: deckA?.name || simulatorState.deckAId,
               deckBName: deckB?.name || simulatorState.deckBId
@@ -4683,10 +4710,132 @@ function mountLegacyBattleInApp() {
         panel.appendChild(runSelWrap);
       }
 
-      const pre = document.createElement("pre");
-      pre.className = "simReport";
-      pre.textContent = simulatorState.selectedReportText || "Run a simulation to view report.";
-      panel.appendChild(pre);
+      const reportTools = document.createElement("div");
+      reportTools.className = "simReportTools";
+      const search = document.createElement("input");
+      search.className = "menuInput";
+      search.placeholder = "Search actions/status";
+      search.value = simulatorState.reportSearch || "";
+      search.oninput = () => { simulatorState.reportSearch = search.value; renderApp(); };
+      const deadOnly = document.createElement("label");
+      deadOnly.className = "zoneMeta";
+      const deadChk = document.createElement("input");
+      deadChk.type = "checkbox";
+      deadChk.checked = !!simulatorState.reportShowOnlyDeadTurns;
+      deadChk.onchange = () => { simulatorState.reportShowOnlyDeadTurns = deadChk.checked; renderApp(); };
+      deadOnly.append(deadChk, document.createTextNode(" Dead turns only"));
+      const compactOnly = document.createElement("label");
+      compactOnly.className = "zoneMeta";
+      const compactChk = document.createElement("input");
+      compactChk.type = "checkbox";
+      compactChk.checked = !!simulatorState.reportCompactActions;
+      compactChk.onchange = () => { simulatorState.reportCompactActions = compactChk.checked; renderApp(); };
+      compactOnly.append(compactChk, document.createTextNode(" Compact actions"));
+      reportTools.append(search, deadOnly, compactOnly);
+      panel.appendChild(reportTools);
+
+      const report = document.createElement("div");
+      report.className = "simStatusReport";
+      const pairs = buildStatusPairs(simulatorState.sampleGame || {});
+      const searchNeedle = String(simulatorState.reportSearch || "").trim().toLowerCase();
+      const filteredPairs = pairs.filter((pair) => {
+        const snap = pair.summary?.eotSnapshot;
+        if (simulatorState.reportShowOnlyDeadTurns && !snap?.flags?.deadTurn) return false;
+        if (!searchNeedle) return true;
+        const hay = JSON.stringify(pair.summary || {}).toLowerCase();
+        return hay.includes(searchNeedle);
+      });
+
+      if (!filteredPairs.length) {
+        const empty = document.createElement("div");
+        empty.className = "zoneMeta";
+        empty.textContent = "No turn rows match current filters.";
+        report.appendChild(empty);
+      } else {
+        filteredPairs.forEach((pair) => {
+          const key = `${pair.turn}:${pair.player}`;
+          const row = document.createElement("section");
+          row.className = "simTurnRow";
+          const head = document.createElement("button");
+          head.className = "simTurnHead";
+          head.type = "button";
+          const snap = pair.summary?.eotSnapshot;
+          head.textContent = `Turn ${pair.turn} • ${pair.player} • ${snap?.flags?.deadTurn ? "dead turn" : "active"}`;
+          head.onclick = () => {
+            simulatorState.reportExpandedTurns[key] = !simulatorState.reportExpandedTurns[key];
+            renderApp();
+          };
+          row.appendChild(head);
+
+          const grid = document.createElement("div");
+          grid.className = "simTurnGrid";
+
+          const left = document.createElement("div");
+          left.className = "simTurnCol";
+          left.innerHTML = '<h4>New Actions</h4>';
+          ["DRAW_STEP", "MAIN_PHASE", "COMBAT_STEP", "END_STEP"].forEach((phase) => {
+            const actions = pair.summary?.actionsByPhase?.[phase] || [];
+            if (!actions.length) return;
+            const phaseEl = document.createElement("div");
+            phaseEl.className = "simPhaseGroup";
+            const title = document.createElement("div");
+            title.className = "zoneMeta";
+            title.textContent = phase.replace("_", " ");
+            phaseEl.appendChild(title);
+            const ul = document.createElement("ul");
+            actions.forEach((evt) => {
+              const li = document.createElement("li");
+              li.textContent = simEventLabel(evt, !!simulatorState.reportCompactActions);
+              ul.appendChild(li);
+            });
+            phaseEl.appendChild(ul);
+            left.appendChild(phaseEl);
+          });
+
+          const right = document.createElement("div");
+          right.className = "simTurnCol";
+          right.innerHTML = '<h4>End-of-Turn Status</h4>';
+          if (!snap) {
+            const miss = document.createElement("div");
+            miss.className = "dbWarning";
+            miss.textContent = "Snapshot missing";
+            right.appendChild(miss);
+          } else {
+            const chips = document.createElement("div");
+            chips.className = "simKpis";
+            [
+              `Life ${snap.life}`,
+              `Hand ${snap.zones.handSize}`,
+              `Deck ${snap.zones.deckSize}`,
+              `Grave ${snap.zones.graveyardSize}`,
+              `Board ${snap.zones.battlefieldCount}`,
+              `Power ${snap.combat.totalCreaturePower}`,
+              `Mana ${snap.tempo.manaSpent}/${snap.tempo.manaAvailable}`
+            ].forEach((txt) => {
+              const chip = document.createElement("div");
+              chip.className = "dbChip";
+              chip.textContent = txt;
+              chips.appendChild(chip);
+            });
+            right.appendChild(chips);
+
+            const details = document.createElement("details");
+            details.open = !!simulatorState.reportExpandedTurns[key];
+            const summary = document.createElement("summary");
+            summary.textContent = "Show details";
+            const pre = document.createElement("pre");
+            pre.className = "simReport";
+            pre.textContent = JSON.stringify(snap, null, 2);
+            details.append(summary, pre);
+            right.appendChild(details);
+          }
+
+          grid.append(left, right);
+          row.appendChild(grid);
+          report.appendChild(row);
+        });
+      }
+      panel.appendChild(report);
     }
 
     wrap.appendChild(panel);
