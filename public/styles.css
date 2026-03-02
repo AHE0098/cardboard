@@ -2035,22 +2035,3 @@ body.tv-ish .inspectorCard{
 @media (max-width: 900px){
   .simulatorRoot .simTurnGrid{ grid-template-columns: 1fr; }
 }
-
-
-/* Simulator scroll-chain fix: keep .simWrap as the single vertical scroll host. */
-.simulatorView{
-  min-height:0;
-  flex:1;
-  justify-content: flex-start !important;
-}
-.simulatorView .simWrap{
-  width: min(980px, 96vw);
-  max-width: min(980px, 96vw);
-  min-height: 0;
-  height: 100%;
-  max-height: 100%;
-  align-self: stretch;
-  flex: 1 1 auto;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
