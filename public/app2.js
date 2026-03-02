@@ -4469,6 +4469,8 @@ function mountLegacyBattleInApp() {
 
     function renderApp() {
       applyLayoutModeClasses();
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
+      document.body.classList.toggle("deckbuilder-active", uiScreen === "mode" && appMode === "deckbuilder");
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||
