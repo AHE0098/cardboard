@@ -384,6 +384,11 @@ function createServer() {
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
       const summoningSickness = String(req.query.summoningSickness || "0") === "1";
+      const smartBlocking = String(req.query.smartBlocking || "0") === "1";
+      const smartAttacking = String(req.query.smartAttacking || "0") === "1";
+      const aiDebugDecisions = String(req.query.aiDebugDecisions || "0") === "1";
+      const attackCertainty = parsePositiveInt(req.query.attackCertainty, 100, { min: 0, max: 100 });
+      const defendCertainty = parsePositiveInt(req.query.defendCertainty, 100, { min: 0, max: 100 });
 
       const { deckA, deckB } = buildSimDecks(deckMode);
       const config = {
@@ -393,6 +398,15 @@ function createServer() {
         devAssertions: true,
         rules: {
           summoningSickness
+        },
+        ai: {
+          smartBlocking,
+          smartAttacking,
+          debugDecisions: aiDebugDecisions,
+          certainty: {
+            attack: attackCertainty,
+            defend: defendCertainty
+          }
         }
       };
 
@@ -420,6 +434,15 @@ function createServer() {
           logMode,
           rules: {
             summoningSickness
+          },
+          ai: {
+            smartBlocking,
+            smartAttacking,
+            debugDecisions: aiDebugDecisions,
+            certainty: {
+              attack: attackCertainty,
+              defend: defendCertainty
+            }
           }
         },
         sampleGame: {
@@ -491,6 +514,11 @@ function createServer() {
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
       const summoningSickness = String(req.query.summoningSickness || "0") === "1";
+      const smartBlocking = String(req.query.smartBlocking || "0") === "1";
+      const smartAttacking = String(req.query.smartAttacking || "0") === "1";
+      const aiDebugDecisions = String(req.query.aiDebugDecisions || "0") === "1";
+      const attackCertainty = parsePositiveInt(req.query.attackCertainty, 100, { min: 0, max: 100 });
+      const defendCertainty = parsePositiveInt(req.query.defendCertainty, 100, { min: 0, max: 100 });
 
       const { deckA, deckB } = buildSimDecks(deckMode);
       const config = {
@@ -500,6 +528,15 @@ function createServer() {
         devAssertions: true,
         rules: {
           summoningSickness
+        },
+        ai: {
+          smartBlocking,
+          smartAttacking,
+          debugDecisions: aiDebugDecisions,
+          certainty: {
+            attack: attackCertainty,
+            defend: defendCertainty
+          }
         }
       };
 
@@ -517,6 +554,15 @@ function createServer() {
           logMode,
           rules: {
             summoningSickness
+          },
+          ai: {
+            smartBlocking,
+            smartAttacking,
+            debugDecisions: aiDebugDecisions,
+            certainty: {
+              attack: attackCertainty,
+              defend: defendCertainty
+            }
           }
         },
         sampleGame: {

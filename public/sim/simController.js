@@ -103,20 +103,52 @@
     logField.append(logLabel, logSelect);
     numericRow.appendChild(logField);
 
-    const ruleField = document.createElement("div");
-    ruleField.className = "simField";
-    const summoningRuleLabel = document.createElement("label");
-    summoningRuleLabel.className = "zoneMeta";
-    const summoningRuleInput = document.createElement("input");
-    summoningRuleInput.type = "checkbox";
-    summoningRuleInput.checked = !!simulatorState.summoningSickness;
-    summoningRuleInput.onchange = () => {
-      simulatorState.summoningSickness = !!summoningRuleInput.checked;
-      persistPlayerSaveDebounced();
-    };
-    summoningRuleLabel.append(summoningRuleInput, document.createTextNode(" Summoning Sickness"));
-    ruleField.appendChild(summoningRuleLabel);
-    numericRow.appendChild(ruleField);
+    function appendRuleToggle(labelText, key) {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!simulatorState[key];
+      input.onchange = () => {
+        simulatorState[key] = !!input.checked;
+        persistPlayerSaveDebounced();
+      };
+      label.append(input, document.createTextNode(` ${labelText}`));
+      field.appendChild(label);
+      numericRow.appendChild(field);
+    }
+
+    function appendCertaintySlider(labelText, key) {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = `${labelText} certainty (${simulatorState[key]}%)`;
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.type = "range";
+      input.min = "0";
+      input.max = "100";
+      input.step = "1";
+      input.value = String(simulatorState[key]);
+      input.oninput = () => {
+        const v = Math.max(0, Math.min(100, Math.floor(Number(input.value) || 0)));
+        simulatorState[key] = v;
+        label.textContent = `${labelText} certainty (${v}%)`;
+        persistPlayerSaveDebounced();
+      };
+      field.append(label, input);
+      numericRow.appendChild(field);
+    }
+
+    appendRuleToggle("Summoning Sickness", "summoningSickness");
+    appendRuleToggle("SMART BLOCKING", "smartBlocking");
+    appendRuleToggle("SMART ATTACKING", "smartAttacking");
+    appendRuleToggle("AI Debug Decisions", "aiDebugDecisions");
+    appendCertaintySlider("Attack", "attackCertainty");
+    appendCertaintySlider("Defend", "defendCertainty");
 
     controls.appendChild(numericRow);
     panel.appendChild(controls);
@@ -153,7 +185,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
+        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
         const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
         const data = await resp.json();
         if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -314,7 +346,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
+          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;
