@@ -1322,6 +1322,29 @@ body.isFocus #topPiles{
   flex-direction:column;
   gap:10px;
 }
+
+.simulatorRoot{
+  min-height: 0;
+  height: 100%;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.simulatorPanel{
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.simulatorReportScroll{
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
 .menuBtn{
   border:1px solid var(--border);
   background:rgba(255,255,255,.04);
