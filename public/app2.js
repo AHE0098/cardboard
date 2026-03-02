@@ -4416,8 +4416,12 @@ function mountLegacyBattleInApp() {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
     wrap.className = "view";
+    wrap.style.justifyContent = "flex-start";
+    wrap.style.overflow = "hidden";
     const panel = document.createElement("div");
     panel.className = "menuCard simWrap";
+    panel.style.maxHeight = "100%";
+    panel.style.overflow = "auto";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
