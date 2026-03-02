@@ -2912,6 +2912,12 @@ case "TOGGLE_TAP": {
         sampleGame: null,
         selectedRunSeed: null,
         selectedReportText: "",
+        reportSearch: "",
+        reportShowOnlyDeadTurns: false,
+        reportCompactActions: true,
+        reportShowPhaseBands: true,
+        reportShowStatusCards: true,
+        reportExpandedTurns: {},
         lastRawResult: null,
         lastError: "",
         warnings: []
@@ -4652,6 +4658,14 @@ function mountLegacyBattleInApp() {
         kpis.appendChild(chip);
       });
       panel.appendChild(kpis);
+
+      const winPoints = buildWinrateCheckpoints(simulatorState.runsMeta, simulatorState.iterations);
+      if (winPoints.length >= 2) {
+        const chartWrap = document.createElement("div");
+        chartWrap.className = "simChartWrap";
+        chartWrap.innerHTML = `<div class="simChartHead"><strong>Winrate by iteration count</strong><div class="simLegend"><span class="simLegendA">A</span><span class="simLegendB">B</span></div></div>${renderWinrateSvg(winPoints)}`;
+        panel.appendChild(chartWrap);
+      }
 
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
