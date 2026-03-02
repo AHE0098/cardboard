@@ -25,6 +25,11 @@ function median(values) {
   return sorted[mid];
 }
 
+function average(arr) {
+  if (!arr.length) return 0;
+  return arr.reduce((sum, n) => sum + n, 0) / arr.length;
+}
+
 function aggregateResults(results) {
   const out = {
     games: results.length,
@@ -35,10 +40,13 @@ function aggregateResults(results) {
     medianTurns: 0,
     totalCreaturesPlayed: { A: 0, B: 0 },
     totalCreaturesDied: { A: 0, B: 0 },
-    cardStats: { A: {}, B: {} }
+    cardStats: { A: {}, B: {} },
+    eotAveragesByTurn: {},
+    deadTurnRateByTurn: {}
   };
 
   const turns = [];
+  const turnBuckets = {};
 
   for (const game of results) {
     turns.push(game.turns);
@@ -50,6 +58,18 @@ function aggregateResults(results) {
     out.totalCreaturesPlayed.B += game.stats.players[1].creaturesPlayed;
     out.totalCreaturesDied.A += game.stats.players[0].creaturesDied;
     out.totalCreaturesDied.B += game.stats.players[1].creaturesDied;
+
+    Object.entries(game.turnSummaries || {}).forEach(([turnKey, perPlayer]) => {
+      turnBuckets[turnKey] ||= { hand: [], battlefield: [], deadTurns: 0, totalSnapshots: 0 };
+      Object.values(perPlayer || {}).forEach((entry) => {
+        const snap = entry?.eotSnapshot;
+        if (!snap) return;
+        turnBuckets[turnKey].hand.push(Number(snap?.zones?.handSize || 0));
+        turnBuckets[turnKey].battlefield.push(Number(snap?.zones?.battlefieldCount || 0));
+        turnBuckets[turnKey].totalSnapshots += 1;
+        if (snap?.flags?.deadTurn) turnBuckets[turnKey].deadTurns += 1;
+      });
+    });
 
     [0, 1].forEach((idx) => {
       const sideKey = idx === 0 ? 'A' : 'B';
@@ -79,6 +99,17 @@ function aggregateResults(results) {
   const totalTurns = turns.reduce((sum, t) => sum + t, 0);
   out.avgTurns = out.games ? totalTurns / out.games : 0;
   out.medianTurns = median(turns);
+
+  Object.entries(turnBuckets).forEach(([turnKey, bucket]) => {
+    out.eotAveragesByTurn[turnKey] = {
+      avgHandSize: average(bucket.hand),
+      avgBattlefieldCount: average(bucket.battlefield),
+      samples: bucket.totalSnapshots
+    };
+    out.deadTurnRateByTurn[turnKey] = bucket.totalSnapshots
+      ? bucket.deadTurns / bucket.totalSnapshots
+      : 0;
+  });
 
   return out;
 }
