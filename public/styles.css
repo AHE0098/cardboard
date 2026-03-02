@@ -458,7 +458,9 @@ body{
 /* hand zone container */
 .dropArea.zone-hand{
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 22px 2px 6px;   /* compact */
   min-height: 150px;
 
@@ -1324,6 +1326,7 @@ body.isFocus #topPiles{
 }
 
 .simulatorRoot{
+  flex: 1 1 auto;
   min-height: 0;
   height: 100%;
   justify-content: flex-start;
@@ -1334,15 +1337,16 @@ body.isFocus #topPiles{
   flex: 1 1 auto;
   min-height: 0;
   max-height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .simulatorReportScroll{
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
+  flex: 0 0 auto;
+  min-height: fit-content;
+  overflow: visible;
   padding-right: 2px;
 }
 .menuBtn{
