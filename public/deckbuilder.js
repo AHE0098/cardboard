@@ -838,8 +838,12 @@ const pool = getDeckbuilderCardPool(cardsSource);
       workingState.settings.targetValueSum = Math.round(avgValue * Math.max(0, workingState.settings.deckSize - workingState.settings.lands));
     }
 
+    const shell = document.createElement("div");
+    shell.className = "deckbuilderShell";
+
     const wrap = document.createElement("div");
     wrap.className = "deckbuilderWrap dbPanel";
+    wrap.id = "deck-scroll-root";
 
     const controls = document.createElement("div");
     controls.className = "menuCard dbControls";
@@ -1484,7 +1488,28 @@ Nonlands: ${summary.nonlands}`);
 
     out.append(savedWrap);
     wrap.appendChild(out);
-    rootNode.replaceChildren(wrap);
+    shell.appendChild(wrap);
+    rootNode.replaceChildren(shell);
+
+    requestAnimationFrame(() => {
+      const scrollRoot = rootNode.querySelector("#deck-scroll-root");
+      if (!scrollRoot) return;
+      const cs = window.getComputedStyle(scrollRoot);
+      const canOverflow = scrollRoot.scrollHeight > scrollRoot.clientHeight;
+      if (!canOverflow || cs.overflowY === "visible") return;
+      const prev = scrollRoot.scrollTop;
+      scrollRoot.scrollTop = prev + 1;
+      const moved = scrollRoot.scrollTop !== prev;
+      scrollRoot.scrollTop = prev;
+      if (!moved) {
+        console.warn("[deckbuilder] overflow content but non-scrollable", {
+          id: "deck-scroll-root",
+          overflowY: cs.overflowY,
+          clientHeight: scrollRoot.clientHeight,
+          scrollHeight: scrollRoot.scrollHeight
+        });
+      }
+    });
   }
 
 
