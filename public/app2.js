@@ -4415,13 +4415,10 @@ function mountLegacyBattleInApp() {
   function renderSimulatorMode(rootNode) {
     subtitle.textContent = `${session.playerName} • simulator`;
     const wrap = document.createElement("div");
-    wrap.className = "view";
+    wrap.className = "view simulatorRoot";
     wrap.style.justifyContent = "flex-start";
-    wrap.style.overflow = "hidden";
     const panel = document.createElement("div");
-    panel.className = "menuCard simWrap";
-    panel.style.maxHeight = "100%";
-    panel.style.overflow = "auto";
+    panel.className = "menuCard simWrap simulatorPanel";
     panel.innerHTML = "<h2>Simulator</h2>";
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
@@ -4694,32 +4691,7 @@ function mountLegacyBattleInApp() {
     reportScroll.className = "simulatorReportScroll";
     panel.appendChild(reportScroll);
 
-    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
-      const nodes = [
-        ["html", document.documentElement],
-        ["body", document.body],
-        [".app", document.querySelector(".app")],
-        ["#root", rootNode],
-        [".simulatorRoot", wrap],
-        [".simulatorPanel", panel],
-        [".simulatorReportScroll", reportScroll]
-      ].filter(([, el]) => !!el);
-      console.groupCollapsed("[sim-layout]");
-      nodes.forEach(([name, el]) => {
-        const cs = getComputedStyle(el);
-        const r = el.getBoundingClientRect();
-        console.log(name, {
-          h: Math.round(r.height),
-          sh: el.scrollHeight,
-          ch: el.clientHeight,
-          overflowY: cs.overflowY,
-          minHeight: cs.minHeight,
-          maxHeight: cs.maxHeight,
-          position: cs.position
-        });
-      });
-      console.groupEnd();
-    }
+    const isSimLayoutDebug = window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1";
 
     if (simulatorState.isRunning) {
       const running = document.createElement("div");
@@ -4962,10 +4934,36 @@ function mountLegacyBattleInApp() {
       reportScroll.appendChild(report);
     }
 
-    if (window.localStorage?.getItem("SIM_LAYOUT_DEBUG") === "1") {
+    if (isSimLayoutDebug) {
+      const sentinel = document.createElement("div");
+      sentinel.id = "sim-scroll-sentinel";
+      sentinel.style.cssText = "height:1px;opacity:0;pointer-events:none;";
+      reportScroll.appendChild(sentinel);
       const cs = getComputedStyle(reportScroll);
       const shouldScroll = reportScroll.scrollHeight > reportScroll.clientHeight;
-      console.assert(!shouldScroll || /(auto|scroll)/.test(cs.overflowY || ""), "[sim-layout] report scroller overflow misconfigured");
+      if (shouldScroll && !/(auto|scroll)/.test(cs.overflowY || "")) {
+        const ancestors = [];
+        let node = reportScroll;
+        while (node) {
+          const st = getComputedStyle(node);
+          ancestors.push({
+            tag: node.tagName.toLowerCase(),
+            id: node.id || "",
+            className: node.className || "",
+            overflowY: st.overflowY,
+            height: st.height,
+            minHeight: st.minHeight,
+            maxHeight: st.maxHeight,
+            position: st.position,
+            transform: st.transform,
+            clientHeight: node.clientHeight,
+            scrollHeight: node.scrollHeight
+          });
+          if (node === document.documentElement) break;
+          node = node.parentElement;
+        }
+        console.error("[sim-layout] report scroller overflow misconfigured", ancestors);
+      }
     }
 
     wrap.appendChild(panel);
@@ -5109,6 +5107,7 @@ function mountLegacyBattleInApp() {
 
     function renderApp() {
       applyLayoutModeClasses();
+      document.body.classList.toggle("simulator-active", uiScreen === "mode" && appMode === "simulator");
       topBackBtn.style.visibility = uiScreen === "playerMenu" ? "hidden" : "visible";
       const usingLegacyUI =
         (uiScreen === "mode" && appMode === "sandbox") ||

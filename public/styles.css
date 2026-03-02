@@ -1324,16 +1324,15 @@ body.isFocus #topPiles{
 }
 
 .simulatorRoot{
+  flex: 1 1 auto;
   min-height: 0;
   height: 100%;
   justify-content: flex-start;
-  overflow: hidden;
 }
 
 .simulatorPanel{
   flex: 1 1 auto;
   min-height: 0;
-  max-height: 100%;
   overflow: hidden;
 }
 
@@ -1343,6 +1342,7 @@ body.isFocus #topPiles{
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding-right: 2px;
 }
 .menuBtn{
@@ -1789,6 +1789,10 @@ html, body{
   overflow: hidden;
 }
 
+body.simulator-active{
+  overflow-y: auto;
+}
+
 body{
   font-size: var(--font-base);
   line-height: 1.35;
@@ -1809,6 +1813,10 @@ body{
     max(var(--app-bottom-pad), env(safe-area-inset-bottom))
     max(var(--app-side-pad), env(safe-area-inset-left));
   overflow: hidden;
+}
+
+body.simulator-active .app{
+  overflow: visible;
 }
 
 .title{ font-size: var(--title-size); }
