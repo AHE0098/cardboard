@@ -16,7 +16,7 @@ PASTE R OUTPUT HERE:
 window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
   {
   id: "r_storm_1337",
-  name: "Storm 1337",
+  name: "A",
   author: "R export",
   createdAt: "2026-02-22",
   notes: "seed 1337",
@@ -56,13 +56,13 @@ window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
     { cardId: "2067_3", qty: 1 },
     { cardId: "2069_4", qty: 1 },
     { cardId: "2087_8", qty: 1 },
-    { cardId: "2089_5", qty: 1 },
-    { cardId: "MANUAL_1_1", qty: 1 },
-    { cardId: "MANUAL_1_2", qty: 1 },
-    { cardId: "MANUAL_1_3", qty: 1 },
-    { cardId: "MANUAL_2_1", qty: 1 },
-    { cardId: "MANUAL_2_2", qty: 1 },
-    { cardId: "MANUAL_2_3", qty: 1 }
+    { cardId: "2089_5", qty: 1 } //,
+ //   { cardId: "MANUAL_1_1", qty: 1 },
+ //   { cardId: "MANUAL_1_2", qty: 1 },
+ //   { cardId: "MANUAL_1_3", qty: 1 },
+ //   { cardId: "MANUAL_2_1", qty: 1 },
+ //   { cardId: "MANUAL_2_2", qty: 1 },
+ //   { cardId: "MANUAL_2_3", qty: 1 }
   ],
   embeddedCards: {
     "102_1": { name: "Island", color: "U", cost: "", power: null, toughness: null, value: null, type: "basic_land" },
@@ -81,19 +81,19 @@ window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
     "104_5": { name: "Mountain", color: "R", cost: "", power: null, toughness: null, value: null, type: "basic_land" },
     "104_6": { name: "Mountain", color: "R", cost: "", power: null, toughness: null, value: null, type: "basic_land" },
     "104_7": { name: "Mountain", color: "R", cost: "", power: null, toughness: null, value: null, type: "basic_land" },
-    "104_8": { name: "Mountain", color: "R", cost: "", power: null, toughness: null, value: null, type: "basic_land" },
-    "MANUAL_1_1": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
-    "MANUAL_1_2": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
-    "MANUAL_1_3": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
-    "MANUAL_2_1": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" },
-    "MANUAL_2_2": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" },
-    "MANUAL_2_3": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" }
+    "104_8": { name: "Mountain", color: "R", cost: "", power: null, toughness: null, value: null, type: "basic_land" } //,
+//    "MANUAL_1_1": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
+ //   "MANUAL_1_2": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
+  //  "MANUAL_1_3": { name: "Storm", color: "", cost: "2", power: null, toughness: null, value: null, type: "instant" },
+   // "MANUAL_2_1": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" },
+   // "MANUAL_2_2": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" },
+   // "MANUAL_2_3": { name: "Storm", color: "", cost: "1", power: null, toughness: null, value: null, type: "instant" }
   }
   },
 
   {
   id: "r_mid_9001",
-  name: "Mid 9001",
+  name: "B",
   author: "R export",
   createdAt: "2026-02-22",
   notes: "seed 9001",

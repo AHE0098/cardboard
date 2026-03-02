@@ -2439,9 +2439,7 @@ Screen + data architecture:
       selectedReportText: "",
       lastRawResult: null,
       lastError: "",
-      warnings: [],
-      ruleStamp: null,
-      rulesText: ""
+      warnings: []
     };
 
     let battleState = null;
@@ -4334,14 +4332,40 @@ function mountLegacyBattleInApp() {
   }
 
   function formatSimGameReport(game, meta = {}) {
-    if (typeof window.formatSimulationReport === "function") {
-      return window.formatSimulationReport(game, {
-        ...meta,
-        rulePath: simulatorState?.ruleStamp?.path,
-        ruleHash: simulatorState?.ruleStamp?.hash
+    if (!game) return "No game selected.";
+    const lines = [];
+    lines.push(`Simulation Report`);
+    lines.push(`Seed: ${game.seed} | Winner: ${game.winner} | Turns: ${game.turns} | End: ${game.endedReason}`);
+    lines.push(`Deck A: ${meta.deckAName || "A"} | Deck B: ${meta.deckBName || "B"}`);
+    lines.push(`Final Life: A=${game?.finalLife?.A ?? "?"} B=${game?.finalLife?.B ?? "?"}`);
+    lines.push("");
+
+    const byTurn = new Map();
+    (game.log || []).forEach((evt) => {
+      const t = Number(evt.turn || 0);
+      if (!byTurn.has(t)) byTurn.set(t, []);
+      byTurn.get(t).push(evt);
+    });
+
+    [...byTurn.keys()].sort((a, b) => a - b).forEach((turn) => {
+      lines.push(`Turn ${turn}`);
+      const events = byTurn.get(turn) || [];
+      events.forEach((evt) => {
+        if (evt.type === "turn_start") lines.push(`  - ${evt.player} turn starts`);
+        else if (evt.type === "draw") lines.push(`  - ${evt.player} draws ${evt.card}`);
+        else if (evt.type === "play_land") lines.push(`  - ${evt.player} plays land ${evt.card}`);
+        else if (evt.type === "cast_creature") lines.push(`  - ${evt.player} casts ${evt.card} (cost ${evt.cost})`);
+        else if (evt.type === "combat_start") lines.push(`  - Combat: ${evt.attacker} attacks with ${evt.attackers?.length || 0} creatures`);
+        else if (evt.type === "blocked_combat") lines.push(`  - Block: ${evt.attacker} vs ${evt.defender} (${evt.attackerDies ? "attacker dies" : "attacker lives"}, ${evt.defenderDies ? "defender dies" : "defender lives"})`);
+        else if (evt.type === "unblocked_damage") lines.push(`  - Unblocked: ${evt.attacker} deals ${evt.amount} to ${evt.playerDamaged} (life ${evt.lifeAfter})`);
+        else if (evt.type === "deck_out") lines.push(`  - ${evt.player} loses by deck-out`);
+        else if (evt.type === "game_end_life_zero") lines.push(`  - ${evt.winner} wins by reducing ${evt.loser} to 0 life`);
+        else if (evt.type === "game_end_max_turns") lines.push(`  - Game ends in draw (max turns)`);
       });
-    }
-    return "Report formatter unavailable.";
+      lines.push("");
+    });
+
+    return lines.join("\n");
   }
 
   function renderSimulatorMode(rootNode) {
@@ -4351,21 +4375,6 @@ function mountLegacyBattleInApp() {
     const panel = document.createElement("div");
     panel.className = "menuCard simWrap";
     panel.innerHTML = "<h2>Simulator</h2>";
-
-    if (!simulatorState.ruleStamp) {
-      fetch('/api/sim/rules').then((r) => r.json()).then((data) => {
-        if (data?.ok) {
-          simulatorState.ruleStamp = {
-            path: data.rules.path,
-            hash: data.rules.hash,
-            mtimeMs: data.rules.mtimeMs
-          };
-          simulatorState.rulesText = String(data.rules.text || '');
-          renderApp();
-        }
-      }).catch(() => {});
-    }
-
 
     const allDecks = typeof window.getAllAvailableDecks === "function"
       ? window.getAllAvailableDecks()
@@ -4528,7 +4537,6 @@ function mountLegacyBattleInApp() {
         simulatorState.sampleGame = data.sampleGame || null;
         simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
         simulatorState.lastRawResult = data;
-        simulatorState.ruleStamp = data.ruleStamp || simulatorState.ruleStamp;
         simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
         simulatorState.selectedReportText = formatSimGameReport(data.sampleGame, {
           deckAName: deckA.name || simulatorState.deckAId,
@@ -4586,25 +4594,6 @@ function mountLegacyBattleInApp() {
       err.className = "dbWarning";
       err.textContent = simulatorState.lastError;
       panel.appendChild(err);
-    }
-
-    if (simulatorState.ruleStamp) {
-      const rulesMeta = document.createElement('div');
-      rulesMeta.className = 'zoneMeta';
-      rulesMeta.textContent = `Rules: ${simulatorState.ruleStamp.path} • ${simulatorState.ruleStamp.hash}`;
-      panel.appendChild(rulesMeta);
-    }
-
-    if (simulatorState.rulesText) {
-      const rulesDetails = document.createElement('details');
-      const sm = document.createElement('summary');
-      sm.textContent = 'View canonical simulation rules';
-      const pre = document.createElement('pre');
-      pre.className = 'simReport';
-      pre.style.maxHeight = '220px';
-      pre.textContent = simulatorState.rulesText;
-      rulesDetails.append(sm, pre);
-      panel.appendChild(rulesDetails);
     }
 
     if (simulatorState.summary) {

@@ -1,14 +1,6 @@
 const { chooseCreaturesToCast, chooseBlocks } = require('./ai');
 const { aggregateResults } = require('./stats');
 
-const PHASES = {
-  TURN_START: 'TURN_START',
-  DRAW_STEP: 'DRAW_STEP',
-  MAIN_PHASE: 'MAIN_PHASE',
-  COMBAT_STEP: 'COMBAT_STEP',
-  END_STEP: 'END_STEP'
-};
-
 function mulberry32(seed) {
   let t = seed >>> 0;
   return function rng() {
@@ -42,14 +34,17 @@ function assertValidCard(card, i) {
 }
 
 function cloneDeckWithValidation(deck, sideLabel) {
-  if (!Array.isArray(deck) || !deck.length) throw new Error(`Deck ${sideLabel} must be a non-empty array`);
+  if (!Array.isArray(deck) || !deck.length) {
+    throw new Error(`Deck ${sideLabel} must be a non-empty array`);
+  }
   const ids = new Set();
-  return deck.map((card, i) => {
+  const copy = deck.map((card, i) => {
     assertValidCard(card, i);
     if (ids.has(card.id)) throw new Error(`Deck ${sideLabel} contains duplicate card id: ${card.id}`);
     ids.add(card.id);
     return { ...card };
   });
+  return copy;
 }
 
 function createPlayer(deck, startingLife, name) {
@@ -67,7 +62,13 @@ function createPlayer(deck, startingLife, name) {
 }
 
 function createEmptyCardStats() {
-  return { timesDrawn: 0, timesPlayed: 0, timesDied: 0, killsMade: 0, damageToPlayer: 0 };
+  return {
+    timesDrawn: 0,
+    timesPlayed: 0,
+    timesDied: 0,
+    killsMade: 0,
+    damageToPlayer: 0
+  };
 }
 
 function ensureCardStats(playerStats, cardName) {
@@ -85,72 +86,29 @@ function createGameStats() {
 }
 
 function logEvent(game, event) {
-  const withMeta = {
-    gameId: game.gameId,
-    turn: game.turn,
-    activePlayerId: game.players[game.activePlayerIndex]?.name || 'A',
-    phase: game.currentPhase || null,
-    logicalTs: game.logicalTs++,
-    ...event
-  };
-  game.log.push(withMeta);
+  game.log.push(event);
 }
 
-function recordViolation(game, message, extra = {}) {
-  const payload = { turn: game.turn, message, ...extra };
-  game.violations.push(payload);
-  logEvent(game, { eventType: 'violation', ...payload });
-  if (game.config.devAssertions) throw new Error(message);
-}
-
-function drawCard(game, playerIndex, context = {}) {
+function drawCard(game, playerIndex) {
   const player = game.players[playerIndex];
-  const source = context.source || 'CARD_EFFECT';
-
-  if (source === 'BASE_DRAW') {
-    const slot = game.baseDrawDoneThisTurn[player.name];
-    if (slot) {
-      return recordViolation(
-        game,
-        `BASE_DRAW repeated in same turn for ${player.name}`,
-        { player: player.name, source }
-      );
-    }
-    game.baseDrawDoneThisTurn[player.name] = true;
-  }
-
   if (player.library.length === 0) {
     game.winner = playerIndex === 0 ? 'B' : 'A';
     game.endedReason = `deck_out:${player.name}`;
-    logEvent(game, { eventType: 'deck_out', player: player.name, source });
+    logEvent(game, { turn: game.turn, type: 'deck_out', player: player.name });
     return null;
   }
-
   const card = player.library.shift();
   player.hand.push(card);
+
   const ps = game.stats.players[playerIndex];
   ensureCardStats(ps, card.name).timesDrawn += 1;
-
-  if (!game.metrics.drawsByTurn[player.name][game.turn]) {
-    game.metrics.drawsByTurn[player.name][game.turn] = { base: 0, extra: 0 };
-  }
-  if (source === 'BASE_DRAW') game.metrics.drawsByTurn[player.name][game.turn].base += 1;
-  else game.metrics.drawsByTurn[player.name][game.turn].extra += 1;
-
-  logEvent(game, {
-    eventType: 'draw',
-    player: player.name,
-    card: card.name,
-    cardId: card.id,
-    source,
-    effectId: context.effectId || null
-  });
+  logEvent(game, { turn: game.turn, type: 'draw', player: player.name, card: card.name, cardId: card.id });
   return card;
 }
 
 function moveCardBetweenArrays(cardId, from, to) {
   const idx = from.findIndex((c) => c.id === cardId);
-  if (idx < 0) return null;
+  if (idx < 0) return false;
   const [card] = from.splice(idx, 1);
   to.push(card);
   return card;
@@ -158,39 +116,34 @@ function moveCardBetweenArrays(cardId, from, to) {
 
 function verifyConservation(game) {
   for (const player of game.players) {
-    const all = [...player.library, ...player.hand, ...player.battlefieldLands, ...player.battlefieldCreatures, ...player.graveyard];
+    const all = [
+      ...player.library,
+      ...player.hand,
+      ...player.battlefieldLands,
+      ...player.battlefieldCreatures,
+      ...player.graveyard
+    ];
     const ids = new Set();
     for (const card of all) {
-      if (ids.has(card.id)) return recordViolation(game, `Duplicate card id in zones: ${card.id}`);
+      if (ids.has(card.id)) throw new Error(`Duplicate card id in zones: ${card.id}`);
       ids.add(card.id);
     }
     if (all.length !== game.initialDeckSizes[player.name]) {
-      return recordViolation(game, `Card conservation failed for ${player.name}`);
+      throw new Error(`Card conservation failed for ${player.name}: expected ${game.initialDeckSizes[player.name]}, found ${all.length}`);
     }
-    if (player.life < 0) return recordViolation(game, `Life below 0 for ${player.name}`);
+    if (player.life < 0) throw new Error(`Life below 0 for ${player.name}`);
   }
-  return null;
-}
-
-function enterPhase(game, phase) {
-  game.currentPhase = phase;
-  game.phaseOrderByTurn[game.turn] ||= [];
-  game.phaseOrderByTurn[game.turn].push(phase);
-  logEvent(game, { eventType: 'phase_enter', phase });
 }
 
 function playMainPhase(game, playerIndex, config) {
   const player = game.players[playerIndex];
-  const startHand = player.hand.length;
   player.landsPlayedThisTurn = 0;
-  let playedAny = false;
 
   const landToPlay = player.hand.find((card) => card.type === 'land');
   if (landToPlay && player.landsPlayedThisTurn < 1) {
     moveCardBetweenArrays(landToPlay.id, player.hand, player.battlefieldLands);
     player.landsPlayedThisTurn += 1;
-    playedAny = true;
-    logEvent(game, { eventType: 'play_land', player: player.name, card: landToPlay.name, cardId: landToPlay.id });
+    logEvent(game, { turn: game.turn, type: 'play_land', player: player.name, card: landToPlay.name, cardId: landToPlay.id });
   }
 
   player.manaAvailable = player.battlefieldLands.length;
@@ -200,12 +153,12 @@ function playMainPhase(game, playerIndex, config) {
     if (creature.cost > player.manaAvailable) continue;
     moveCardBetweenArrays(creature.id, player.hand, player.battlefieldCreatures);
     player.manaAvailable -= creature.cost;
-    playedAny = true;
     const ps = game.stats.players[playerIndex];
     ps.creaturesPlayed += 1;
     ensureCardStats(ps, creature.name).timesPlayed += 1;
     logEvent(game, {
-      eventType: 'cast_creature',
+      turn: game.turn,
+      type: 'cast_creature',
       player: player.name,
       card: creature.name,
       cardId: creature.id,
@@ -213,16 +166,12 @@ function playMainPhase(game, playerIndex, config) {
     });
   }
 
-  if (!playedAny && player.hand.length === startHand) game.metrics.deadDrawTurns += 1;
-
   logEvent(game, {
-    eventType: 'main_phase_end',
+    turn: game.turn,
+    type: 'main_phase_end',
     player: player.name,
     manaSpent: spentMana,
-    manaRemaining: player.manaAvailable,
-    handSize: player.hand.length,
-    landsInPlay: player.battlefieldLands.length,
-    creaturesInPlay: player.battlefieldCreatures.length
+    manaRemaining: player.manaAvailable
   });
 
   if (config.devAssertions) verifyConservation(game);
@@ -232,13 +181,10 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   const attackerP = game.players[attackerIndex];
   const defenderP = game.players[defenderIndex];
   const attackers = attackerP.battlefieldCreatures.slice();
-
   if (attackers.length === 0) {
-    logEvent(game, { eventType: 'combat_skip', attacker: attackerP.name });
+    logEvent(game, { turn: game.turn, type: 'combat_skip', attacker: attackerP.name });
     return;
   }
-
-  if (!game.metrics.firstAttackTurn) game.metrics.firstAttackTurn = game.turn;
 
   const defenders = defenderP.battlefieldCreatures.slice();
   const blocks = chooseBlocks(attackers, defenders, config.blockScoring);
@@ -249,7 +195,8 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   const deadDefenders = new Set();
 
   logEvent(game, {
-    eventType: 'combat_start',
+    turn: game.turn,
+    type: 'combat_start',
     attacker: attackerP.name,
     defender: defenderP.name,
     attackers: attackers.map((c) => c.id),
@@ -262,9 +209,9 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
       defenderP.life = Math.max(0, defenderP.life - attacker.power);
       const aps = game.stats.players[attackerIndex];
       ensureCardStats(aps, attacker.name).damageToPlayer += attacker.power;
-      game.metrics.damageByTurn[attackerP.name][game.turn] = (game.metrics.damageByTurn[attackerP.name][game.turn] || 0) + attacker.power;
       logEvent(game, {
-        eventType: 'unblocked_damage',
+        turn: game.turn,
+        type: 'unblocked_damage',
         attacker: attacker.id,
         playerDamaged: defenderP.name,
         amount: attacker.power,
@@ -276,16 +223,28 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
     const defender = defenderById.get(defenderId);
     const attackerDies = defender.power >= attacker.toughness;
     const defenderDies = attacker.power >= defender.toughness;
+
     if (attackerDies) deadAttackers.add(attacker.id);
     if (defenderDies) deadDefenders.add(defender.id);
 
-    if (defenderDies) ensureCardStats(game.stats.players[attackerIndex], attacker.name).killsMade += 1;
-    if (attackerDies) ensureCardStats(game.stats.players[defenderIndex], defender.name).killsMade += 1;
+    if (defenderDies) {
+      const aps = game.stats.players[attackerIndex];
+      ensureCardStats(aps, attacker.name).killsMade += 1;
+    }
+    if (attackerDies) {
+      const dps = game.stats.players[defenderIndex];
+      ensureCardStats(dps, defender.name).killsMade += 1;
+    }
 
     logEvent(game, {
-      eventType: 'blocked_combat',
+      turn: game.turn,
+      type: 'blocked_combat',
       attacker: attacker.id,
       defender: defender.id,
+      attackerPower: attacker.power,
+      attackerToughness: attacker.toughness,
+      defenderPower: defender.power,
+      defenderToughness: defender.toughness,
       attackerDies,
       defenderDies
     });
@@ -293,15 +252,12 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
 
   for (const deadId of deadAttackers) {
     const deadCard = moveCardBetweenArrays(deadId, attackerP.battlefieldCreatures, attackerP.graveyard);
-    if (!deadCard) continue;
     const aps = game.stats.players[attackerIndex];
     aps.creaturesDied += 1;
     ensureCardStats(aps, deadCard.name).timesDied += 1;
   }
-
   for (const deadId of deadDefenders) {
     const deadCard = moveCardBetweenArrays(deadId, defenderP.battlefieldCreatures, defenderP.graveyard);
-    if (!deadCard) continue;
     const dps = game.stats.players[defenderIndex];
     dps.creaturesDied += 1;
     ensureCardStats(dps, deadCard.name).timesDied += 1;
@@ -310,8 +266,7 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   if (defenderP.life <= 0) {
     game.winner = attackerIndex === 0 ? 'A' : 'B';
     game.endedReason = 'life_zero';
-    if (!game.metrics.firstLethalTurn) game.metrics.firstLethalTurn = game.turn;
-    logEvent(game, { eventType: 'game_end_life_zero', loser: defenderP.name, winner: attackerP.name });
+    logEvent(game, { turn: game.turn, type: 'game_end_life_zero', loser: defenderP.name, winner: attackerP.name });
   }
 
   if (config.devAssertions) verifyConservation(game);
@@ -325,61 +280,30 @@ function newGame({ seed, deckA, deckB, config }) {
   shuffleInPlace(deckBCloned, rng);
 
   const game = {
-    gameId: `g_${seed}`,
     turn: 1,
     activePlayerIndex: 0,
     seed,
-    currentPhase: null,
-    logicalTs: 0,
-    players: [createPlayer(deckACloned, config.startingLife, 'A'), createPlayer(deckBCloned, config.startingLife, 'B')],
+    players: [
+      createPlayer(deckACloned, config.startingLife, 'A'),
+      createPlayer(deckBCloned, config.startingLife, 'B')
+    ],
     log: [],
     winner: null,
     endedReason: null,
     stats: createGameStats(),
-    initialDeckSizes: { A: deckACloned.length, B: deckBCloned.length },
-    baseDrawDoneThisTurn: { A: false, B: false },
-    phaseOrderByTurn: {},
-    violations: [],
-    config,
-    metrics: {
-      firstAttackTurn: null,
-      firstLethalTurn: null,
-      deadDrawTurns: 0,
-      drawsByTurn: { A: {}, B: {} },
-      handSizeByTurn: { A: {}, B: {} },
-      landsByTurn: { A: {}, B: {} },
-      creaturesByTurn: { A: {}, B: {} },
-      damageByTurn: { A: {}, B: {} }
+    initialDeckSizes: {
+      A: deckACloned.length,
+      B: deckBCloned.length
     }
   };
 
   for (let i = 0; i < config.startingHandSize; i += 1) {
-    if (!game.winner) drawCard(game, 0, { source: 'RULE_EFFECT', effectId: 'STARTING_HAND' });
-    if (!game.winner) drawCard(game, 1, { source: 'RULE_EFFECT', effectId: 'STARTING_HAND' });
+    if (!game.winner) drawCard(game, 0);
+    if (!game.winner) drawCard(game, 1);
   }
 
   if (config.devAssertions) verifyConservation(game);
   return game;
-}
-
-function validatePhaseOrder(game) {
-  const full = [PHASES.TURN_START, PHASES.DRAW_STEP, PHASES.MAIN_PHASE, PHASES.COMBAT_STEP, PHASES.END_STEP];
-  const combatTerminal = [PHASES.TURN_START, PHASES.DRAW_STEP, PHASES.MAIN_PHASE, PHASES.COMBAT_STEP];
-  Object.entries(game.phaseOrderByTurn).forEach(([turn, phases]) => {
-    const got = phases.join('>');
-    const ok = got === full.join('>') || got === combatTerminal.join('>');
-    if (!ok) recordViolation(game, `Phase order mismatch on turn ${turn}: ${got}`);
-  });
-}
-
-function summarizeGameDraws(drawsByTurn) {
-  let base = 0;
-  let extra = 0;
-  Object.values(drawsByTurn || {}).forEach((perTurn) => {
-    base += Number(perTurn?.base || 0);
-    extra += Number(perTurn?.extra || 0);
-  });
-  return { base, extra, total: base + extra };
 }
 
 function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
@@ -399,33 +323,15 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
     const ap = game.activePlayerIndex;
     const dp = ap === 0 ? 1 : 0;
     const activePlayer = game.players[ap];
-    game.baseDrawDoneThisTurn[activePlayer.name] = false;
 
-    enterPhase(game, PHASES.TURN_START);
-    logEvent(game, { eventType: 'turn_start', player: activePlayer.name });
+    logEvent(game, { turn: game.turn, type: 'turn_start', player: activePlayer.name });
 
-    enterPhase(game, PHASES.DRAW_STEP);
-    drawCard(game, ap, { source: 'BASE_DRAW' });
+    drawCard(game, ap);
     if (game.winner) break;
 
-    enterPhase(game, PHASES.MAIN_PHASE);
     playMainPhase(game, ap, cfg);
-
-    enterPhase(game, PHASES.COMBAT_STEP);
     resolveCombat(game, ap, dp, cfg);
     if (game.winner) break;
-
-    enterPhase(game, PHASES.END_STEP);
-    game.metrics.handSizeByTurn[activePlayer.name][game.turn] = activePlayer.hand.length;
-    game.metrics.landsByTurn[activePlayer.name][game.turn] = activePlayer.battlefieldLands.length;
-    game.metrics.creaturesByTurn[activePlayer.name][game.turn] = activePlayer.battlefieldCreatures.length;
-    logEvent(game, {
-      eventType: 'turn_end',
-      player: activePlayer.name,
-      handSize: activePlayer.hand.length,
-      landsInPlay: activePlayer.battlefieldLands.length,
-      creaturesInPlay: activePlayer.battlefieldCreatures.length
-    });
 
     game.activePlayerIndex = dp;
     game.turn += 1;
@@ -434,36 +340,50 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
   if (!game.winner) {
     game.winner = 'draw';
     game.endedReason = 'max_turns';
-    logEvent(game, { eventType: 'game_end_max_turns' });
+    logEvent(game, { turn: game.turn, type: 'game_end_max_turns' });
   }
 
-  validatePhaseOrder(game);
+  const winner = game.winner === 'draw' ? 'draw' : game.winner;
+  const result = {
+    seed: game.seed,
+    winner,
+    endedReason: game.endedReason,
+    turns: game.turn,
+    finalLife: {
+      A: game.players[0].life,
+      B: game.players[1].life
+    },
+    stats: game.stats,
+    log: cfg.logMode === 'none' ? [] : game.log
+  };
 
-  const drawsA = summarizeGameDraws(game.metrics.drawsByTurn.A);
-  const drawsB = summarizeGameDraws(game.metrics.drawsByTurn.B);
-
-  let log = game.log;
-  if (cfg.logMode === 'none') log = [];
   if (cfg.logMode === 'summary') {
-    log = game.log.filter((event) => [
-      'turn_start', 'phase_enter', 'draw', 'turn_end', 'game_end_life_zero', 'game_end_max_turns', 'deck_out', 'violation'
-    ].includes(event.eventType));
+    result.log = game.log.filter((event) => (
+      event.type === 'turn_start'
+      || event.type.startsWith('game_end')
+      || event.type === 'deck_out'
+    ));
+  }
+
+  return result;
+}
+
+function simulateMany({ iterations = 100, seedBase = 1337, deckA, deckB, config = {} }) {
+  if (!Number.isInteger(iterations) || iterations < 1) {
+    throw new Error(`iterations must be positive integer, got ${iterations}`);
+  }
+
+  const games = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const seed = (seedBase + i) >>> 0;
+    games.push(simulateGame({ seed, deckA, deckB, config }));
   }
 
   return {
-    gameId: game.gameId,
-    seed: game.seed,
-    winner: game.winner,
-    endedReason: game.endedReason,
-    turns: game.turn,
-    finalLife: { A: game.players[0].life, B: game.players[1].life },
-    stats: game.stats,
-    log,
-    violations: game.violations,
-    metrics: {
-      ...game.metrics,
-      draws: { A: drawsA, B: drawsB }
-    }
+    iterations,
+    seedBase,
+    summary: aggregateResults(games),
+    games
   };
 }
 
@@ -498,15 +418,7 @@ function buildStarterDeck(prefix = 'S') {
   ], prefix);
 }
 
-function simulateMany({ iterations = 100, seedBase = 1337, deckA, deckB, config = {} }) {
-  if (!Number.isInteger(iterations) || iterations < 1) throw new Error(`iterations must be positive integer, got ${iterations}`);
-  const games = [];
-  for (let i = 0; i < iterations; i += 1) games.push(simulateGame({ seed: (seedBase + i) >>> 0, deckA, deckB, config }));
-  return { iterations, seedBase, summary: aggregateResults(games), games };
-}
-
 module.exports = {
-  PHASES,
   mulberry32,
   shuffleInPlace,
   simulateGame,

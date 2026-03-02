@@ -43,8 +43,3 @@ Running the same command twice should produce identical summaries and sample log
 ```bash
 node sim/tests/run_tests.js
 ```
-
-
-## Canonical rules script
-The simulator behavior/reporting contract is described in `rules/SIMULATION_RULES.md`.
-All reports should include the rule stamp (path + hash) so output can be traced to this exact rules text.
