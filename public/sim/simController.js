@@ -102,6 +102,22 @@
     logSelect.onchange = () => { simulatorState.logMode = logSelect.value; persistPlayerSaveDebounced(); };
     logField.append(logLabel, logSelect);
     numericRow.appendChild(logField);
+
+    const ruleField = document.createElement("div");
+    ruleField.className = "simField";
+    const summoningRuleLabel = document.createElement("label");
+    summoningRuleLabel.className = "zoneMeta";
+    const summoningRuleInput = document.createElement("input");
+    summoningRuleInput.type = "checkbox";
+    summoningRuleInput.checked = !!simulatorState.summoningSickness;
+    summoningRuleInput.onchange = () => {
+      simulatorState.summoningSickness = !!summoningRuleInput.checked;
+      persistPlayerSaveDebounced();
+    };
+    summoningRuleLabel.append(summoningRuleInput, document.createTextNode(" Summoning Sickness"));
+    ruleField.appendChild(summoningRuleLabel);
+    numericRow.appendChild(ruleField);
+
     controls.appendChild(numericRow);
     panel.appendChild(controls);
 
@@ -137,7 +153,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1" });
+        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
         const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
         const data = await resp.json();
         if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -298,7 +314,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1" });
+          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;

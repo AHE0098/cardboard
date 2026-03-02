@@ -94,6 +94,55 @@ function testNoLegacyWinrateHelperReference() {
   );
 }
 
+
+function testSummoningSicknessToggle() {
+  const deckA = buildDeckFromList([
+    { type: 'land', name: 'Basic Land', qty: 40 },
+    { type: 'creature', name: 'A-2-2', cost: 0, power: 2, toughness: 2, qty: 3 }
+  ], 'SSA');
+  const deckB = buildDeckFromList([
+    { type: 'land', name: 'Basic Land', qty: 40 },
+    { type: 'creature', name: 'B-2-2', cost: 0, power: 2, toughness: 2, qty: 3 }
+  ], 'SSB');
+
+  const offResult = simulateGame({
+    seed: 4242,
+    deckA,
+    deckB,
+    config: { logMode: 'full', maxTurns: 4, devAssertions: true, rules: { summoningSickness: false } }
+  });
+  const onResult = simulateGame({
+    seed: 4242,
+    deckA,
+    deckB,
+    config: { logMode: 'full', maxTurns: 4, devAssertions: true, rules: { summoningSickness: true } }
+  });
+
+  const offTurn1Damage = offResult.log.filter((e) => e.type === 'unblocked_damage' && e.turn === 1).length;
+  const onTurn1Damage = onResult.log.filter((e) => e.type === 'unblocked_damage' && e.turn === 1).length;
+  const onTurn2PlusAttackers = onResult.log
+    .filter((e) => e.type === 'combat_start' && e.turn >= 2)
+    .reduce((acc, e) => acc + ((e.attackers || []).length), 0);
+
+  assert.ok(offTurn1Damage > 0, 'Expected immediate attack damage with summoning sickness disabled');
+  assert.equal(onTurn1Damage, 0, 'Expected no turn-1 damage when summoning sickness enabled');
+  assert.ok(onTurn2PlusAttackers > 0, 'Expected legal attackers on later turns when summoning sickness enabled');
+}
+
+function testSummoningSicknessDefaultMatchesExplicitFalse() {
+  const deckA = buildStarterDeck('A');
+  const deckB = buildStarterDeck('B');
+  const implicit = simulateGame({ seed: 999, deckA, deckB, config: { logMode: 'full', devAssertions: true } });
+  const explicitFalse = simulateGame({
+    seed: 999,
+    deckA,
+    deckB,
+    config: { logMode: 'full', devAssertions: true, rules: { summoningSickness: false } }
+  });
+  assert.equal(implicit.winner, explicitFalse.winner);
+  assert.equal(implicit.turns, explicitFalse.turns);
+  assert.equal(digestLog(implicit.log), digestLog(explicitFalse.log));
+}
 function run() {
   testDeterminism();
   testConservation();
@@ -101,6 +150,8 @@ function run() {
   testBatchStatsShape();
   testEotSnapshotsCapturedOnce();
   testSnapshotAggregatesShape();
+  testSummoningSicknessToggle();
+  testSummoningSicknessDefaultMatchesExplicitFalse();
   testNoLegacyWinrateHelperReference();
   console.log('sim tests passed');
 }

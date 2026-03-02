@@ -383,13 +383,17 @@ function createServer() {
       const logModeRaw = String(req.query.log || "summary").trim();
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
+      const summoningSickness = String(req.query.summoningSickness || "0") === "1";
 
       const { deckA, deckB } = buildSimDecks(deckMode);
       const config = {
         startingLife,
         maxTurns,
         logMode,
-        devAssertions: true
+        devAssertions: true,
+        rules: {
+          summoningSickness
+        }
       };
 
       const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
@@ -413,7 +417,10 @@ function createServer() {
           maxTurns,
           startingLife,
           deckMode,
-          logMode
+          logMode,
+          rules: {
+            summoningSickness
+          }
         },
         sampleGame: {
           seed: sampleGame.seed,
@@ -483,13 +490,17 @@ function createServer() {
       const logModeRaw = String(req.query.log || "summary").trim();
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
+      const summoningSickness = String(req.query.summoningSickness || "0") === "1";
 
       const { deckA, deckB } = buildSimDecks(deckMode);
       const config = {
         startingLife,
         maxTurns,
         logMode,
-        devAssertions: true
+        devAssertions: true,
+        rules: {
+          summoningSickness
+        }
       };
 
       const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
@@ -503,7 +514,10 @@ function createServer() {
           maxTurns,
           startingLife,
           deckMode,
-          logMode
+          logMode,
+          rules: {
+            summoningSickness
+          }
         },
         sampleGame: {
           seed: sampleGame.seed,
