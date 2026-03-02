@@ -1,5 +1,6 @@
 const { chooseCreaturesToCast, chooseBlocks } = require('./ai');
 const { aggregateResults } = require('./stats');
+const { buildEotSnapshot } = require('./eotSnapshot');
 
 function mulberry32(seed) {
   let t = seed >>> 0;
@@ -89,6 +90,43 @@ function logEvent(game, event) {
   game.log.push(event);
 }
 
+function ensureTurnSummary(game, turn, playerName) {
+  const t = String(turn);
+  if (!game.turnSummaries[t]) game.turnSummaries[t] = {};
+  if (!game.turnSummaries[t][playerName]) {
+    game.turnSummaries[t][playerName] = {
+      player: playerName,
+      actionsByPhase: {
+        DRAW_STEP: [],
+        MAIN_PHASE: [],
+        COMBAT_STEP: [],
+        END_STEP: []
+      },
+      eotSnapshot: null,
+      warnings: []
+    };
+  }
+  return game.turnSummaries[t][playerName];
+}
+
+function trackTurnAction(game, turn, playerName, phase, event) {
+  const summary = ensureTurnSummary(game, turn, playerName);
+  summary.actionsByPhase[phase] ||= [];
+  summary.actionsByPhase[phase].push(event);
+}
+
+function captureSnapshot(game, playerIndex, turnContext) {
+  const player = game.players[playerIndex];
+  const summary = ensureTurnSummary(game, game.turn, player.name);
+  if (summary.eotSnapshot) {
+    const warning = `Duplicate EoT snapshot for ${player.name} turn ${game.turn}`;
+    summary.warnings.push(warning);
+    game.warnings.push(warning);
+    return;
+  }
+  summary.eotSnapshot = buildEotSnapshot(game, playerIndex, turnContext);
+}
+
 function drawCard(game, playerIndex) {
   const player = game.players[playerIndex];
   if (player.library.length === 0) {
@@ -102,7 +140,9 @@ function drawCard(game, playerIndex) {
 
   const ps = game.stats.players[playerIndex];
   ensureCardStats(ps, card.name).timesDrawn += 1;
-  logEvent(game, { turn: game.turn, type: 'draw', player: player.name, card: card.name, cardId: card.id });
+  const event = { turn: game.turn, type: 'draw', player: player.name, card: card.name, cardId: card.id, phase: 'DRAW_STEP' };
+  logEvent(game, event);
+  if (game.isTurnActive) trackTurnAction(game, game.turn, player.name, 'DRAW_STEP', event);
   return card;
 }
 
@@ -143,7 +183,10 @@ function playMainPhase(game, playerIndex, config) {
   if (landToPlay && player.landsPlayedThisTurn < 1) {
     moveCardBetweenArrays(landToPlay.id, player.hand, player.battlefieldLands);
     player.landsPlayedThisTurn += 1;
-    logEvent(game, { turn: game.turn, type: 'play_land', player: player.name, card: landToPlay.name, cardId: landToPlay.id });
+    const event = { turn: game.turn, type: 'play_land', player: player.name, card: landToPlay.name, cardId: landToPlay.id, phase: 'MAIN_PHASE' };
+    logEvent(game, event);
+    trackTurnAction(game, game.turn, player.name, 'MAIN_PHASE', event);
+    game.turnContext.cardsPlayedThisTurn += 1;
   }
 
   player.manaAvailable = player.battlefieldLands.length;
@@ -156,23 +199,33 @@ function playMainPhase(game, playerIndex, config) {
     const ps = game.stats.players[playerIndex];
     ps.creaturesPlayed += 1;
     ensureCardStats(ps, creature.name).timesPlayed += 1;
-    logEvent(game, {
+    const event = {
       turn: game.turn,
       type: 'cast_creature',
       player: player.name,
       card: creature.name,
       cardId: creature.id,
-      cost: creature.cost
-    });
+      cost: creature.cost,
+      phase: 'MAIN_PHASE'
+    };
+    logEvent(game, event);
+    trackTurnAction(game, game.turn, player.name, 'MAIN_PHASE', event);
+    game.turnContext.cardsPlayedThisTurn += 1;
   }
 
-  logEvent(game, {
+  const mainPhaseEnd = {
     turn: game.turn,
     type: 'main_phase_end',
     player: player.name,
     manaSpent: spentMana,
-    manaRemaining: player.manaAvailable
-  });
+    manaRemaining: player.manaAvailable,
+    phase: 'MAIN_PHASE'
+  };
+  logEvent(game, mainPhaseEnd);
+  trackTurnAction(game, game.turn, player.name, 'MAIN_PHASE', mainPhaseEnd);
+  game.turnContext.manaSpent = spentMana;
+  game.turnContext.manaAvailable = player.battlefieldLands.length;
+  if (spentMana > 0) game.turnContext.activeActions += 1;
 
   if (config.devAssertions) verifyConservation(game);
 }
@@ -182,7 +235,9 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   const defenderP = game.players[defenderIndex];
   const attackers = attackerP.battlefieldCreatures.slice();
   if (attackers.length === 0) {
-    logEvent(game, { turn: game.turn, type: 'combat_skip', attacker: attackerP.name });
+    const event = { turn: game.turn, type: 'combat_skip', attacker: attackerP.name, phase: 'COMBAT_STEP' };
+    logEvent(game, event);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', event);
     return;
   }
 
@@ -194,14 +249,18 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   const deadAttackers = new Set();
   const deadDefenders = new Set();
 
-  logEvent(game, {
+  const combatStart = {
     turn: game.turn,
     type: 'combat_start',
     attacker: attackerP.name,
     defender: defenderP.name,
     attackers: attackers.map((c) => c.id),
-    blocks
-  });
+    blocks,
+    phase: 'COMBAT_STEP'
+  };
+  logEvent(game, combatStart);
+  trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', combatStart);
+  game.turnContext.activeActions += 1;
 
   for (const attacker of attackers) {
     const defenderId = blockMap.get(attacker.id);
@@ -209,14 +268,19 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
       defenderP.life = Math.max(0, defenderP.life - attacker.power);
       const aps = game.stats.players[attackerIndex];
       ensureCardStats(aps, attacker.name).damageToPlayer += attacker.power;
-      logEvent(game, {
+      const dmgEvent = {
         turn: game.turn,
         type: 'unblocked_damage',
         attacker: attacker.id,
         playerDamaged: defenderP.name,
         amount: attacker.power,
-        lifeAfter: defenderP.life
-      });
+        lifeAfter: defenderP.life,
+        phase: 'COMBAT_STEP'
+      };
+      logEvent(game, dmgEvent);
+      trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', dmgEvent);
+      game.turnContext.damageDealtThisTurn += attacker.power;
+      game.turnContext.cumulativeDamageDealt += attacker.power;
       continue;
     }
 
@@ -236,7 +300,7 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
       ensureCardStats(dps, defender.name).killsMade += 1;
     }
 
-    logEvent(game, {
+    const blockEvent = {
       turn: game.turn,
       type: 'blocked_combat',
       attacker: attacker.id,
@@ -246,8 +310,11 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
       defenderPower: defender.power,
       defenderToughness: defender.toughness,
       attackerDies,
-      defenderDies
-    });
+      defenderDies,
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, blockEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', blockEvent);
   }
 
   for (const deadId of deadAttackers) {
@@ -294,7 +361,12 @@ function newGame({ seed, deckA, deckB, config }) {
     initialDeckSizes: {
       A: deckACloned.length,
       B: deckBCloned.length
-    }
+    },
+    turnSummaries: {},
+    warnings: [],
+    turnContext: {},
+    isTurnActive: false,
+    cumulativeDamageByPlayer: { A: 0, B: 0 }
   };
 
   for (let i = 0; i < config.startingHandSize; i += 1) {
@@ -324,15 +396,49 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
     const dp = ap === 0 ? 1 : 0;
     const activePlayer = game.players[ap];
 
-    logEvent(game, { turn: game.turn, type: 'turn_start', player: activePlayer.name });
+    game.isTurnActive = true;
+    game.turnContext = {
+      cardsPlayedThisTurn: 0,
+      manaSpent: 0,
+      manaAvailable: 0,
+      damageDealtThisTurn: 0,
+      cumulativeDamageDealt: game.cumulativeDamageByPlayer?.[activePlayer.name] || 0,
+      activeActions: 0
+    };
+    const turnStart = { turn: game.turn, type: 'turn_start', player: activePlayer.name, phase: 'TURN_START' };
+    logEvent(game, turnStart);
+    ensureTurnSummary(game, game.turn, activePlayer.name);
 
     drawCard(game, ap);
-    if (game.winner) break;
+    if (game.winner) {
+      const summary = ensureTurnSummary(game, game.turn, activePlayer.name);
+      summary.warnings.push('Snapshot missing: turn ended before END_STEP');
+      game.warnings.push(`Snapshot missing for ${activePlayer.name} turn ${game.turn}`);
+      game.isTurnActive = false;
+      break;
+    }
 
     playMainPhase(game, ap, cfg);
     resolveCombat(game, ap, dp, cfg);
-    if (game.winner) break;
 
+    game.cumulativeDamageByPlayer[activePlayer.name] = game.turnContext.cumulativeDamageDealt;
+    captureSnapshot(game, ap, game.turnContext);
+    const snapshotEvent = {
+      turn: game.turn,
+      type: 'turn_end',
+      player: activePlayer.name,
+      phase: 'END_STEP',
+      snapshotCaptured: !!ensureTurnSummary(game, game.turn, activePlayer.name).eotSnapshot
+    };
+    logEvent(game, snapshotEvent);
+    trackTurnAction(game, game.turn, activePlayer.name, 'END_STEP', snapshotEvent);
+
+    if (game.winner) {
+      game.isTurnActive = false;
+      break;
+    }
+
+    game.isTurnActive = false;
     game.activePlayerIndex = dp;
     game.turn += 1;
   }
@@ -354,6 +460,8 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
       B: game.players[1].life
     },
     stats: game.stats,
+    turnSummaries: game.turnSummaries,
+    warnings: game.warnings,
     log: cfg.logMode === 'none' ? [] : game.log
   };
 

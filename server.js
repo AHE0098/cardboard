@@ -421,6 +421,8 @@ function createServer() {
           turns: sampleGame.turns,
           endedReason: sampleGame.endedReason,
           finalLife: sampleGame.finalLife,
+          turnSummaries: sampleGame.turnSummaries || {},
+          warnings: sampleGame.warnings || [],
           logLength: sampleGame.log.length,
           log: includeSampleLog ? sampleGame.log : undefined
         },
@@ -509,6 +511,8 @@ function createServer() {
           turns: sampleGame.turns,
           endedReason: sampleGame.endedReason,
           finalLife: sampleGame.finalLife,
+          turnSummaries: sampleGame.turnSummaries || {},
+          warnings: sampleGame.warnings || [],
           logLength: sampleGame.log.length,
           log: includeSampleLog ? sampleGame.log : undefined
         },
