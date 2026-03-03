@@ -36,6 +36,8 @@ const socketPresence = new Map(); // socket.id -> { roomId, role }
 const PREFER_SHARED_DEFINITIONS = process.env.PREFER_SHARED_DEFINITIONS === "1";
 
 
+let roomCodeCounter = 0;
+
 function getSimulationRulesStamp() {
   const rulesPath = path.join(__dirname, "rules", "SIMULATION_RULES.md");
   const text = fs.readFileSync(rulesPath, "utf8");
