@@ -1,0 +1,99 @@
+{
+  "name": "2p-like interaction flow",
+  "mode": "server-intent",
+  "seed": 202,
+  "initialState": {
+    "sharedZones": {
+      "stack": []
+    },
+    "players": {
+      "p1": {
+        "id": "p1",
+        "name": "Alice",
+        "zones": {
+          "hand": [
+            "a1",
+            "a2"
+          ],
+          "deck": [
+            "a3"
+          ],
+          "graveyard": [],
+          "lands": [],
+          "permanents": []
+        }
+      },
+      "p2": {
+        "id": "p2",
+        "name": "Bob",
+        "zones": {
+          "hand": [
+            "b1",
+            "b2"
+          ],
+          "deck": [
+            "b3"
+          ],
+          "graveyard": [],
+          "lands": [],
+          "permanents": []
+        }
+      }
+    },
+    "tapped": {},
+    "tarped": {},
+    "version": 1
+  },
+  "actions": [
+    {
+      "role": "p2",
+      "intent": {
+        "type": "MOVE_CARD",
+        "payload": {
+          "cardId": "b1",
+          "from": {
+            "owner": "p2",
+            "zone": "hand"
+          },
+          "to": {
+            "owner": "p2",
+            "zone": "lands"
+          }
+        }
+      }
+    },
+    {
+      "role": "p1",
+      "intent": {
+        "type": "MOVE_CARD",
+        "payload": {
+          "cardId": "b1",
+          "from": {
+            "owner": "p2",
+            "zone": "lands"
+          },
+          "to": {
+            "owner": "p1",
+            "zone": "permanents"
+          }
+        }
+      }
+    },
+    {
+      "role": "p1",
+      "intent": {
+        "type": "DECK_PLACE",
+        "payload": {
+          "cardId": "a2",
+          "from": {
+            "owner": "p1",
+            "zone": "hand"
+          },
+          "owner": "p1",
+          "where": "top"
+        }
+      }
+    }
+  ],
+  "expectedDigest": "9af040cb2335e06f"
+}
