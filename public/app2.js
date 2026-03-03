@@ -2365,6 +2365,11 @@ Screen + data architecture:
     const subtitle = document.getElementById("subtitle");
     if (!root || !subtitle) throw new Error("Missing required DOM roots");
 
+    const uiIntentHub = window.UICore?.createIntentHub ? window.UICore.createIntentHub() : null;
+    uiIntentHub?.bindBack?.();
+    uiIntentHub?.on?.("back", () => onBack());
+    window.UICore?.updateViewportVars?.();
+
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
     const BATTLE_DECK_KEY_P1 = "cb_battle_deck_p1";
@@ -4072,7 +4077,12 @@ function onBack() {
       simBtn.textContent = "Simulator Mode";
       simBtn.onclick = () => { appMode = "simulator"; uiScreen = "mode"; renderApp(); };
 
-      card.append(sandboxBtn, battleBtn, deckBtn, simBtn);
+      const smokeBtn = document.createElement("button");
+      smokeBtn.className = "menuBtn";
+      smokeBtn.textContent = "UI Smoke Harness";
+      smokeBtn.onclick = () => { appMode = "ui-smoke"; uiScreen = "mode"; renderApp(); };
+
+      card.append(sandboxBtn, battleBtn, deckBtn, simBtn, smokeBtn);
       root.replaceChildren(card);
     }
 
@@ -4425,6 +4435,12 @@ function mountLegacyBattleInApp() {
 
   if (appMode === "simulator") {
     renderSimulatorMode(root);
+    return;
+  }
+
+  if (appMode === "ui-smoke") {
+    subtitle.textContent = `${session.playerName} • ui-smoke`;
+    window.UICore?.mountSmokeHarness?.(root);
     return;
   }
 
