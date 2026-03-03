@@ -144,6 +144,7 @@
     }
 
     appendRuleToggle("Summoning Sickness", "summoningSickness");
+    appendRuleToggle("No block after attacking (1-turn)", "noBlockAfterAttacking");
     appendRuleToggle("SMART BLOCKING", "smartBlocking");
     appendRuleToggle("SMART ATTACKING", "smartAttacking");
     appendRuleToggle("AI Debug Decisions", "aiDebugDecisions");
@@ -185,7 +186,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
+        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
         const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
         const data = await resp.json();
         if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -346,7 +347,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
+          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;

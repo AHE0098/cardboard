@@ -384,6 +384,7 @@ function createServer() {
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
       const summoningSickness = String(req.query.summoningSickness || "0") === "1";
+      const noBlockAfterAttacking = String(req.query.noBlockAfterAttacking || "0") === "1";
       const smartBlocking = String(req.query.smartBlocking || "0") === "1";
       const smartAttacking = String(req.query.smartAttacking || "0") === "1";
       const aiDebugDecisions = String(req.query.aiDebugDecisions || "0") === "1";
@@ -397,7 +398,8 @@ function createServer() {
         logMode,
         devAssertions: true,
         rules: {
-          summoningSickness
+          summoningSickness,
+          noBlockAfterAttacking
         },
         ai: {
           smartBlocking,
@@ -433,7 +435,8 @@ function createServer() {
           deckMode,
           logMode,
           rules: {
-            summoningSickness
+            summoningSickness,
+            noBlockAfterAttacking
           },
           ai: {
             smartBlocking,
@@ -514,6 +517,7 @@ function createServer() {
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
       const summoningSickness = String(req.query.summoningSickness || "0") === "1";
+      const noBlockAfterAttacking = String(req.query.noBlockAfterAttacking || "0") === "1";
       const smartBlocking = String(req.query.smartBlocking || "0") === "1";
       const smartAttacking = String(req.query.smartAttacking || "0") === "1";
       const aiDebugDecisions = String(req.query.aiDebugDecisions || "0") === "1";
@@ -527,7 +531,8 @@ function createServer() {
         logMode,
         devAssertions: true,
         rules: {
-          summoningSickness
+          summoningSickness,
+          noBlockAfterAttacking
         },
         ai: {
           smartBlocking,
@@ -553,7 +558,8 @@ function createServer() {
           deckMode,
           logMode,
           rules: {
-            summoningSickness
+            summoningSickness,
+            noBlockAfterAttacking
           },
           ai: {
             smartBlocking,

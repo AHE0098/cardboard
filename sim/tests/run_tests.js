@@ -146,6 +146,48 @@ function testSummoningSicknessDefaultMatchesExplicitFalse() {
 }
 
 
+
+function testNoBlockAfterAttackingToggle() {
+  const deckA = buildStarterDeck('A');
+  const deckB = buildStarterDeck('B');
+
+  const offResult = simulateGame({
+    seed: 1337,
+    deckA,
+    deckB,
+    config: { logMode: 'full', maxTurns: 20, devAssertions: true, rules: { summoningSickness: false, noBlockAfterAttacking: false, debugRules: true } }
+  });
+  const onResult = simulateGame({
+    seed: 1337,
+    deckA,
+    deckB,
+    config: { logMode: 'full', maxTurns: 20, devAssertions: true, rules: { summoningSickness: false, noBlockAfterAttacking: true, debugRules: true } }
+  });
+
+  const offBlocked = offResult.log.filter((e) => e.type === 'blocked_combat').length;
+  const onBlocked = onResult.log.filter((e) => e.type === 'blocked_combat').length;
+  const onFiltered = onResult.log.filter((e) => e.type === 'rules_debug_blockers_filtered').length;
+
+  assert.ok(offBlocked > 0, 'Expected blocked combats when no-block-after-attacking is disabled');
+  assert.equal(onBlocked, 0, 'Expected no blocked combats when no-block-after-attacking is enabled for this fixed-seed baseline');
+  assert.ok(onFiltered > 0, 'Expected engine blocker legality filter logs when no-block-after-attacking is enabled');
+}
+
+function testNoBlockAfterAttackingDefaultMatchesExplicitFalse() {
+  const deckA = buildStarterDeck('A');
+  const deckB = buildStarterDeck('B');
+  const implicit = simulateGame({ seed: 8128, deckA, deckB, config: { logMode: 'full', devAssertions: true } });
+  const explicitFalse = simulateGame({
+    seed: 8128,
+    deckA,
+    deckB,
+    config: { logMode: 'full', devAssertions: true, rules: { summoningSickness: false, noBlockAfterAttacking: false } }
+  });
+  assert.equal(implicit.winner, explicitFalse.winner);
+  assert.equal(implicit.turns, explicitFalse.turns);
+  assert.equal(digestLog(implicit.log), digestLog(explicitFalse.log));
+}
+
 function testSmartAttackingAvoidsPointlessSuicide() {
   const attackers = [
     { id: 'a1', power: 2, toughness: 1 },
@@ -205,6 +247,8 @@ function run() {
   testSnapshotAggregatesShape();
   testSummoningSicknessToggle();
   testSummoningSicknessDefaultMatchesExplicitFalse();
+  testNoBlockAfterAttackingToggle();
+  testNoBlockAfterAttackingDefaultMatchesExplicitFalse();
   testSmartAttackingAvoidsPointlessSuicide();
   testSmartBlockingForcesKillSurvive();
   testCertaintyZeroUsesAlternative();
