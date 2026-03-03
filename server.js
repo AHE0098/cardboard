@@ -23,6 +23,7 @@ const {
   simulateGame,
   simulateMany
 } = require("./sim/engine");
+const { createSeededRng, randomInt } = require("./shared/rng");
 
 const PORT = process.env.PORT || 3000;
 const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
@@ -34,6 +35,8 @@ const socketPresence = new Map(); // socket.id -> { roomId, role }
 
 const PREFER_SHARED_DEFINITIONS = process.env.PREFER_SHARED_DEFINITIONS === "1";
 
+
+let roomCodeCounter = 0;
 
 function getSimulationRulesStamp() {
   const rulesPath = path.join(__dirname, "rules", "SIMULATION_RULES.md");
@@ -72,7 +75,16 @@ function getOpenRoomsList() {
 function code() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let out = "";
-  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+
+  if (typeof crypto.randomInt === "function") {
+    for (let i = 0; i < 6; i += 1) out += chars[crypto.randomInt(chars.length)];
+    return out;
+  }
+
+  roomCodeCounter += 1;
+  const entropy = typeof process.hrtime?.bigint === "function" ? String(process.hrtime.bigint()) : String(roomCodeCounter);
+  const rng = createSeededRng(`${Date.now()}|room-code|${entropy}|${roomCodeCounter}`);
+  for (let i = 0; i < 6; i += 1) out += chars[randomInt(rng, chars.length)];
   return out;
 }
 
@@ -103,13 +115,39 @@ function sanitizeDeckCardsByRole(payload) {
 }
 
 function shuffleInPlace(arr) {
+  const fallbackRng = createSeededRng(`${Date.now()}|shuffle|${arr.length}`);
   for (let i = arr.length - 1; i > 0; i -= 1) {
     const j = typeof crypto.randomInt === "function"
       ? crypto.randomInt(i + 1)
-      : Math.floor(Math.random() * (i + 1));
+      : randomInt(fallbackRng, i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function summarizeRoomState(state) {
+  return {
+    version: state?.version,
+    p1: Object.fromEntries(Object.entries(state?.players?.p1?.zones || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])),
+    p2: Object.fromEntries(Object.entries(state?.players?.p2?.zones || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])),
+    stack: Array.isArray(state?.sharedZones?.stack) ? state.sharedZones.stack.length : 0
+  };
+}
+
+function assertIntentInvariants(room, role, intent) {
+  const state = room.state;
+  if (!Number.isInteger(state?.version) || state.version < 1) {
+    throw new Error(`[invariant] invalid version; role=${role}; intent=${intent?.type}; summary=${JSON.stringify(summarizeRoomState(state))}`);
+  }
+  for (const owner of ["p1", "p2"]) {
+    const zones = state.players?.[owner]?.zones || {};
+    for (const zoneName of ["hand", "deck", "graveyard", "lands", "permanents"]) {
+      const zone = zones[zoneName] || [];
+      if (!Array.isArray(zone)) {
+        throw new Error(`[invariant] zone not array (${owner}.${zoneName}); role=${role}; intent=${intent?.type}; summary=${JSON.stringify(summarizeRoomState(state))}`);
+      }
+    }
+  }
 }
 
 function applyDeckToPlayer(player, cards) {
@@ -309,6 +347,7 @@ function applyIntent(room, role, intent) {
   }
 
   s.version += 1;
+  assertIntentInvariants(room, role, intent);
   return { ok: true };
 }
 
