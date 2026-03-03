@@ -20,6 +20,51 @@
     return "•";
   }
 
+  const AVAILABLE_SWEEP_TOGGLES = [
+    { key: "summoningSickness", label: "Summoning Sickness" },
+    { key: "noBlockAfterAttacking", label: "No block after attacking" },
+    { key: "smartBlocking", label: "Smart Blocking" },
+    { key: "smartAttacking", label: "Smart Attacking" }
+  ];
+
+  const SWEEP_TOGGLE_KEYS = new Set(AVAILABLE_SWEEP_TOGGLES.map((item) => item.key));
+  let sweepStrategyCounter = 0;
+
+  function createSweepStrategyId() {
+    sweepStrategyCounter += 1;
+    return `sweep-${Date.now().toString(36)}-${sweepStrategyCounter.toString(36)}`;
+  }
+
+  function normalizeSweepStrategies(strategies) {
+    const next = [];
+    const ids = new Set();
+    (Array.isArray(strategies) ? strategies : []).forEach((strategy, idx) => {
+      const idRaw = String(strategy?.id || "").trim();
+      const id = idRaw && !ids.has(idRaw) ? idRaw : createSweepStrategyId();
+      ids.add(id);
+      const toggles = {};
+      Object.entries(strategy?.toggles || {}).forEach(([key, value]) => {
+        if (!SWEEP_TOGGLE_KEYS.has(key)) return;
+        if (value) toggles[key] = true;
+      });
+      next.push({
+        id,
+        name: String(strategy?.name || `Strategy ${idx + 1}`),
+        enabled: strategy?.enabled !== false,
+        toggles
+      });
+    });
+    if (!next.length) {
+      next.push({
+        id: createSweepStrategyId(),
+        name: "Strategy 1",
+        enabled: true,
+        toggles: { smartBlocking: true }
+      });
+    }
+    return next;
+  }
+
   function renderSimulatorMode(rootNode, ctx) {
     const { subtitle, session, savedDecks, simulatorState, persistPlayerSaveDebounced, renderApp, getDeckById, uid, parseManaCost, getCardDef, getAbortController, setAbortController } = ctx;
     subtitle.textContent = `${session.playerName} • simulator`;
@@ -166,6 +211,7 @@
     sweepEnabledField.appendChild(sweepEnabledLabel);
     numericRow.appendChild(sweepEnabledField);
 
+    simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
     const sweepFeaturesField = document.createElement("div");
     sweepFeaturesField.className = "simField";
     const sweepFeaturesLabel = document.createElement("label");
@@ -173,40 +219,138 @@
     sweepFeaturesLabel.textContent = "Sweep strategies";
     const sweepFeaturesWrap = document.createElement("div");
     sweepFeaturesWrap.className = "simStack";
-    const sweepFeatures = [
-      ["summoningSickness", "Summoning Sickness"],
-      ["noBlockAfterAttacking", "No block after attacking"],
-      ["smartBlocking", "Smart Blocking"],
-      ["smartAttacking", "Smart Attacking"]
-    ];
-    const selectedSweepFeatures = new Set(Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys : []);
-    sweepFeatures.forEach(([value, text]) => {
-      const row = document.createElement("label");
-      row.className = "zoneMeta";
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = selectedSweepFeatures.has(value);
-      input.onchange = () => {
-        const nextSet = new Set(Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys : []);
-        if (input.checked) nextSet.add(value);
-        else nextSet.delete(value);
-        simulatorState.sweepFeatureKeys = Array.from(nextSet);
+
+    const makeStrategyFeaturePicker = (strategy) => {
+      const picker = document.createElement("details");
+      const summary = document.createElement("summary");
+      const selectedCount = Object.keys(strategy.toggles || {}).length;
+      summary.className = "zoneMeta";
+      summary.textContent = selectedCount ? `${selectedCount} features selected` : "Select features";
+      picker.appendChild(summary);
+
+      const actions = document.createElement("div");
+      actions.className = "simButtons";
+      const selectAllBtn = document.createElement("button");
+      selectAllBtn.className = "menuBtn";
+      selectAllBtn.type = "button";
+      selectAllBtn.textContent = "Select all";
+      selectAllBtn.onclick = (evt) => {
+        evt.preventDefault();
+        strategy.toggles = AVAILABLE_SWEEP_TOGGLES.reduce((acc, item) => {
+          acc[item.key] = true;
+          return acc;
+        }, {});
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "menuBtn";
+      clearBtn.type = "button";
+      clearBtn.textContent = "Clear";
+      clearBtn.onclick = (evt) => {
+        evt.preventDefault();
+        strategy.toggles = {};
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+      actions.append(selectAllBtn, clearBtn);
+      picker.appendChild(actions);
+
+      AVAILABLE_SWEEP_TOGGLES.forEach((feature) => {
+        const row = document.createElement("label");
+        row.className = "zoneMeta";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !!strategy.toggles?.[feature.key];
+        input.onchange = () => {
+          if (input.checked) strategy.toggles[feature.key] = true;
+          else delete strategy.toggles[feature.key];
+          persistPlayerSaveDebounced();
+          renderApp();
+        };
+        row.append(input, document.createTextNode(` ${feature.label}`));
+        picker.appendChild(row);
+      });
+      return picker;
+    };
+
+    simulatorState.sweepStrategies.forEach((strategy, idx) => {
+      const strategyRow = document.createElement("div");
+      strategyRow.className = "simStack";
+
+      const topRow = document.createElement("div");
+      topRow.className = "simButtons";
+
+      const enabledLabel = document.createElement("label");
+      enabledLabel.className = "zoneMeta";
+      const enabledInput = document.createElement("input");
+      enabledInput.type = "checkbox";
+      enabledInput.checked = strategy.enabled !== false;
+      enabledInput.onchange = () => {
+        strategy.enabled = !!enabledInput.checked;
         persistPlayerSaveDebounced();
       };
-      row.append(input, document.createTextNode(` ${text}`));
-      sweepFeaturesWrap.appendChild(row);
+      enabledLabel.append(enabledInput, document.createTextNode(" Enabled"));
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "menuInput";
+      nameInput.type = "text";
+      nameInput.value = strategy.name || `Strategy ${idx + 1}`;
+      nameInput.placeholder = `Strategy ${idx + 1}`;
+      nameInput.onchange = () => {
+        strategy.name = String(nameInput.value || "").trim() || `Strategy ${idx + 1}`;
+        persistPlayerSaveDebounced();
+      };
+
+      const duplicateBtn = document.createElement("button");
+      duplicateBtn.className = "menuBtn";
+      duplicateBtn.type = "button";
+      duplicateBtn.textContent = "Duplicate";
+      duplicateBtn.onclick = () => {
+        simulatorState.sweepStrategies.splice(idx + 1, 0, {
+          id: createSweepStrategyId(),
+          name: `${strategy.name || `Strategy ${idx + 1}`} copy`,
+          enabled: strategy.enabled !== false,
+          toggles: { ...(strategy.toggles || {}) }
+        });
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "menuBtn";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.onclick = () => {
+        simulatorState.sweepStrategies = simulatorState.sweepStrategies.filter((item) => item.id !== strategy.id);
+        simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+
+      topRow.append(enabledLabel, nameInput, duplicateBtn, deleteBtn);
+      strategyRow.append(topRow, makeStrategyFeaturePicker(strategy));
+      sweepFeaturesWrap.appendChild(strategyRow);
     });
-    const combineRow = document.createElement("label");
-    combineRow.className = "zoneMeta";
-    const combineInput = document.createElement("input");
-    combineInput.type = "checkbox";
-    combineInput.checked = !!simulatorState.sweepIncludeCombined;
-    combineInput.onchange = () => {
-      simulatorState.sweepIncludeCombined = !!combineInput.checked;
+
+    const addStrategyBtn = document.createElement("button");
+    addStrategyBtn.className = "menuBtn";
+    addStrategyBtn.type = "button";
+    addStrategyBtn.textContent = "Add strategy";
+    addStrategyBtn.onclick = () => {
+      const count = Array.isArray(simulatorState.sweepStrategies) ? simulatorState.sweepStrategies.length : 0;
+      simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+      simulatorState.sweepStrategies.push({
+        id: createSweepStrategyId(),
+        name: `Strategy ${count + 1}`,
+        enabled: true,
+        toggles: {}
+      });
       persistPlayerSaveDebounced();
+      renderApp();
     };
-    combineRow.append(combineInput, document.createTextNode(" Combine selected toggles into single strategy"));
-    sweepFeaturesWrap.appendChild(combineRow);
+    sweepFeaturesWrap.appendChild(addStrategyBtn);
+
     sweepFeaturesField.append(sweepFeaturesLabel, sweepFeaturesWrap);
     numericRow.appendChild(sweepFeaturesField);
 
@@ -257,6 +401,12 @@
     sweepNote.className = "zoneMeta";
     sweepNote.textContent = "Sweep uses fixed certainty lanes: 0% to 100% by 10%.";
     numericRow.appendChild(sweepNote);
+    const enabledStrategiesCount = (Array.isArray(simulatorState.sweepStrategies) ? simulatorState.sweepStrategies : []).filter((strategy) => strategy?.enabled !== false).length;
+    const sweepWorkload = enabledStrategiesCount * 11 * Number(simulatorState.sweepIterationsPerLane || 0);
+    const workloadNote = document.createElement("div");
+    workloadNote.className = "zoneMeta";
+    workloadNote.textContent = `Estimated sweep games: ${sweepWorkload}`;
+    numericRow.appendChild(workloadNote);
 
     controls.appendChild(numericRow);
     panel.appendChild(controls);
@@ -295,18 +445,16 @@
       };
     }
 
-    async function executeSimulationRun({ isSweep }) {
+    async function executeSimulationRun({ isSweep, sweepStrategies = [] }) {
       const qs = new URLSearchParams({
         ...buildBaseRunQuery(),
         sweepEnabled: isSweep ? "1" : "0",
-        sweepToggleKey: String(simulatorState.sweepToggleKey || "smartBlocking"),
         sweepCertaintyKey: String(simulatorState.sweepCertaintyKey || "both"),
         sweepIterationsPerLane: String(simulatorState.sweepIterationsPerLane || simulatorState.iterations),
         sweepConcurrency: String(simulatorState.sweepConcurrency || 2),
-        sweepToggleValues: "0,1",
-        sweepFeatureKeys: Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys.join(",") : "",
-        sweepIncludeCombined: simulatorState.sweepIncludeCombined ? "1" : "0"
+        sweepStrategies: encodeURIComponent(JSON.stringify(sweepStrategies))
       });
+      if (global.__SIM_SWEEP_DEBUG__ === true) console.info("[sim.sweep.ui] request strategies", sweepStrategies);
       const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
       const data = await resp.json();
       if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
@@ -377,10 +525,21 @@
       const deckA = getDeckById(simulatorState.deckAId);
       const deckB = getDeckById(simulatorState.deckBId);
       if (!deckA || !deckB) { simulatorState.lastError = "Please select both Deck A and Deck B."; renderApp(); return; }
-      const strategyCount = (Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys.length : 0)
-        + ((simulatorState.sweepIncludeCombined && Array.isArray(simulatorState.sweepFeatureKeys) && simulatorState.sweepFeatureKeys.length > 1) ? 1 : 0);
-      if (!strategyCount) { simulatorState.lastError = "Select at least one sweep strategy feature."; renderApp(); return; }
-      if (simulatorState.sweepIterationsPerLane > 2000 || (strategyCount * 11 * simulatorState.sweepIterationsPerLane) > 30000) simulatorState.lastError = "Warning: selected sweep workload may be slow.";
+      simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+      const enabledStrategies = simulatorState.sweepStrategies
+        .filter((strategy) => strategy.enabled !== false)
+        .map((strategy, idx) => ({
+          id: String(strategy.id || "").trim() || createSweepStrategyId(),
+          name: String(strategy.name || `Strategy ${idx + 1}`),
+          enabled: true,
+          toggles: Object.entries(strategy.toggles || {}).reduce((acc, [key, value]) => {
+            if (SWEEP_TOGGLE_KEYS.has(key) && value) acc[key] = true;
+            return acc;
+          }, {})
+        }));
+      if (!enabledStrategies.length) { simulatorState.lastError = "Enable at least one sweep strategy."; renderApp(); return; }
+      const totalGames = enabledStrategies.length * 11 * Number(simulatorState.sweepIterationsPerLane || 0);
+      if (simulatorState.sweepIterationsPerLane > 2000 || totalGames > 50000) simulatorState.lastError = `Warning: selected sweep workload may be slow (${totalGames} games).`;
 
       simulatorState.isRunning = true;
       simulatorState.selectedReportText = "";
@@ -392,7 +551,7 @@
       setAbortController(new AbortController());
 
       try {
-        const data = await executeSimulationRun({ isSweep: true });
+        const data = await executeSimulationRun({ isSweep: true, sweepStrategies: enabledStrategies });
         simulatorState.finishedAt = Date.now();
         simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
         simulatorState.summary = data.summary || null;

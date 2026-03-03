@@ -48,8 +48,9 @@
     if (!Array.isArray(lanes) || !lanes.length) return [];
     const grouped = new Map();
     lanes.forEach((lane) => {
+      const strategyId = String(lane?.strategyId || "").trim();
       const strategyIndex = Number.isFinite(Number(lane?.strategyIndex)) ? Number(lane.strategyIndex) : null;
-      const key = strategyIndex == null ? (lane?.toggleValue ? "on" : "off") : `strategy:${strategyIndex}`;
+      const key = strategyId || (strategyIndex == null ? (lane?.toggleValue ? "on" : "off") : `strategy:${strategyIndex}`);
       const label = lane?.strategyName || (lane?.toggleValue ? "Toggle ON" : "Toggle OFF");
       if (!grouped.has(key)) grouped.set(key, { key, label, points: [] });
       grouped.get(key).points.push({

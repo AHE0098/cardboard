@@ -401,11 +401,58 @@ function createServer() {
     return nextConfig;
   }
 
+
+
+  function hashStringToUInt32(value) {
+    const str = String(value || "");
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i += 1) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function parseSweepStrategiesParam(rawValue) {
+    if (!rawValue) return null;
+    const normalized = String(rawValue).trim();
+    if (!normalized) return null;
+    const candidates = [normalized];
+    try { candidates.push(decodeURIComponent(normalized)); } catch {}
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    throw new Error("Invalid sweepStrategies payload");
+  }
+
+  function normalizeSweepStrategiesInput(strategies) {
+    const seen = new Set();
+    const normalized = [];
+    (Array.isArray(strategies) ? strategies : []).forEach((strategy, idx) => {
+      const id = String(strategy?.id || "").trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const name = String(strategy?.name || `Strategy ${idx + 1}`).trim() || `Strategy ${idx + 1}`;
+      const enabled = strategy?.enabled !== false;
+      const toggles = {};
+      Object.entries(strategy?.toggles || {}).forEach(([key, value]) => {
+        if (!SWEEP_FEATURE_DEFS[key]) return;
+        if (value) toggles[key] = true;
+      });
+      normalized.push({ id, name, enabled, toggles });
+    });
+    return normalized;
+  }
+
   function buildLaneSummary({ lane, batch }) {
     const winsA = Number(batch?.summary?.winsA || 0);
     const winsB = Number(batch?.summary?.winsB || 0);
     const games = Number(batch?.summary?.games || 0);
     return {
+      strategyId: lane.strategyId,
       strategyName: lane.strategyName,
       strategyIndex: lane.strategyIndex,
       strategyToggles: lane.strategyToggles,
@@ -442,12 +489,14 @@ function createServer() {
 
     strategies.forEach((strategy, strategyIdx) => {
       certaintySteps.forEach((certaintyPct) => {
-        const laneSeed = (Number(sweep.baseSeed || 0) + Number(certaintyPct || 0) + (strategyIdx * 1000000)) >>> 0;
+        const strategySeedComponent = hashStringToUInt32(strategy.id || strategy.name || strategyIdx) % 1000000;
+        const laneSeed = (Number(sweep.baseSeed || 0) + Number(certaintyPct || 0) + (strategySeedComponent * 1000)) >>> 0;
         const laneConfigWithStrategy = applyStrategyTogglesToConfig(config, strategy.toggles || {});
         const laneAi = applyLaneCertainty({ ...(laneConfigWithStrategy.ai || {}) }, sweep.certaintyKey, certaintyPct);
         const laneConfig = { ...laneConfigWithStrategy, ai: laneAi };
         const batch = simulateMany({ iterations: sweep.iterationsPerLane, seedBase: laneSeed, deckA, deckB, config: laneConfig });
         const lane = {
+          strategyId: String(strategy.id || `strategy-${strategyIdx + 1}`),
           strategyName: String(strategy.name || `Strategy ${strategyIdx + 1}`),
           strategyIndex: strategyIdx,
           strategyToggles: strategy.toggles || {},
@@ -461,6 +510,7 @@ function createServer() {
           console.info("[sim.sweep] lane", {
             toggleKey: lane.toggleKey,
             toggleValue: lane.toggleValue,
+            strategyId: lane.strategyId,
             strategyName: lane.strategyName,
             strategyIndex: lane.strategyIndex,
             certaintyPct: lane.certaintyPct,
@@ -530,6 +580,7 @@ function createServer() {
         .map((x) => String(x).trim())
         .filter((x) => !!SWEEP_FEATURE_DEFS[x]);
       const sweepIncludeCombined = String(req.query.sweepIncludeCombined || "0") === "1";
+      const parsedSweepStrategies = parseSweepStrategiesParam(req.query.sweepStrategies);
       const debugSweep = String(req.query.simDebugSweep || "0") === "1";
 
       const { deckA, deckB } = buildSimDecks(deckMode);
@@ -563,17 +614,40 @@ function createServer() {
         return `Combined ${short.join(" + ")}`;
       };
 
-      const sweepStrategies = sweepFeatureKeys.map((featureKey) => ({
+      const legacySweepStrategies = sweepFeatureKeys.map((featureKey, idx) => ({
+        id: `legacy-${featureKey}-${idx + 1}`,
         name: strategyLabel(featureKey),
+        enabled: true,
         toggles: { [featureKey]: true }
       }));
       if (sweepIncludeCombined && sweepFeatureKeys.length > 1) {
-        sweepStrategies.push({
+        legacySweepStrategies.push({
+          id: `legacy-combined-${sweepFeatureKeys.join("-")}`,
           name: strategyLabelCombined(sweepFeatureKeys),
+          enabled: true,
           toggles: sweepFeatureKeys.reduce((acc, key) => {
             acc[key] = true;
             return acc;
           }, {})
+        });
+      }
+
+      const normalizedSweepStrategies = normalizeSweepStrategiesInput(
+        Array.isArray(parsedSweepStrategies) ? parsedSweepStrategies : legacySweepStrategies
+      )
+        .filter((strategy) => strategy.enabled)
+        .slice(0, 12);
+
+      if (Array.isArray(parsedSweepStrategies) && parsedSweepStrategies.length > 12) {
+        throw new Error("Too many sweep strategies (max 12)");
+      }
+      if (sweepEnabled && !normalizedSweepStrategies.length) {
+        throw new Error("At least one enabled sweep strategy is required");
+      }
+      if (debugSweep) {
+        console.info("[sim.sweep] parsed strategies", {
+          count: normalizedSweepStrategies.length,
+          strategies: normalizedSweepStrategies
         });
       }
 
@@ -582,7 +656,7 @@ function createServer() {
             enabled: true,
             toggleKey: sweepToggleKey,
             toggleValues: sweepToggleValues.length ? sweepToggleValues : [false, true],
-            strategies: sweepStrategies,
+            strategies: normalizedSweepStrategies,
             certaintyKey: sweepCertaintyKey,
             certaintySteps: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
             iterationsPerLane: sweepIterationsPerLane,
@@ -593,6 +667,13 @@ function createServer() {
         : null;
 
       const sweepResult = sweep ? runSimulationSweep({ sweep, config, deckA, deckB }) : null;
+      if (debugSweep) {
+        console.info("[sim.sweep] lane-count", {
+          strategies: normalizedSweepStrategies.length,
+          certaintySteps: sweep?.certaintySteps?.length || 0,
+          lanes: sweepResult?.sweepRows?.length || 0
+        });
+      }
 
       return res.json({
         ok: true,
