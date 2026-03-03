@@ -74,17 +74,9 @@ function getOpenRoomsList() {
 
 function code() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const rng = createSeededRng(`${Date.now()}|room-code`);
   let out = "";
-
-  if (typeof crypto.randomInt === "function") {
-    for (let i = 0; i < 6; i += 1) out += chars[crypto.randomInt(chars.length)];
-    return out;
-  }
-
-  roomCodeCounter += 1;
-  const entropy = typeof process.hrtime?.bigint === "function" ? String(process.hrtime.bigint()) : String(roomCodeCounter);
-  const rng = createSeededRng(`${Date.now()}|room-code|${entropy}|${roomCodeCounter}`);
-  for (let i = 0; i < 6; i += 1) out += chars[randomInt(rng, chars.length)];
+  for (let i = 0; i < 6; i++) out += chars[randomInt(rng, chars.length)];
   return out;
 }
 
