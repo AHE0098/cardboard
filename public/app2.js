@@ -2451,6 +2451,8 @@ Screen + data architecture:
       logMode: "summary",
       sweepEnabled: false,
       sweepToggleKey: "smartBlocking",
+      sweepFeatureKeys: [],
+      sweepIncludeCombined: false,
       sweepCertaintyKey: "both",
       sweepIterationsPerLane: 100,
       sweepConcurrency: 2,
@@ -2930,6 +2932,10 @@ case "TOGGLE_TAP": {
         logMode: ["none", "summary", "full"].includes(savedSim.logMode) ? savedSim.logMode : simulatorState.logMode,
         sweepEnabled: !!savedSim.sweepEnabled,
         sweepToggleKey: ["smartBlocking", "smartAttacking"].includes(savedSim.sweepToggleKey) ? savedSim.sweepToggleKey : simulatorState.sweepToggleKey,
+        sweepFeatureKeys: Array.isArray(savedSim.sweepFeatureKeys)
+          ? savedSim.sweepFeatureKeys.filter((key) => ["summoningSickness", "noBlockAfterAttacking", "smartBlocking", "smartAttacking"].includes(key))
+          : (["smartBlocking", "smartAttacking"].includes(savedSim.sweepToggleKey) ? [savedSim.sweepToggleKey] : simulatorState.sweepFeatureKeys),
+        sweepIncludeCombined: !!savedSim.sweepIncludeCombined,
         sweepCertaintyKey: ["attack", "defend", "both"].includes(savedSim.sweepCertaintyKey) ? savedSim.sweepCertaintyKey : simulatorState.sweepCertaintyKey,
         sweepIterationsPerLane: Number.isFinite(Number(savedSim.sweepIterationsPerLane)) ? Math.max(1, Math.min(5000, Math.floor(Number(savedSim.sweepIterationsPerLane)))) : simulatorState.sweepIterationsPerLane,
         sweepConcurrency: Number.isFinite(Number(savedSim.sweepConcurrency)) ? Math.max(1, Math.min(4, Math.floor(Number(savedSim.sweepConcurrency)))) : simulatorState.sweepConcurrency,

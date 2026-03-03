@@ -48,18 +48,21 @@
     if (!Array.isArray(lanes) || !lanes.length) return [];
     const grouped = new Map();
     lanes.forEach((lane) => {
-      const key = lane?.toggleValue ? "on" : "off";
-      if (!grouped.has(key)) grouped.set(key, []);
-      grouped.get(key).push({
+      const strategyIndex = Number.isFinite(Number(lane?.strategyIndex)) ? Number(lane.strategyIndex) : null;
+      const key = strategyIndex == null ? (lane?.toggleValue ? "on" : "off") : `strategy:${strategyIndex}`;
+      const label = lane?.strategyName || (lane?.toggleValue ? "Toggle ON" : "Toggle OFF");
+      if (!grouped.has(key)) grouped.set(key, { key, label, points: [] });
+      grouped.get(key).points.push({
         certaintyPct: Number(lane?.certaintyPct || 0),
         winRatePct: Number(lane?.deckA_winRate || 0) * 100
       });
     });
-    return Array.from(grouped.entries()).map(([key, points]) => ({
-      key,
-      label: key === "on" ? "Toggle ON" : "Toggle OFF",
-      color: key === "on" ? "#67d17e" : "#f4af55",
-      points: points.sort((a, b) => a.certaintyPct - b.certaintyPct)
+    const palette = ["#67d17e", "#f4af55", "#56d1ff", "#ff7c8f", "#c59bff", "#ffd166", "#8bd3dd"];
+    return Array.from(grouped.values()).map((series, idx) => ({
+      key: series.key,
+      label: series.label,
+      color: palette[idx % palette.length],
+      points: series.points.sort((a, b) => a.certaintyPct - b.certaintyPct)
     }));
   }
 

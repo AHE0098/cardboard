@@ -166,26 +166,49 @@
     sweepEnabledField.appendChild(sweepEnabledLabel);
     numericRow.appendChild(sweepEnabledField);
 
-    const sweepToggleField = document.createElement("div");
-    sweepToggleField.className = "simField";
-    const sweepToggleLabel = document.createElement("label");
-    sweepToggleLabel.className = "zoneMeta";
-    sweepToggleLabel.textContent = "Toggle under study";
-    const sweepToggleSelect = document.createElement("select");
-    sweepToggleSelect.className = "menuInput";
-    [["smartBlocking", "SMART BLOCKING"], ["smartAttacking", "SMART ATTACKING"]].forEach(([value, text]) => {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = text;
-      if (simulatorState.sweepToggleKey === value) opt.selected = true;
-      sweepToggleSelect.appendChild(opt);
+    const sweepFeaturesField = document.createElement("div");
+    sweepFeaturesField.className = "simField";
+    const sweepFeaturesLabel = document.createElement("label");
+    sweepFeaturesLabel.className = "zoneMeta";
+    sweepFeaturesLabel.textContent = "Sweep strategies";
+    const sweepFeaturesWrap = document.createElement("div");
+    sweepFeaturesWrap.className = "simStack";
+    const sweepFeatures = [
+      ["summoningSickness", "Summoning Sickness"],
+      ["noBlockAfterAttacking", "No block after attacking"],
+      ["smartBlocking", "Smart Blocking"],
+      ["smartAttacking", "Smart Attacking"]
+    ];
+    const selectedSweepFeatures = new Set(Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys : []);
+    sweepFeatures.forEach(([value, text]) => {
+      const row = document.createElement("label");
+      row.className = "zoneMeta";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selectedSweepFeatures.has(value);
+      input.onchange = () => {
+        const nextSet = new Set(Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys : []);
+        if (input.checked) nextSet.add(value);
+        else nextSet.delete(value);
+        simulatorState.sweepFeatureKeys = Array.from(nextSet);
+        persistPlayerSaveDebounced();
+      };
+      row.append(input, document.createTextNode(` ${text}`));
+      sweepFeaturesWrap.appendChild(row);
     });
-    sweepToggleSelect.onchange = () => {
-      simulatorState.sweepToggleKey = sweepToggleSelect.value;
+    const combineRow = document.createElement("label");
+    combineRow.className = "zoneMeta";
+    const combineInput = document.createElement("input");
+    combineInput.type = "checkbox";
+    combineInput.checked = !!simulatorState.sweepIncludeCombined;
+    combineInput.onchange = () => {
+      simulatorState.sweepIncludeCombined = !!combineInput.checked;
       persistPlayerSaveDebounced();
     };
-    sweepToggleField.append(sweepToggleLabel, sweepToggleSelect);
-    numericRow.appendChild(sweepToggleField);
+    combineRow.append(combineInput, document.createTextNode(" Combine selected toggles into single strategy"));
+    sweepFeaturesWrap.appendChild(combineRow);
+    sweepFeaturesField.append(sweepFeaturesLabel, sweepFeaturesWrap);
+    numericRow.appendChild(sweepFeaturesField);
 
     const sweepCertaintyField = document.createElement("div");
     sweepCertaintyField.className = "simField";
@@ -280,7 +303,9 @@
         sweepCertaintyKey: String(simulatorState.sweepCertaintyKey || "both"),
         sweepIterationsPerLane: String(simulatorState.sweepIterationsPerLane || simulatorState.iterations),
         sweepConcurrency: String(simulatorState.sweepConcurrency || 2),
-        sweepToggleValues: "0,1"
+        sweepToggleValues: "0,1",
+        sweepFeatureKeys: Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys.join(",") : "",
+        sweepIncludeCombined: simulatorState.sweepIncludeCombined ? "1" : "0"
       });
       const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
       const data = await resp.json();
@@ -352,7 +377,10 @@
       const deckA = getDeckById(simulatorState.deckAId);
       const deckB = getDeckById(simulatorState.deckBId);
       if (!deckA || !deckB) { simulatorState.lastError = "Please select both Deck A and Deck B."; renderApp(); return; }
-      if (simulatorState.sweepIterationsPerLane > 2000) simulatorState.lastError = "Warning: high sweep iterations per lane may be slow.";
+      const strategyCount = (Array.isArray(simulatorState.sweepFeatureKeys) ? simulatorState.sweepFeatureKeys.length : 0)
+        + ((simulatorState.sweepIncludeCombined && Array.isArray(simulatorState.sweepFeatureKeys) && simulatorState.sweepFeatureKeys.length > 1) ? 1 : 0);
+      if (!strategyCount) { simulatorState.lastError = "Select at least one sweep strategy feature."; renderApp(); return; }
+      if (simulatorState.sweepIterationsPerLane > 2000 || (strategyCount * 11 * simulatorState.sweepIterationsPerLane) > 30000) simulatorState.lastError = "Warning: selected sweep workload may be slow.";
 
       simulatorState.isRunning = true;
       simulatorState.selectedReportText = "";
@@ -468,9 +496,10 @@
       const sweepLanes = Array.isArray(simulatorState.sweepSummary?.lanes) ? simulatorState.sweepSummary.lanes : [];
       const sweepSeries = SimUI.computeSweepSeries ? SimUI.computeSweepSeries(sweepLanes) : [];
       if (sweepSeries.length) {
+        const strategyList = sweepSeries.map((s) => `<div>- ${s.label}</div>`).join("");
         const chartWrap = document.createElement("div");
         chartWrap.className = "simChartWrap";
-        chartWrap.innerHTML = `<div class="simChartHead"><strong>Deck A success rate vs certainty (sweep)</strong><div class="simLegend">${sweepSeries.map((s) => `<span style="color:${s.color}">${s.label}</span>`).join("")}</div></div>${SimUI.renderSweepWinrateSvg(sweepSeries)}`;
+        chartWrap.innerHTML = `<div class="simChartHead"><strong>Deck A success rate vs certainty (strategy sweep)</strong><div class="zoneMeta">Strategies:${strategyList}</div><div class="simLegend">${sweepSeries.map((s) => `<span style="color:${s.color}">${s.label}</span>`).join("")}</div></div>${SimUI.renderSweepWinrateSvg(sweepSeries)}`;
         panel.appendChild(chartWrap);
       }
 
