@@ -379,11 +379,36 @@ function createServer() {
     return next;
   }
 
+  const SWEEP_FEATURE_DEFS = {
+    summoningSickness: { scope: "rules", label: "Summoning Sickness" },
+    noBlockAfterAttacking: { scope: "rules", label: "No block after attacking" },
+    smartBlocking: { scope: "ai", label: "Smart Blocking" },
+    smartAttacking: { scope: "ai", label: "Smart Attacking" }
+  };
+
+  function applyStrategyTogglesToConfig(baseConfig, toggles) {
+    const nextConfig = {
+      ...baseConfig,
+      rules: { ...(baseConfig?.rules || {}) },
+      ai: { ...(baseConfig?.ai || {}) }
+    };
+    Object.entries(toggles || {}).forEach(([key, value]) => {
+      const featureDef = SWEEP_FEATURE_DEFS[key];
+      if (!featureDef) return;
+      if (featureDef.scope === "rules") nextConfig.rules[key] = !!value;
+      if (featureDef.scope === "ai") nextConfig.ai[key] = !!value;
+    });
+    return nextConfig;
+  }
+
   function buildLaneSummary({ lane, batch }) {
     const winsA = Number(batch?.summary?.winsA || 0);
     const winsB = Number(batch?.summary?.winsB || 0);
     const games = Number(batch?.summary?.games || 0);
     return {
+      strategyName: lane.strategyName,
+      strategyIndex: lane.strategyIndex,
+      strategyToggles: lane.strategyToggles,
       toggleKey: lane.toggleKey,
       toggleValue: lane.toggleValue,
       certaintyPct: lane.certaintyPct,
@@ -399,18 +424,35 @@ function createServer() {
     const certaintySteps = Array.isArray(sweep.certaintySteps) && sweep.certaintySteps.length
       ? sweep.certaintySteps
       : [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
-    const toggleValues = Array.isArray(sweep.toggleValues) && sweep.toggleValues.length ? sweep.toggleValues : [false, true];
+    const strategies = Array.isArray(sweep.strategies) && sweep.strategies.length
+      ? sweep.strategies
+      : [
+          {
+            name: `${sweep.toggleKey} OFF`,
+            toggles: { [sweep.toggleKey]: false },
+            legacyToggleValue: false
+          },
+          {
+            name: `${sweep.toggleKey} ON`,
+            toggles: { [sweep.toggleKey]: true },
+            legacyToggleValue: true
+          }
+        ];
     const sweepRows = [];
 
-    toggleValues.forEach((toggleValue, toggleIdx) => {
+    strategies.forEach((strategy, strategyIdx) => {
       certaintySteps.forEach((certaintyPct) => {
-        const laneSeed = (Number(sweep.baseSeed || 0) + (toggleValue ? 1000 : 0) + Number(certaintyPct || 0) + (toggleIdx * 100000)) >>> 0;
-        const laneAi = applyLaneCertainty({ ...(config.ai || {}), [sweep.toggleKey]: !!toggleValue }, sweep.certaintyKey, certaintyPct);
-        const laneConfig = { ...config, ai: laneAi };
+        const laneSeed = (Number(sweep.baseSeed || 0) + Number(certaintyPct || 0) + (strategyIdx * 1000000)) >>> 0;
+        const laneConfigWithStrategy = applyStrategyTogglesToConfig(config, strategy.toggles || {});
+        const laneAi = applyLaneCertainty({ ...(laneConfigWithStrategy.ai || {}) }, sweep.certaintyKey, certaintyPct);
+        const laneConfig = { ...laneConfigWithStrategy, ai: laneAi };
         const batch = simulateMany({ iterations: sweep.iterationsPerLane, seedBase: laneSeed, deckA, deckB, config: laneConfig });
         const lane = {
+          strategyName: String(strategy.name || `Strategy ${strategyIdx + 1}`),
+          strategyIndex: strategyIdx,
+          strategyToggles: strategy.toggles || {},
           toggleKey: sweep.toggleKey,
-          toggleValue: !!toggleValue,
+          toggleValue: strategy.legacyToggleValue,
           certaintyPct,
           seed: laneSeed
         };
@@ -419,6 +461,8 @@ function createServer() {
           console.info("[sim.sweep] lane", {
             toggleKey: lane.toggleKey,
             toggleValue: lane.toggleValue,
+            strategyName: lane.strategyName,
+            strategyIndex: lane.strategyIndex,
             certaintyPct: lane.certaintyPct,
             seed: lane.seed,
             games: laneSummary.games,
@@ -480,6 +524,12 @@ function createServer() {
         .map((x) => String(x).trim())
         .filter((x) => x === "0" || x === "1")
         .map((x) => x === "1");
+      const sweepFeatureKeysRaw = String(req.query.sweepFeatureKeys || "").trim();
+      const sweepFeatureKeys = sweepFeatureKeysRaw
+        .split(",")
+        .map((x) => String(x).trim())
+        .filter((x) => !!SWEEP_FEATURE_DEFS[x]);
+      const sweepIncludeCombined = String(req.query.sweepIncludeCombined || "0") === "1";
       const debugSweep = String(req.query.simDebugSweep || "0") === "1";
 
       const { deckA, deckB } = buildSimDecks(deckMode);
@@ -506,11 +556,33 @@ function createServer() {
       const { sampleGame, batch, runsMeta } = runSingleSimulation({ iterations, seed, config, deckA, deckB });
       const ruleStamp = getSimulationRulesStamp();
 
+      const strategyLabel = (featureKey) => SWEEP_FEATURE_DEFS[featureKey]?.label || featureKey;
+      const strategyLabelCombined = (keys) => {
+        if (keys.length <= 1) return strategyLabel(keys[0] || "Combined");
+        const short = keys.map((k) => strategyLabel(k).split(" ").map((word) => word[0]).join(""));
+        return `Combined ${short.join(" + ")}`;
+      };
+
+      const sweepStrategies = sweepFeatureKeys.map((featureKey) => ({
+        name: strategyLabel(featureKey),
+        toggles: { [featureKey]: true }
+      }));
+      if (sweepIncludeCombined && sweepFeatureKeys.length > 1) {
+        sweepStrategies.push({
+          name: strategyLabelCombined(sweepFeatureKeys),
+          toggles: sweepFeatureKeys.reduce((acc, key) => {
+            acc[key] = true;
+            return acc;
+          }, {})
+        });
+      }
+
       const sweep = sweepEnabled
         ? {
             enabled: true,
             toggleKey: sweepToggleKey,
             toggleValues: sweepToggleValues.length ? sweepToggleValues : [false, true],
+            strategies: sweepStrategies,
             certaintyKey: sweepCertaintyKey,
             certaintySteps: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
             iterationsPerLane: sweepIterationsPerLane,
