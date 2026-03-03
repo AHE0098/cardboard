@@ -333,6 +333,15 @@ state.mode ||= "solo";
 state.activePlayerKey ||= "p1";
 
 function updateSubtitle() {
+  if (typeof opts.getSubtitleText === "function") {
+    subtitle.textContent = String(opts.getSubtitleText({
+      mode: getMode(),
+      activePlayer: getPlayer(getActivePlayerKey()),
+      state
+    }) || "");
+    return;
+  }
+
   // battle: show which player you're "viewing"
   if (getMode() === "battle") {
     const active = getPlayer(getActivePlayerKey());
@@ -4181,6 +4190,11 @@ function mountLegacyBattleInApp() {
     dispatch,
     authoritativeDispatch: true,
     debugDnD: DEBUG_DND,
+    getSubtitleText: ({ activePlayer }) => {
+      const viewing = activePlayer?.name || battleViewRole || session.role || "-";
+      const roomLabel = battleRoomId ? `Game ${battleRoomId}` : "Game -";
+      return `Battle • ${roomLabel} • Viewing: ${viewing}`;
+    },
     persistIntervalMs: 0
   });
 
