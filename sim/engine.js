@@ -159,6 +159,11 @@ function canAttackWithCreature(game, creature, config) {
   return Number(creature?.enteredTurn) < Number(game.turn);
 }
 
+function canBlockWithCreature(game, creature, config) {
+  if (!config?.rules?.noBlockAfterAttacking) return true;
+  return Number(creature?.lastAttackedTurn) !== (Number(game.turn) - 1);
+}
+
 function verifyConservation(game) {
   for (const player of game.players) {
     const all = [
@@ -254,6 +259,18 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
     rng: game.rng
   });
   const chosenAttackers = attackChoice.attackers;
+  for (const attacker of chosenAttackers) attacker.lastAttackedTurn = game.turn;
+  if (config.rules?.debugRules && chosenAttackers.length) {
+    const markEvent = {
+      turn: game.turn,
+      type: 'rules_debug_attack_marked',
+      attacker: attackerP.name,
+      markedAttackers: chosenAttackers.map((creature) => creature.id),
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, markEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', markEvent);
+  }
   const summoningSick = attackerP.battlefieldCreatures
     .filter((creature) => !canAttackWithCreature(game, creature, config))
     .map((creature) => creature.id);
@@ -275,7 +292,23 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
     return;
   }
 
-  const blockChoice = chooseBlocks(chosenAttackers, defenders, {
+  const ineligibleDefenders = defenders
+    .filter((creature) => !canBlockWithCreature(game, creature, config))
+    .map((creature) => creature.id);
+  const legalDefenders = defenders.filter((creature) => canBlockWithCreature(game, creature, config));
+  if (config.rules?.debugRules && ineligibleDefenders.length) {
+    const filteredEvent = {
+      turn: game.turn,
+      type: 'rules_debug_blockers_filtered',
+      defender: defenderP.name,
+      blockedFromDefending: ineligibleDefenders,
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, filteredEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', filteredEvent);
+  }
+
+  const blockChoice = chooseBlocks(chosenAttackers, legalDefenders, {
     ai: config.ai,
     blockScoring: config.blockScoring,
     rng: game.rng
@@ -478,12 +511,16 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
     },
     rules: {
       summoningSickness: false,
+      noBlockAfterAttacking: false,
+      debugRules: false,
       ...(config?.rules || {})
     },
     ...config
   };
   cfg.rules = {
     summoningSickness: false,
+    noBlockAfterAttacking: false,
+    debugRules: false,
     ...(cfg.rules || {})
   };
 
