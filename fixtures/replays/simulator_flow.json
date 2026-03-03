@@ -1,0 +1,11 @@
+{
+  "name": "simulator fixed-seed flow",
+  "mode": "sim",
+  "seed": 1337,
+  "decks": {
+    "a": "starter",
+    "b": "starter"
+  },
+  "actions": [],
+  "expectedDigest": "ec7f0281b2aff32d"
+}
