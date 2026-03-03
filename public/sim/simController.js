@@ -151,6 +151,90 @@
     appendCertaintySlider("Attack", "attackCertainty");
     appendCertaintySlider("Defend", "defendCertainty");
 
+    const sweepEnabledField = document.createElement("div");
+    sweepEnabledField.className = "simField";
+    const sweepEnabledLabel = document.createElement("label");
+    sweepEnabledLabel.className = "zoneMeta";
+    const sweepEnabledInput = document.createElement("input");
+    sweepEnabledInput.type = "checkbox";
+    sweepEnabledInput.checked = !!simulatorState.sweepEnabled;
+    sweepEnabledInput.onchange = () => {
+      simulatorState.sweepEnabled = !!sweepEnabledInput.checked;
+      persistPlayerSaveDebounced();
+    };
+    sweepEnabledLabel.append(sweepEnabledInput, document.createTextNode(" Enable sweep"));
+    sweepEnabledField.appendChild(sweepEnabledLabel);
+    numericRow.appendChild(sweepEnabledField);
+
+    const sweepToggleField = document.createElement("div");
+    sweepToggleField.className = "simField";
+    const sweepToggleLabel = document.createElement("label");
+    sweepToggleLabel.className = "zoneMeta";
+    sweepToggleLabel.textContent = "Toggle under study";
+    const sweepToggleSelect = document.createElement("select");
+    sweepToggleSelect.className = "menuInput";
+    [["smartBlocking", "SMART BLOCKING"], ["smartAttacking", "SMART ATTACKING"]].forEach(([value, text]) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      if (simulatorState.sweepToggleKey === value) opt.selected = true;
+      sweepToggleSelect.appendChild(opt);
+    });
+    sweepToggleSelect.onchange = () => {
+      simulatorState.sweepToggleKey = sweepToggleSelect.value;
+      persistPlayerSaveDebounced();
+    };
+    sweepToggleField.append(sweepToggleLabel, sweepToggleSelect);
+    numericRow.appendChild(sweepToggleField);
+
+    const sweepCertaintyField = document.createElement("div");
+    sweepCertaintyField.className = "simField";
+    const sweepCertaintyLabel = document.createElement("label");
+    sweepCertaintyLabel.className = "zoneMeta";
+    sweepCertaintyLabel.textContent = "Apply certainty to";
+    const sweepCertaintySelect = document.createElement("select");
+    sweepCertaintySelect.className = "menuInput";
+    [["attack", "Attack"], ["defend", "Defend"], ["both", "Both"]].forEach(([value, text]) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      if (simulatorState.sweepCertaintyKey === value) opt.selected = true;
+      sweepCertaintySelect.appendChild(opt);
+    });
+    sweepCertaintySelect.onchange = () => {
+      simulatorState.sweepCertaintyKey = sweepCertaintySelect.value;
+      persistPlayerSaveDebounced();
+    };
+    sweepCertaintyField.append(sweepCertaintyLabel, sweepCertaintySelect);
+    numericRow.appendChild(sweepCertaintyField);
+
+    [["Iterations / lane", "sweepIterationsPerLane", 1, 5000], ["Sweep concurrency", "sweepConcurrency", 1, 4]].forEach(([labelText, key, min, max]) => {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = String(labelText);
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.type = "number";
+      input.min = String(min);
+      input.max = String(max);
+      input.value = String(simulatorState[key]);
+      input.onchange = () => {
+        const v = Number(input.value);
+        if (Number.isFinite(v)) simulatorState[key] = Math.max(min, Math.min(max, Math.floor(v)));
+        input.value = String(simulatorState[key]);
+        persistPlayerSaveDebounced();
+      };
+      field.append(label, input);
+      numericRow.appendChild(field);
+    });
+
+    const sweepNote = document.createElement("div");
+    sweepNote.className = "zoneMeta";
+    sweepNote.textContent = "Sweep uses fixed certainty lanes: 0% to 100% by 10%.";
+    numericRow.appendChild(sweepNote);
+
     controls.appendChild(numericRow);
     panel.appendChild(controls);
 
@@ -164,6 +248,45 @@
     stopBtn.className = "menuBtn";
     stopBtn.textContent = "Cancel";
     stopBtn.disabled = !simulatorState.isRunning;
+
+    const runSweepBtn = document.createElement("button");
+    runSweepBtn.className = "menuBtn";
+    runSweepBtn.textContent = simulatorState.isRunning ? "Running..." : "Run sweep";
+    runSweepBtn.disabled = simulatorState.isRunning;
+
+    function buildBaseRunQuery() {
+      return {
+        iterations: String(simulatorState.iterations),
+        seed: String(simulatorState.seed),
+        maxTurns: String(simulatorState.maxTurns),
+        startingLife: String(simulatorState.startingLife),
+        log: simulatorState.logMode,
+        includeSampleLog: "1",
+        summoningSickness: simulatorState.summoningSickness ? "1" : "0",
+        noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0",
+        smartBlocking: simulatorState.smartBlocking ? "1" : "0",
+        smartAttacking: simulatorState.smartAttacking ? "1" : "0",
+        attackCertainty: String(simulatorState.attackCertainty),
+        defendCertainty: String(simulatorState.defendCertainty),
+        aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0"
+      };
+    }
+
+    async function executeSimulationRun({ isSweep }) {
+      const qs = new URLSearchParams({
+        ...buildBaseRunQuery(),
+        sweepEnabled: isSweep ? "1" : "0",
+        sweepToggleKey: String(simulatorState.sweepToggleKey || "smartBlocking"),
+        sweepCertaintyKey: String(simulatorState.sweepCertaintyKey || "both"),
+        sweepIterationsPerLane: String(simulatorState.sweepIterationsPerLane || simulatorState.iterations),
+        sweepConcurrency: String(simulatorState.sweepConcurrency || 2),
+        sweepToggleValues: "0,1"
+      });
+      const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      return data;
+    }
 
     runBtn.onclick = async () => {
       const deckA = getDeckById(simulatorState.deckAId);
@@ -186,10 +309,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
-        const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
-        const data = await resp.json();
-        if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+        const data = await executeSimulationRun({ isSweep: false });
 
         simulatorState.finishedAt = Date.now();
         simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
@@ -197,6 +317,7 @@
         simulatorState.sampleGame = data.sampleGame || null;
         simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
         simulatorState.lastRawResult = data;
+        simulatorState.sweepSummary = data.sweepSummary || null;
         simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
         simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA.name || simulatorState.deckAId, deckBName: deckB.name || simulatorState.deckBId });
         if (isSimReportDebugEnabled()) {
@@ -227,8 +348,45 @@
       }
     };
 
+    runSweepBtn.onclick = async () => {
+      const deckA = getDeckById(simulatorState.deckAId);
+      const deckB = getDeckById(simulatorState.deckBId);
+      if (!deckA || !deckB) { simulatorState.lastError = "Please select both Deck A and Deck B."; renderApp(); return; }
+      if (simulatorState.sweepIterationsPerLane > 2000) simulatorState.lastError = "Warning: high sweep iterations per lane may be slow.";
+
+      simulatorState.isRunning = true;
+      simulatorState.selectedReportText = "";
+      simulatorState.runId = uid();
+      simulatorState.startedAt = Date.now();
+      renderApp();
+
+      if (getAbortController()) getAbortController().abort();
+      setAbortController(new AbortController());
+
+      try {
+        const data = await executeSimulationRun({ isSweep: true });
+        simulatorState.finishedAt = Date.now();
+        simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
+        simulatorState.summary = data.summary || null;
+        simulatorState.sampleGame = data.sampleGame || null;
+        simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
+        simulatorState.lastRawResult = data;
+        simulatorState.sweepSummary = data.sweepSummary || null;
+        simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
+        simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA.name || simulatorState.deckAId, deckBName: deckB.name || simulatorState.deckBId });
+      } catch (err) {
+        if (err?.name === "AbortError") simulatorState.lastError = "Simulation cancelled.";
+        else simulatorState.lastError = String(err?.message || err || "simulation failed");
+      } finally {
+        simulatorState.isRunning = false;
+        setAbortController(null);
+        persistPlayerSaveDebounced();
+        renderApp();
+      }
+    };
+
     stopBtn.onclick = () => { if (getAbortController()) getAbortController().abort(); simulatorState.isRunning = false; simulatorState.lastError = "Simulation cancelled."; renderApp(); };
-    btnRow.append(runBtn, stopBtn);
+    btnRow.append(runBtn, runSweepBtn, stopBtn);
 
     const copyJsonBtn = document.createElement("button");
     copyJsonBtn.className = "menuBtn";
@@ -307,6 +465,15 @@
         panel.appendChild(chartWrap);
       }
 
+      const sweepLanes = Array.isArray(simulatorState.sweepSummary?.lanes) ? simulatorState.sweepSummary.lanes : [];
+      const sweepSeries = SimUI.computeSweepSeries ? SimUI.computeSweepSeries(sweepLanes) : [];
+      if (sweepSeries.length) {
+        const chartWrap = document.createElement("div");
+        chartWrap.className = "simChartWrap";
+        chartWrap.innerHTML = `<div class="simChartHead"><strong>Deck A success rate vs certainty (sweep)</strong><div class="simLegend">${sweepSeries.map((s) => `<span style="color:${s.color}">${s.label}</span>`).join("")}</div></div>${SimUI.renderSweepWinrateSvg(sweepSeries)}`;
+        panel.appendChild(chartWrap);
+      }
+
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
       const table = document.createElement("table");
@@ -347,7 +514,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0", noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0", smartBlocking: simulatorState.smartBlocking ? "1" : "0", smartAttacking: simulatorState.smartAttacking ? "1" : "0", attackCertainty: String(simulatorState.attackCertainty), defendCertainty: String(simulatorState.defendCertainty), aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0" });
+          const qs = new URLSearchParams({ ...buildBaseRunQuery(), iterations: "1", seed: String(seedVal), sweepEnabled: "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;
