@@ -44,6 +44,49 @@
     </svg>`;
   }
 
+  function computeSweepSeries(lanes) {
+    if (!Array.isArray(lanes) || !lanes.length) return [];
+    const grouped = new Map();
+    lanes.forEach((lane) => {
+      const key = lane?.toggleValue ? "on" : "off";
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push({
+        certaintyPct: Number(lane?.certaintyPct || 0),
+        winRatePct: Number(lane?.deckA_winRate || 0) * 100
+      });
+    });
+    return Array.from(grouped.entries()).map(([key, points]) => ({
+      key,
+      label: key === "on" ? "Toggle ON" : "Toggle OFF",
+      color: key === "on" ? "#67d17e" : "#f4af55",
+      points: points.sort((a, b) => a.certaintyPct - b.certaintyPct)
+    }));
+  }
+
+  function renderSweepWinrateSvg(series) {
+    if (!Array.isArray(series) || !series.length) return "";
+    const width = 620;
+    const height = 260;
+    const pad = { left: 48, right: 16, top: 18, bottom: 34 };
+    const innerWidth = width - pad.left - pad.right;
+    const innerHeight = height - pad.top - pad.bottom;
+    const xAt = (pct) => pad.left + ((Math.max(0, Math.min(100, pct)) / 100) * innerWidth);
+    const yAt = (pct) => pad.top + ((100 - Math.max(0, Math.min(100, pct))) / 100) * innerHeight;
+    const yTicks = [0, 25, 50, 75, 100];
+    const xTicks = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    const pathFor = (points) => points.map((p, idx) => `${idx === 0 ? "M" : "L"}${xAt(p.certaintyPct).toFixed(2)},${yAt(p.winRatePct).toFixed(2)}`).join(" ");
+    return `<svg viewBox="0 0 ${width} ${height}" class="simChart" role="img" aria-label="Deck A success rate by certainty sweep">
+      ${yTicks.map((v) => `<line x1="${pad.left}" x2="${width - pad.right}" y1="${yAt(v)}" y2="${yAt(v)}" stroke="rgba(255,255,255,0.08)" />`).join("")}
+      ${xTicks.map((v) => `<line x1="${xAt(v)}" x2="${xAt(v)}" y1="${pad.top}" y2="${height - pad.bottom}" stroke="rgba(255,255,255,0.05)" />`).join("")}
+      ${series.map((s) => `<path d="${pathFor(s.points)}" fill="none" stroke="${s.color}" stroke-width="2.5" />`).join("")}
+      ${series.map((s) => s.points.map((p) => `<circle cx="${xAt(p.certaintyPct)}" cy="${yAt(p.winRatePct)}" r="3" fill="${s.color}" />`).join("")).join("")}
+      ${yTicks.map((v) => `<text x="${pad.left - 8}" y="${yAt(v) + 4}" text-anchor="end" fill="rgba(255,255,255,0.7)" font-size="11">${v}%</text>`).join("")}
+      ${xTicks.map((v) => `<text x="${xAt(v)}" y="${height - 8}" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">${v}</text>`).join("")}
+    </svg>`;
+  }
+
   SimUI.computeWinrateSeries = computeWinrateSeries;
   SimUI.renderWinrateSvg = renderWinrateSvg;
+  SimUI.computeSweepSeries = computeSweepSeries;
+  SimUI.renderSweepWinrateSvg = renderSweepWinrateSvg;
 })(window);
