@@ -1,0 +1,87 @@
+{
+  "name": "sandbox-like intent flow",
+  "mode": "server-intent",
+  "seed": 101,
+  "initialState": {
+    "sharedZones": {
+      "stack": []
+    },
+    "players": {
+      "p1": {
+        "id": "p1",
+        "name": "Alice",
+        "zones": {
+          "hand": [
+            "c1",
+            "c2"
+          ],
+          "deck": [
+            "c3",
+            "c4"
+          ],
+          "graveyard": [],
+          "lands": [],
+          "permanents": []
+        }
+      },
+      "p2": {
+        "id": "p2",
+        "name": "Bob",
+        "zones": {
+          "hand": [
+            "d1"
+          ],
+          "deck": [
+            "d2",
+            "d3"
+          ],
+          "graveyard": [],
+          "lands": [],
+          "permanents": []
+        }
+      }
+    },
+    "tapped": {},
+    "tarped": {},
+    "version": 1
+  },
+  "actions": [
+    {
+      "role": "p1",
+      "intent": {
+        "type": "MOVE_CARD",
+        "payload": {
+          "cardId": "c1",
+          "from": {
+            "owner": "p1",
+            "zone": "hand"
+          },
+          "to": {
+            "owner": "p1",
+            "zone": "lands"
+          }
+        }
+      }
+    },
+    {
+      "role": "p1",
+      "intent": {
+        "type": "DRAW_CARD",
+        "payload": {
+          "owner": "p1"
+        }
+      }
+    },
+    {
+      "role": "p1",
+      "intent": {
+        "type": "TOGGLE_TAP",
+        "payload": {
+          "cardId": "c1",
+          "kind": "tapped"
+        }
+      }
+    }
+  ],
+  "expectedDigest": "4ec23c5acc53f298"
+}
