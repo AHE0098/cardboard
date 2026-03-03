@@ -2453,6 +2453,7 @@ Screen + data architecture:
       sweepToggleKey: "smartBlocking",
       sweepFeatureKeys: [],
       sweepIncludeCombined: false,
+      sweepStrategies: [{ id: "default-strategy-1", name: "Strategy 1", enabled: true, toggles: { smartBlocking: true } }],
       sweepCertaintyKey: "both",
       sweepIterationsPerLane: 100,
       sweepConcurrency: 2,
@@ -2936,6 +2937,24 @@ case "TOGGLE_TAP": {
           ? savedSim.sweepFeatureKeys.filter((key) => ["summoningSickness", "noBlockAfterAttacking", "smartBlocking", "smartAttacking"].includes(key))
           : (["smartBlocking", "smartAttacking"].includes(savedSim.sweepToggleKey) ? [savedSim.sweepToggleKey] : simulatorState.sweepFeatureKeys),
         sweepIncludeCombined: !!savedSim.sweepIncludeCombined,
+        sweepStrategies: Array.isArray(savedSim.sweepStrategies) && savedSim.sweepStrategies.length
+          ? savedSim.sweepStrategies.map((strategy, idx) => ({
+              id: String(strategy?.id || `saved-strategy-${idx + 1}`),
+              name: String(strategy?.name || `Strategy ${idx + 1}`),
+              enabled: strategy?.enabled !== false,
+              toggles: Object.entries(strategy?.toggles || {}).reduce((acc, [key, value]) => {
+                if (["summoningSickness", "noBlockAfterAttacking", "smartBlocking", "smartAttacking"].includes(key) && value) acc[key] = true;
+                return acc;
+              }, {})
+            }))
+          : (Array.isArray(savedSim.sweepFeatureKeys) && savedSim.sweepFeatureKeys.length
+            ? savedSim.sweepFeatureKeys.map((key, idx) => ({
+                id: `legacy-feature-${key}-${idx + 1}`,
+                name: key,
+                enabled: true,
+                toggles: { [key]: true }
+              }))
+            : simulatorState.sweepStrategies),
         sweepCertaintyKey: ["attack", "defend", "both"].includes(savedSim.sweepCertaintyKey) ? savedSim.sweepCertaintyKey : simulatorState.sweepCertaintyKey,
         sweepIterationsPerLane: Number.isFinite(Number(savedSim.sweepIterationsPerLane)) ? Math.max(1, Math.min(5000, Math.floor(Number(savedSim.sweepIterationsPerLane)))) : simulatorState.sweepIterationsPerLane,
         sweepConcurrency: Number.isFinite(Number(savedSim.sweepConcurrency)) ? Math.max(1, Math.min(4, Math.floor(Number(savedSim.sweepConcurrency)))) : simulatorState.sweepConcurrency,
