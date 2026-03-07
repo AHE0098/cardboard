@@ -214,6 +214,200 @@
     let dragging = null;
     let inspector = null;
     let inspectorDragging = null;
+    let dragTokenSeq = 0;
+
+    // Centralized transient drag state for battle/sandbox board interactions.
+    // The rendered ghost/highlight comes from this model so authoritative rerenders
+    // can invalidate safely without depending on source DOM node lifecycle.
+    const dragInteraction = {
+      active: false,
+      status: "idle", // idle | pending | dragging | dropping | canceled
+      dragToken: null,
+      pointerId: null,
+      cardId: null,
+      fromZoneKey: null,
+      sourceOwner: null,
+      pointer: { x: 0, y: 0 },
+      candidateDropTarget: null,
+      startedAtVersion: 0,
+      sourceEl: null,
+      holdTimer: null,
+      listenersBound: false,
+      _pendingStart: null
+    };
+
+    function getAuthoritativeVersion() {
+      return Number(state?.version || 0);
+    }
+
+    function bindGlobalDragListeners() {
+      if (dragInteraction.listenersBound) return;
+      dragInteraction.listenersBound = true;
+      window.addEventListener("pointermove", onGlobalDragPointerMove, { passive: false });
+      window.addEventListener("pointerup", onGlobalDragPointerUp, { passive: false });
+      window.addEventListener("pointercancel", onGlobalDragPointerCancel, { passive: false });
+    }
+
+    function unbindGlobalDragListeners() {
+      if (!dragInteraction.listenersBound) return;
+      dragInteraction.listenersBound = false;
+      window.removeEventListener("pointermove", onGlobalDragPointerMove);
+      window.removeEventListener("pointerup", onGlobalDragPointerUp);
+      window.removeEventListener("pointercancel", onGlobalDragPointerCancel);
+    }
+
+    function syncDragOverlayDOM() {
+      if (!dragLayer) return;
+      dragLayer.replaceChildren();
+      if (!dragInteraction.active || dragInteraction.status !== "dragging") return;
+
+      const ghost = document.createElement("div");
+      ghost.className = "dragGhost";
+      ghost.textContent = String(dragInteraction.cardId || "");
+      ghost.style.pointerEvents = "none";
+      ghost.style.left = `${dragInteraction.pointer.x}px`;
+      ghost.style.top = `${dragInteraction.pointer.y}px`;
+      dragLayer.appendChild(ghost);
+    }
+
+    function setDragDropCandidate(zoneKey) {
+      dragInteraction.candidateDropTarget = zoneKey || null;
+      syncDropTargetHighlights(dragInteraction.candidateDropTarget);
+      syncDragOverlayDOM();
+    }
+
+    function cancelDragInteraction(reason = "unknown") {
+      clearTimeout(dragInteraction.holdTimer);
+      dragInteraction.holdTimer = null;
+
+      if (dragInteraction.sourceEl && dragInteraction.pointerId != null) {
+        try { dragInteraction.sourceEl.releasePointerCapture(dragInteraction.pointerId); } catch {}
+      }
+
+      const hadActiveDrag = dragInteraction.active;
+      dragInteraction.active = false;
+      dragInteraction.status = "idle";
+      dragInteraction.dragToken = null;
+      dragInteraction.pointerId = null;
+      dragInteraction.cardId = null;
+      dragInteraction.fromZoneKey = null;
+      dragInteraction.sourceOwner = null;
+      dragInteraction.pointer = { x: 0, y: 0 };
+      dragInteraction.candidateDropTarget = null;
+      dragInteraction.startedAtVersion = 0;
+      dragInteraction.sourceEl = null;
+      dragInteraction._pendingStart = null;
+
+      dragging = null;
+      syncDropTargetHighlights(null);
+      syncDragOverlayDOM();
+      unbindGlobalDragListeners();
+
+      if (hadActiveDrag) {
+        debugLog({ event: "cancel", reason });
+      }
+    }
+
+    function beginCardDrag(e, { cardId, fromZoneKey }) {
+      cancelDragInteraction("replace_active_drag");
+      dragInteraction.active = true;
+      dragInteraction.status = "pending";
+      dragInteraction.dragToken = `drag-${++dragTokenSeq}`;
+      dragInteraction.pointerId = e.pointerId;
+      dragInteraction.cardId = String(cardId || "").trim();
+      dragInteraction.fromZoneKey = fromZoneKey;
+      dragInteraction.sourceOwner = getActivePlayerKey();
+      dragInteraction.pointer = { x: e.clientX, y: e.clientY };
+      dragInteraction.startedAtVersion = getAuthoritativeVersion();
+      dragInteraction.sourceEl = e.currentTarget || null;
+
+      bindGlobalDragListeners();
+
+      try { dragInteraction.sourceEl?.setPointerCapture?.(dragInteraction.pointerId); } catch {}
+
+      const start = { x: e.clientX, y: e.clientY };
+
+      const lift = () => {
+        if (!dragInteraction.active || dragInteraction.status !== "pending") return;
+        dragInteraction.status = "dragging";
+        dragging = {
+          cardId: dragInteraction.cardId,
+          fromZoneKey: dragInteraction.fromZoneKey,
+          pointerId: dragInteraction.pointerId,
+          dragToken: dragInteraction.dragToken
+        };
+        setDragDropCandidate(null);
+        syncDragOverlayDOM();
+        debugLog({
+          event: "dragStart",
+          dragToken: dragInteraction.dragToken,
+          pointerId: dragInteraction.pointerId,
+          cardId: dragInteraction.cardId,
+          fromZone: dragInteraction.fromZoneKey,
+          sourcePlayer: dragInteraction.sourceOwner,
+          startedAtVersion: dragInteraction.startedAtVersion
+        });
+        if (navigator.vibrate) navigator.vibrate(10);
+      };
+
+      dragInteraction.holdTimer = setTimeout(lift, 320);
+
+      const onLostCapture = (evt) => {
+        if (evt.pointerId !== dragInteraction.pointerId) return;
+        cancelDragInteraction("lost_pointer_capture");
+      };
+      dragInteraction.sourceEl?.addEventListener?.("lostpointercapture", onLostCapture, { once: true });
+
+      dragInteraction._pendingStart = start;
+    }
+
+    function onGlobalDragPointerMove(ev) {
+      if (!dragInteraction.active) return;
+      if (ev.pointerId !== dragInteraction.pointerId) return;
+
+      dragInteraction.pointer = { x: ev.clientX, y: ev.clientY };
+      const start = dragInteraction._pendingStart || dragInteraction.pointer;
+      const dx = ev.clientX - start.x;
+      const dy = ev.clientY - start.y;
+
+      if (dragInteraction.status === "pending") {
+        const movedFar = (Math.abs(dx) > 22 || Math.abs(dy) > 22);
+        if (movedFar) {
+          clearTimeout(dragInteraction.holdTimer);
+          dragInteraction.holdTimer = null;
+          cancelDragInteraction("gesture_scrolled");
+        }
+        return;
+      }
+
+      if (dragInteraction.status !== "dragging") return;
+      ev.preventDefault();
+      const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
+      setDragDropCandidate(overZoneKey);
+    }
+
+    function onGlobalDragPointerUp(ev) {
+      if (!dragInteraction.active) return;
+      if (ev.pointerId !== dragInteraction.pointerId) return;
+      clearTimeout(dragInteraction.holdTimer);
+      dragInteraction.holdTimer = null;
+
+      if (dragInteraction.status !== "dragging") {
+        cancelDragInteraction("pointer_up_without_drag");
+        return;
+      }
+
+      ev.preventDefault();
+      const dropZoneKey = hitTestZone(ev.clientX, ev.clientY);
+      finalizeDrop(dropZoneKey);
+    }
+
+    function onGlobalDragPointerCancel(ev) {
+      if (!dragInteraction.active) return;
+      if (ev.pointerId !== dragInteraction.pointerId) return;
+      ev.preventDefault();
+      cancelDragInteraction("pointer_cancel");
+    }
 
     // --- helpers rewritten to go through api ---
     function getMode() { return api.getMode(); }
@@ -1609,101 +1803,10 @@ function renderFocus(zoneKey) {
 
 
   function onCardPointerDown(e) {
-  
     const cardEl = e.currentTarget;
     const cardId = String(cardEl.dataset.cardId || "").trim();
     const fromZoneKey = cardEl.dataset.fromZoneKey;
-
-    // small press-hold before lifting
-    const pointerId = e.pointerId;
-    try { cardEl.setPointerCapture(pointerId); } catch {}
-
-    const start = { x: e.clientX, y: e.clientY, t: performance.now() };
-    let lifted = false;
-    let holdTimer = null;
-
-    const cancelAll = () => {
-      clearTimeout(holdTimer);
-      try { cardEl.releasePointerCapture(pointerId); } catch {}
-      cardEl.removeEventListener("pointermove", onMove);
-      cardEl.removeEventListener("pointerup", onUp);
-      cardEl.removeEventListener("pointercancel", onCancel);
-    };
-
-    const lift = () => {
-      if (lifted) return;
-      lifted = true;
-
-      const ghost = document.createElement("div");
-      ghost.className = "dragGhost";
-      ghost.textContent = cardId;
-      ghost.style.pointerEvents = "none";
-      dragLayer.appendChild(ghost);
-      positionGhost(ghost, e.clientX, e.clientY);
-
-      dragging = { cardId, fromZoneKey, ghostEl: ghost, pointerId };
-      debugLog({ event: "dragStart", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
-      syncDropTargetHighlights(null);
-
-      // little vibration if supported
-      if (navigator.vibrate) navigator.vibrate(10);
-    };
-
-    holdTimer = setTimeout(lift, 320);
-
-    const onMove = (ev) => {
-      const dx = ev.clientX - start.x;
-      const dy = ev.clientY - start.y;
-
-// ✅ Do NOT auto-lift into drag just because of tiny movement (mobile jitter).
-// But also do NOT cancel hold unless the user is clearly scrolling.
-if (!lifted) {
-  const movedFar = (Math.abs(dx) > 22 || Math.abs(dy) > 22);
-  if (movedFar) {
-    clearTimeout(holdTimer); // they’re likely scrolling, not trying to drag a card
-  }
-}
-
-
-
-      if (dragging?.ghostEl) {
-        ev.preventDefault();
-        positionGhost(dragging.ghostEl, ev.clientX, ev.clientY);
-        const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
-        syncDropTargetHighlights(overZoneKey);
-      }
-    };
-
-    const onUp = (ev) => {
-      clearTimeout(holdTimer);
-
-      if (!lifted || !dragging) {
-        // Keep native click synthesis for tap/double-tap interactions
-        // when no drag action was started.
-        cancelAll();
-        return;
-      }
-
-      ev.preventDefault();
-
-      const dropZoneKey = hitTestZone(ev.clientX, ev.clientY);
-      debugLog({ event: "dropCommit", cardId, fromZone: fromZoneKey, toZone: dropZoneKey || null, sourcePlayer: getActivePlayerKey() });
-      finalizeDrop(dropZoneKey);
-
-      cancelAll();
-    };
-
-    const onCancel = (ev) => {
-      ev.preventDefault();
-      clearTimeout(holdTimer);
-      debugLog({ event: "cancel", cardId, fromZone: fromZoneKey, sourcePlayer: getActivePlayerKey() });
-      if (dragging) finalizeDrop(null);
-      cancelAll();
-    };
-
-    cardEl.addEventListener("pointermove", onMove, { passive: false });
-    cardEl.addEventListener("pointerup", onUp, { passive: false });
-    cardEl.addEventListener("pointercancel", onCancel, { passive: false });
+    beginCardDrag(e, { cardId, fromZoneKey });
   }
 
   function positionGhost(el, x, y) {
@@ -1863,30 +1966,40 @@ function attachTapStates(el, cardId) {
 
   
 function finalizeDrop(toZoneKey) {
-  const d = dragging;
-  if (!d) return;
+  if (!dragInteraction.active || dragInteraction.status !== "dragging") return;
 
-  // remove ghost
-  if (d.ghostEl && d.ghostEl.parentNode) d.ghostEl.parentNode.removeChild(d.ghostEl);
+  const from = dragInteraction.fromZoneKey;
+  const cardId = dragInteraction.cardId;
+  dragInteraction.status = "dropping";
 
-  const from = d.fromZoneKey;
-  const cardId = d.cardId;
-
-  // snap-back if invalid drop or same zone
   if (!toZoneKey || toZoneKey === from) {
-    debugLog({ event: "cancel", cardId, fromZone: from, toZone: toZoneKey || null, sourcePlayer: getActivePlayerKey() });
-    dragging = null;
-    syncDropTargetHighlights(null);
+    debugLog({
+      event: "cancel",
+      reason: "invalid_or_same_zone",
+      dragToken: dragInteraction.dragToken,
+      cardId,
+      fromZone: from,
+      toZone: toZoneKey || null,
+      sourcePlayer: dragInteraction.sourceOwner,
+      startedAtVersion: dragInteraction.startedAtVersion
+    });
+    cancelDragInteraction("invalid_or_same_zone");
     return;
   }
 
-  dragging = null;
-  syncDropTargetHighlights(null);
+  debugLog({
+    event: "dropCommit",
+    dragToken: dragInteraction.dragToken,
+    cardId,
+    fromZone: from,
+    toZone: toZoneKey || null,
+    sourcePlayer: dragInteraction.sourceOwner,
+    startedAtVersion: dragInteraction.startedAtVersion,
+    baseVersion: getAuthoritativeVersion()
+  });
 
-  // ✅ IMPORTANT: route through moveCard so deck logic works
   moveCard(cardId, from, toZoneKey);
-
-  // render (moveCard may open chooser which also calls render)
+  cancelDragInteraction("drop_complete");
   render();
 }
 
@@ -2343,10 +2456,12 @@ render();
       return {
       invalidate() {
         // Host can call this after authoritative room_state updates
+        cancelDragInteraction("authoritative_state_applied");
         try { updateSubtitle(); } catch {}
         try { render(); } catch {}
       },
       unmount() {
+        cancelDragInteraction("view_unmount");
         try { if (intervalId) clearInterval(intervalId); } catch {}
         try {
           const btn = document.querySelector(".topBackBtn");
