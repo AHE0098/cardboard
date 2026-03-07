@@ -1322,6 +1322,7 @@ function renderInspector(zoneKey) {
         card.appendChild(pt);
       }
 
+      appendInspectorRulesText(card, data);
       attachInspectorLongPress(card, id, zoneKey, ownerKey);
 
       // allow tap/tarp from inspector too (not in hand)
@@ -2771,6 +2772,16 @@ case "TOGGLE_TAP": {
       return raw;
     }
 
+    function appendInspectorRulesText(cardEl, cardLike = {}) {
+      const text = cardLike?.text == null ? "" : String(cardLike.text);
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const rules = document.createElement("div");
+      rules.className = "inspectorText";
+      rules.textContent = trimmed;
+      cardEl.appendChild(rules);
+    }
+
     function deepClone(value) {
       if (typeof structuredClone === "function") return structuredClone(value);
       return JSON.parse(JSON.stringify(value));
@@ -3895,6 +3906,7 @@ function onBack() {
           pt.textContent = `${data.power}|${data.toughness}`;
           row.appendChild(pt);
         }
+        appendInspectorRulesText(row, data);
         const s = modeState();
         if (s?.tapped?.[id]) row.classList.add("tapped");
         if (s?.tarped?.[id]) row.classList.add("tarped");
