@@ -1164,17 +1164,28 @@ body.isFocus .app{
   width: var(--manaSize, 12px);
   height: var(--manaSize, 12px);
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.18);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.30);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.22);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
-  font-size: calc(var(--manaSize, 12px) * 0.62);
+  font-size: calc(var(--manaSize, 12px) * 0.66);
   line-height: 1;
   color: rgba(255,255,255,0.95);
   background: rgba(255,255,255,0.08);
   overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+
+.manaSymbol::before {
+  content: "";
+  position: absolute;
+  inset: -14%;
+  border-radius: 999px;
+  background: rgba(150, 156, 170, 0.5);
+  z-index: -1;
 }
 
 /* Color-ish fallback styling */
@@ -1187,8 +1198,8 @@ body.isFocus .app{
 .manaSymbol[data-mana="x"]{ background: rgba(255,255,255,0.10); }
 
 /* Sizing presets */
-.manaCost.isMini { --manaSize: 12px; }
-.manaCost.isInspector { --manaSize: 22px; gap: 6px; }
+.manaCost.isMini { --manaSize: 15px; }
+.manaCost.isInspector { --manaSize: 26px; gap: 7px; }
 .manaCost.isInspector .manaRow { gap: 6px; }
 
 /* Keep inspector card top padding from fighting overlay */
@@ -1858,6 +1869,23 @@ body{
   max-width: 1200px;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+@media (pointer: coarse) {
+  .inspectorOverlay {
+    align-items: stretch;
+    touch-action: pan-x pan-y;
+  }
+
+  .inspectorTrack {
+    min-height: 100%;
+    align-items: center;
+    padding-top: 34px;
+    padding-bottom: 34px;
+    margin-top: -14px;
+    margin-bottom: -14px;
+    touch-action: pan-x;
+  }
 }
 
 .inspectorCard{
