@@ -697,6 +697,58 @@ function shouldWarnCardStats() {
   return host === "localhost" || host === "127.0.0.1";
 }
 
+function toRenderableStatNumber(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+window.CARD_GET_RENDERABLE_COMBAT_STATS = window.CARD_GET_RENDERABLE_COMBAT_STATS || function CARD_GET_RENDERABLE_COMBAT_STATS(cardLike = {}, cardId = "") {
+  const id = cardId == null ? "" : String(cardId);
+  const fromRepo = id ? (window.CARD_REPO?.[id] || {}) : {};
+  const data = (cardLike && typeof cardLike === "object") ? cardLike : fromRepo;
+  const statPairs = [
+    { leftKey: "power", rightKey: "toughness", format: (left, right) => `${left}|${right}` },
+    { leftKey: "strength", rightKey: "life", format: (left, right) => `${left}|${right}` },
+  ];
+
+  for (const pair of statPairs) {
+    const left = toRenderableStatNumber(data?.[pair.leftKey]);
+    const right = toRenderableStatNumber(data?.[pair.rightKey]);
+    const leftRaw = data?.[pair.leftKey];
+    const rightRaw = data?.[pair.rightKey];
+    const hasLeft = leftRaw !== null && leftRaw !== undefined && leftRaw !== "";
+    const hasRight = rightRaw !== null && rightRaw !== undefined && rightRaw !== "";
+
+    if (left !== null && right !== null) {
+      return {
+        left,
+        right,
+        leftKey: pair.leftKey,
+        rightKey: pair.rightKey,
+        text: pair.format(left, right),
+      };
+    }
+
+    if (shouldWarnCardStats() && (hasLeft || hasRight) && !(left !== null && right !== null)) {
+      console.warn("[card-stats] Incomplete or non-numeric combat stat pair", {
+        cardId: id || null,
+        name: data?.name || null,
+        kindField: data?.kind,
+        typeField: data?.type,
+        cardType: data?.cardType,
+        types: data?.types,
+        leftKey: pair.leftKey,
+        leftRaw,
+        rightKey: pair.rightKey,
+        rightRaw,
+      });
+    }
+  }
+
+  return null;
+};
+
 window.CARD_KIND = window.CARD_KIND || function CARD_KIND(cardId) {
   const data = window.CARD_REPO?.[String(cardId)] || {};
   if (!data || Object.keys(data).length === 0) return "unknown";
@@ -715,43 +767,7 @@ window.CARD_KIND = window.CARD_KIND || function CARD_KIND(cardId) {
 };
 
 window.CARD_HAS_RENDERABLE_COMBAT_STATS = window.CARD_HAS_RENDERABLE_COMBAT_STATS || function CARD_HAS_RENDERABLE_COMBAT_STATS(cardLike = {}, cardId = "") {
-  const id = cardId == null ? "" : String(cardId);
-  const fromRepo = id ? (window.CARD_REPO?.[id] || {}) : {};
-  const data = (cardLike && typeof cardLike === "object") ? cardLike : fromRepo;
-  const kind = kindFromCardLike(data) || (id ? window.CARD_KIND(id) : "unknown");
-  const hasNumericStats = Number.isFinite(data?.power) && Number.isFinite(data?.toughness);
-  const shouldRender = kind === "creature";
-
-  if (shouldWarnCardStats()) {
-    if (!shouldRender && hasNumericStats) {
-      console.warn("[card-stats] Suppressed non-creature combat stats render", {
-        cardId: id || null,
-        name: data?.name || null,
-        kind,
-        kindField: data?.kind,
-        typeField: data?.type,
-        cardType: data?.cardType,
-        types: data?.types,
-        power: data?.power,
-        toughness: data?.toughness,
-      });
-    }
-    if (shouldRender && !hasNumericStats) {
-      console.warn("[card-stats] Creature-like card missing numeric combat stats", {
-        cardId: id || null,
-        name: data?.name || null,
-        kind,
-        kindField: data?.kind,
-        typeField: data?.type,
-        cardType: data?.cardType,
-        types: data?.types,
-        power: data?.power,
-        toughness: data?.toughness,
-      });
-    }
-  }
-
-  return shouldRender;
+  return !!window.CARD_GET_RENDERABLE_COMBAT_STATS?.(cardLike, cardId);
 };
 
 window.resolveCardImage = function resolveCardImage(cardId, opts = {}) {
