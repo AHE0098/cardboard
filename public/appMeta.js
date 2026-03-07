@@ -127,6 +127,16 @@ if (!prevRole || !nextViewRole || nextViewRole === prevRole) {
           toZoneKey: null,
           serverVersion: Number(state?.version || 0)
         });
+        if (state && typeof state === "object") {
+          api.setBattleSession({
+            roomId: api.getBattleRoomId(),
+            role: api.getSession()?.role || null,
+            state,
+            viewRole: api.getBattleViewRole() || api.getSession()?.role || "p1"
+          });
+        }
+        api.onBattleStateChanged?.();
+
         if (!DEBUG_DND) return;
         console.warn("[battle:dnd]", {
           event: "intent rejected",
