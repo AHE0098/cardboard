@@ -34,6 +34,7 @@ const socketPresence = new Map(); // socket.id -> { roomId, role }
 
 
 const PREFER_SHARED_DEFINITIONS = process.env.PREFER_SHARED_DEFINITIONS === "1";
+const DEBUG_DECK_INIT = process.env.DEBUG_DECK_INIT === "1";
 
 
 let roomCodeCounter = 0;
@@ -117,6 +118,21 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
+function deckFingerprint(cards) {
+  if (!Array.isArray(cards)) return "empty";
+  return cards.slice(0, 5).map((c) => String(c)).join("|");
+}
+
+function deckChecksum(cards) {
+  const serial = Array.isArray(cards) ? cards.map((c) => String(c)).join("|") : "";
+  return crypto.createHash("sha1").update(serial).digest("hex").slice(0, 12);
+}
+
+function logDeckInit(event, payload) {
+  if (!DEBUG_DECK_INIT) return;
+  console.info(`[deck-init:${event}]`, payload);
+}
+
 function summarizeRoomState(state) {
   return {
     version: state?.version,
@@ -142,9 +158,29 @@ function assertIntentInvariants(room, role, intent) {
   }
 }
 
-function applyDeckToPlayer(player, cards) {
+function isDeckInitializedForGame(player, gameId) {
+  return player?.deckState?.isShuffled && player?.deckState?.gameId === gameId;
+}
+
+function applyDeckToPlayer(player, cards, context = {}) {
+  const { gameId = "", roomId = "", role = "", source = "unknown" } = context;
+  if (gameId && isDeckInitializedForGame(player, gameId)) {
+    logDeckInit("skip_reinitialize", {
+      gameId,
+      roomId,
+      role,
+      source,
+      deckLength: (player?.zones?.hand?.length || 0) + (player?.zones?.deck?.length || 0),
+      top5: deckFingerprint([...(player?.zones?.hand || []), ...(player?.zones?.deck || [])]),
+      checksum: deckChecksum([...(player?.zones?.hand || []), ...(player?.zones?.deck || [])])
+    });
+    return ensurePlayerZones(player);
+  }
+
   const deckCards = sanitizeDeckCards(cards);
   if (!deckCards.length) return ensurePlayerZones(player);
+  const beforeTop5 = deckFingerprint(deckCards);
+  const beforeChecksum = deckChecksum(deckCards);
   const nextDeck = shuffleInPlace([...deckCards]);
   const hand = [];
   for (let i = 0; i < 3 && nextDeck.length; i += 1) hand.push(nextDeck.shift());
@@ -155,6 +191,26 @@ function applyDeckToPlayer(player, cards) {
     lands: [],
     permanents: []
   };
+  player.deckState = {
+    isShuffled: true,
+    gameId: gameId || null,
+    initializedAt: Date.now(),
+    shuffleCount: Number(player?.deckState?.shuffleCount || 0) + 1,
+    source,
+    initialTop5: deckFingerprint([...hand, ...nextDeck]),
+    initialChecksum: deckChecksum([...hand, ...nextDeck])
+  };
+  logDeckInit("initialized", {
+    gameId,
+    roomId,
+    role,
+    source,
+    deckLength: deckCards.length,
+    beforeTop5,
+    afterTop5: player.deckState.initialTop5,
+    beforeChecksum,
+    afterChecksum: player.deckState.initialChecksum
+  });
   return ensurePlayerZones(player);
 }
 
@@ -166,6 +222,15 @@ function ensurePlayerZones(player) {
   zones.lands ||= [];
   zones.permanents ||= [];
   player.zones = zones;
+  player.deckState ||= {
+    isShuffled: false,
+    gameId: null,
+    initializedAt: null,
+    shuffleCount: 0,
+    source: null,
+    initialTop5: "",
+    initialChecksum: ""
+  };
   return player;
 }
 
@@ -183,8 +248,9 @@ function makeRoom(creator, opts = {}) {
   const p1 = makePlayer(creator.playerId, creator.playerName);
   const p2 = makePlayer(null, "Waiting...");
   const requestedDecks = sanitizeDeckCardsByRole(opts.deckCardsByRole);
-  applyDeckToPlayer(p1, requestedDecks.p1.length ? requestedDecks.p1 : DEFAULT_BATTLE_DECK_P1);
-  applyDeckToPlayer(p2, requestedDecks.p2.length ? requestedDecks.p2 : DEFAULT_BATTLE_DECK_P2);
+  const gameId = `${roomId}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`;
+  applyDeckToPlayer(p1, requestedDecks.p1.length ? requestedDecks.p1 : DEFAULT_BATTLE_DECK_P1, { gameId, roomId, role: "p1", source: "room_create" });
+  applyDeckToPlayer(p2, requestedDecks.p2.length ? requestedDecks.p2 : DEFAULT_BATTLE_DECK_P2, { gameId, roomId, role: "p2", source: "room_create" });
 
   const room = {
     roomId,
@@ -197,6 +263,7 @@ function makeRoom(creator, opts = {}) {
       },
       tapped: {},
       tarped: {},
+      gameId,
       version: 1
     }
   };
@@ -807,6 +874,7 @@ function createServer() {
       if (!room) return ack?.({ ok: false, error: "Room not found" });
 
       let role = getRole(room, playerId);
+      const requestedDecks = sanitizeDeckCardsByRole(deckCardsByRole);
       if (!role) {
         const preferred = preferredRole === "p1" || preferredRole === "p2" ? preferredRole : null;
 
@@ -820,7 +888,10 @@ function createServer() {
             name: playerName || room.state.players[preferred].name
           });
           const defaultDeck = preferred === "p1" ? DEFAULT_BATTLE_DECK_P1 : DEFAULT_BATTLE_DECK_P2;
-          applyDeckToPlayer(room.state.players[preferred], defaultDeck);
+          const selectedDeck = preferred === "p1" && requestedDecks.p1.length
+            ? requestedDecks.p1
+            : (preferred === "p2" && requestedDecks.p2.length ? requestedDecks.p2 : defaultDeck);
+          applyDeckToPlayer(room.state.players[preferred], selectedDeck, { gameId: room.state.gameId, roomId, role: preferred, source: "join_room_new_seat" });
           role = preferred;
         } else if (!room.state.players.p2.id) {
           room.state.players.p2 = ensurePlayerZones({
@@ -828,7 +899,8 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p2.name
           });
-          applyDeckToPlayer(room.state.players.p2, DEFAULT_BATTLE_DECK_P2);
+          const selectedDeck = requestedDecks.p2.length ? requestedDecks.p2 : DEFAULT_BATTLE_DECK_P2;
+          applyDeckToPlayer(room.state.players.p2, selectedDeck, { gameId: room.state.gameId, roomId, role: "p2", source: "join_room_new_seat" });
           role = "p2";
         } else if (!room.state.players.p1.id) {
           room.state.players.p1 = ensurePlayerZones({
@@ -836,16 +908,15 @@ function createServer() {
             id: playerId,
             name: playerName || room.state.players.p1.name
           });
-          applyDeckToPlayer(room.state.players.p1, DEFAULT_BATTLE_DECK_P1);
+          const selectedDeck = requestedDecks.p1.length ? requestedDecks.p1 : DEFAULT_BATTLE_DECK_P1;
+          applyDeckToPlayer(room.state.players.p1, selectedDeck, { gameId: room.state.gameId, roomId, role: "p1", source: "join_room_new_seat" });
           role = "p1";
         } else {
           return ack?.({ ok: false, error: "Room full" });
         }
+      } else {
+        logDeckInit("join_existing_player", { gameId: room.state.gameId, roomId, role, playerId, source: "join_room_reconnect" });
       }
-
-      const requestedDecks = sanitizeDeckCardsByRole(deckCardsByRole);
-      if (role === "p1" && requestedDecks.p1.length) applyDeckToPlayer(room.state.players.p1, requestedDecks.p1);
-      if (role === "p2" && requestedDecks.p2.length) applyDeckToPlayer(room.state.players.p2, requestedDecks.p2);
 
       socket.join(roomId);
       socketPresence.set(socket.id, { roomId, role });
@@ -934,5 +1005,6 @@ module.exports = {
   validateDeckPlace,
   findCardIndex,
   sameCardId,
-  shuffleInPlace
+  shuffleInPlace,
+  applyDeckToPlayer
 };
