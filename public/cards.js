@@ -652,7 +652,7 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
     },
     kindFallback: {
       land: "/cards/lands/image10.png",
-      creature: "/cards/image44.png",
+      creature: "/cards/image1.png",
       instant: "/cards/image202.png",
       sorcery: "/cards/image202.png",
       spell: "/cards/image202.png",
