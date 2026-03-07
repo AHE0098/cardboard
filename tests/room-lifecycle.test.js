@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { makeRoom, rooms } = require('../server');
+const { makeRoom, rooms, applyDeckToPlayer } = require('../server');
 const { DEFAULT_BATTLE_DECK_P1, DEFAULT_BATTLE_DECK_P2 } = require('../battleDecks');
 
 (function run() {
@@ -12,6 +12,28 @@ const { DEFAULT_BATTLE_DECK_P1, DEFAULT_BATTLE_DECK_P2 } = require('../battleDec
   assert.equal(room.state.players.p2.zones.hand.length + room.state.players.p2.zones.deck.length, DEFAULT_BATTLE_DECK_P2.length, 'p2 should receive default battle deck size');
   assert.equal(typeof room.state.players.p1.zones.hand[0], 'string', 'p1 cards should remain string ids');
   assert.equal(typeof room.state.players.p2.zones.hand[0], 'string', 'p2 cards should remain string ids');
+  assert.equal(room.state.players.p1.deckState.isShuffled, true, 'p1 deck should be marked shuffled');
+  assert.equal(room.state.players.p2.deckState.isShuffled, true, 'p2 deck should be marked shuffled');
+  assert.equal(room.state.players.p1.deckState.gameId, room.state.gameId, 'p1 deck should be bound to room gameId');
+  assert.equal(room.state.players.p2.deckState.gameId, room.state.gameId, 'p2 deck should be bound to room gameId');
+
+  const p1Before = [...room.state.players.p1.zones.hand, ...room.state.players.p1.zones.deck];
+  applyDeckToPlayer(room.state.players.p1, DEFAULT_BATTLE_DECK_P1, {
+    gameId: room.state.gameId,
+    roomId: room.roomId,
+    role: 'p1',
+    source: 'test-reinit-guard'
+  });
+  const p1AfterSameGame = [...room.state.players.p1.zones.hand, ...room.state.players.p1.zones.deck];
+  assert.deepEqual(p1AfterSameGame, p1Before, 'same gameId re-init should be a no-op');
+
+  applyDeckToPlayer(room.state.players.p1, DEFAULT_BATTLE_DECK_P1, {
+    gameId: `${room.state.gameId}:new`,
+    roomId: room.roomId,
+    role: 'p1',
+    source: 'test-new-game-allows-init'
+  });
+  assert.equal(room.state.players.p1.deckState.gameId, `${room.state.gameId}:new`, 'new gameId should allow fresh initialization');
 
   // Simulate host leaving with new behavior (seat should be clear-able without auto deletion)
   room.state.players.p1 = { ...room.state.players.p1, id: null, name: 'Waiting for Player 1...' };
