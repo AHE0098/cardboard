@@ -5,17 +5,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <title>Cardboard v0</title>
+  <link rel="stylesheet" href="./ui-core.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
+  <div class="app ui-shell" id="appShell">
+    <header class="topbar ui-header">
       <div class="title">Cardboard</div>
       <div class="subtitle" id="subtitle">Single Player</div>
     </header>
 
-    <div class="view">
-      <main id="root"></main>
+    <div class="view ui-main" id="appMainScroll">
+      <main id="root" class="ui-stack"></main>
     </div>
 
     <div id="dragLayer" class="dragLayer" aria-hidden="true"></div>
@@ -35,6 +36,7 @@
   <script src="./sim/simControls.js"></script>
   <script src="./sim/simLayout.js"></script>
   <script src="./sim/simController.js"></script>
+  <script src="./ui-core.js"></script>
   <script src="./app2.js"></script>
 </body>
 </html>

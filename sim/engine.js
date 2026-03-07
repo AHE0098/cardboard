@@ -1,4 +1,4 @@
-const { chooseCreaturesToCast, chooseBlocks } = require('./ai');
+const { chooseCreaturesToCast, chooseAttackers, chooseBlocks } = require('./ai');
 const { aggregateResults } = require('./stats');
 const { buildEotSnapshot } = require('./eotSnapshot');
 
@@ -159,6 +159,11 @@ function canAttackWithCreature(game, creature, config) {
   return Number(creature?.enteredTurn) < Number(game.turn);
 }
 
+function canBlockWithCreature(game, creature, config) {
+  if (!config?.rules?.noBlockAfterAttacking) return true;
+  return Number(creature?.lastAttackedTurn) !== (Number(game.turn) - 1);
+}
+
 function verifyConservation(game) {
   for (const player of game.players) {
     const all = [
@@ -248,6 +253,24 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   }
 
   const defenders = defenderP.battlefieldCreatures.slice();
+  const attackChoice = chooseAttackers(attackers, defenders, {
+    ai: config.ai,
+    blockScoring: config.blockScoring,
+    rng: game.rng
+  });
+  const chosenAttackers = attackChoice.attackers;
+  for (const attacker of chosenAttackers) attacker.lastAttackedTurn = game.turn;
+  if (config.rules?.debugRules && chosenAttackers.length) {
+    const markEvent = {
+      turn: game.turn,
+      type: 'rules_debug_attack_marked',
+      attacker: attackerP.name,
+      markedAttackers: chosenAttackers.map((creature) => creature.id),
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, markEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', markEvent);
+  }
   const summoningSick = attackerP.battlefieldCreatures
     .filter((creature) => !canAttackWithCreature(game, creature, config))
     .map((creature) => creature.id);
@@ -262,7 +285,35 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
     logEvent(game, sickEvent);
     trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', sickEvent);
   }
-  const blocks = chooseBlocks(attackers, defenders, config.blockScoring);
+  if (chosenAttackers.length === 0) {
+    const event = { turn: game.turn, type: 'combat_skip_no_attackers_chosen', attacker: attackerP.name, phase: 'COMBAT_STEP' };
+    logEvent(game, event);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', event);
+    return;
+  }
+
+  const ineligibleDefenders = defenders
+    .filter((creature) => !canBlockWithCreature(game, creature, config))
+    .map((creature) => creature.id);
+  const legalDefenders = defenders.filter((creature) => canBlockWithCreature(game, creature, config));
+  if (config.rules?.debugRules && ineligibleDefenders.length) {
+    const filteredEvent = {
+      turn: game.turn,
+      type: 'rules_debug_blockers_filtered',
+      defender: defenderP.name,
+      blockedFromDefending: ineligibleDefenders,
+      phase: 'COMBAT_STEP'
+    };
+    logEvent(game, filteredEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', filteredEvent);
+  }
+
+  const blockChoice = chooseBlocks(chosenAttackers, legalDefenders, {
+    ai: config.ai,
+    blockScoring: config.blockScoring,
+    rng: game.rng
+  });
+  const blocks = blockChoice.blocks;
   const blockMap = new Map(blocks.map((b) => [b.attackerId, b.defenderId]));
   const defenderById = new Map(defenders.map((d) => [d.id, d]));
 
@@ -274,7 +325,7 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
     type: 'combat_start',
     attacker: attackerP.name,
     defender: defenderP.name,
-    attackers: attackers.map((c) => c.id),
+    attackers: chosenAttackers.map((c) => c.id),
     blocks,
     phase: 'COMBAT_STEP'
   };
@@ -282,7 +333,39 @@ function resolveCombat(game, attackerIndex, defenderIndex, config) {
   trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', combatStart);
   game.turnContext.activeActions += 1;
 
-  for (const attacker of attackers) {
+  game.aiCounters.smartBlockingForcedBlocksCount += blockChoice.meta.forcedBlocks.length;
+  game.aiCounters.smartAttackingForcedAttackersCount += attackChoice.meta.forcedAttackers.length;
+  if (attackChoice.meta.attackDecisionMode === 'heuristic') game.aiCounters.attackHeuristicCount += 1;
+  else game.aiCounters.attackAlternativeCount += 1;
+  if (blockChoice.meta.defendDecisionMode === 'heuristic') game.aiCounters.defendHeuristicCount += 1;
+  else game.aiCounters.defendAlternativeCount += 1;
+  if (attackChoice.meta.pointlessPrevented) game.aiCounters.smartAttackingRuleAPreventedCount += 1;
+
+  if (config.ai?.debugDecisions) {
+    const aiEvent = {
+      turn: game.turn,
+      type: 'ai_decision',
+      phase: 'COMBAT_STEP',
+      attacker: attackerP.name,
+      defender: defenderP.name,
+      smartAttacking: config.ai.smartAttacking,
+      smartBlocking: config.ai.smartBlocking,
+      attackCertainty: config.ai.certainty.attack,
+      defendCertainty: config.ai.certainty.defend,
+      forcedAttackers: attackChoice.meta.forcedAttackers.map((c) => c.id),
+      forcedBlocks: blockChoice.meta.forcedBlocks,
+      attackRoll: attackChoice.meta.attackRoll,
+      defendRoll: blockChoice.meta.defendRoll,
+      attackDecisionMode: attackChoice.meta.attackDecisionMode,
+      defendDecisionMode: blockChoice.meta.defendDecisionMode,
+      finalAttackers: chosenAttackers.map((c) => c.id),
+      finalBlocks: blocks
+    };
+    logEvent(game, aiEvent);
+    trackTurnAction(game, game.turn, attackerP.name, 'COMBAT_STEP', aiEvent);
+  }
+
+  for (const attacker of chosenAttackers) {
     const defenderId = blockMap.get(attacker.id);
     if (!defenderId) {
       defenderP.life = Math.max(0, defenderP.life - attacker.power);
@@ -386,7 +469,17 @@ function newGame({ seed, deckA, deckB, config }) {
     warnings: [],
     turnContext: {},
     isTurnActive: false,
-    cumulativeDamageByPlayer: { A: 0, B: 0 }
+    cumulativeDamageByPlayer: { A: 0, B: 0 },
+    aiCounters: {
+      smartBlockingForcedBlocksCount: 0,
+      smartAttackingForcedAttackersCount: 0,
+      attackHeuristicCount: 0,
+      attackAlternativeCount: 0,
+      defendHeuristicCount: 0,
+      defendAlternativeCount: 0,
+      smartAttackingRuleAPreventedCount: 0
+    },
+    rng
   };
 
   for (let i = 0; i < config.startingHandSize; i += 1) {
@@ -406,15 +499,39 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
     logMode: 'summary',
     devAssertions: true,
     blockScoring: {},
+    ai: {
+      smartBlocking: false,
+      smartAttacking: false,
+      certainty: {
+        attack: 100,
+        defend: 100
+      },
+      debugDecisions: false,
+      ...(config?.ai || {})
+    },
     rules: {
       summoningSickness: false,
+      noBlockAfterAttacking: false,
+      debugRules: false,
       ...(config?.rules || {})
     },
     ...config
   };
   cfg.rules = {
     summoningSickness: false,
+    noBlockAfterAttacking: false,
+    debugRules: false,
     ...(cfg.rules || {})
+  };
+
+  cfg.ai = {
+    smartBlocking: !!cfg.ai?.smartBlocking,
+    smartAttacking: !!cfg.ai?.smartAttacking,
+    debugDecisions: !!cfg.ai?.debugDecisions,
+    certainty: {
+      attack: Number.isFinite(Number(cfg.ai?.certainty?.attack)) ? Number(cfg.ai.certainty.attack) : 100,
+      defend: Number.isFinite(Number(cfg.ai?.certainty?.defend)) ? Number(cfg.ai.certainty.defend) : 100
+    }
   };
 
   const game = newGame({ seed, deckA, deckB, config: cfg });
@@ -488,6 +605,7 @@ function simulateGame({ seed = 1, deckA, deckB, config = {} }) {
       B: game.players[1].life
     },
     stats: game.stats,
+    aiCounters: game.aiCounters,
     turnSummaries: game.turnSummaries,
     warnings: game.warnings,
     log: cfg.logMode === 'none' ? [] : game.log

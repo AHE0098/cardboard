@@ -20,6 +20,51 @@
     return "•";
   }
 
+  const AVAILABLE_SWEEP_TOGGLES = [
+    { key: "summoningSickness", label: "Summoning Sickness" },
+    { key: "noBlockAfterAttacking", label: "No block after attacking" },
+    { key: "smartBlocking", label: "Smart Blocking" },
+    { key: "smartAttacking", label: "Smart Attacking" }
+  ];
+
+  const SWEEP_TOGGLE_KEYS = new Set(AVAILABLE_SWEEP_TOGGLES.map((item) => item.key));
+  let sweepStrategyCounter = 0;
+
+  function createSweepStrategyId() {
+    sweepStrategyCounter += 1;
+    return `sweep-${Date.now().toString(36)}-${sweepStrategyCounter.toString(36)}`;
+  }
+
+  function normalizeSweepStrategies(strategies) {
+    const next = [];
+    const ids = new Set();
+    (Array.isArray(strategies) ? strategies : []).forEach((strategy, idx) => {
+      const idRaw = String(strategy?.id || "").trim();
+      const id = idRaw && !ids.has(idRaw) ? idRaw : createSweepStrategyId();
+      ids.add(id);
+      const toggles = {};
+      Object.entries(strategy?.toggles || {}).forEach(([key, value]) => {
+        if (!SWEEP_TOGGLE_KEYS.has(key)) return;
+        if (value) toggles[key] = true;
+      });
+      next.push({
+        id,
+        name: String(strategy?.name || `Strategy ${idx + 1}`),
+        enabled: strategy?.enabled !== false,
+        toggles
+      });
+    });
+    if (!next.length) {
+      next.push({
+        id: createSweepStrategyId(),
+        name: "Strategy 1",
+        enabled: true,
+        toggles: { smartBlocking: true }
+      });
+    }
+    return next;
+  }
+
   function renderSimulatorMode(rootNode, ctx) {
     const { subtitle, session, savedDecks, simulatorState, persistPlayerSaveDebounced, renderApp, getDeckById, uid, parseManaCost, getCardDef, getAbortController, setAbortController } = ctx;
     subtitle.textContent = `${session.playerName} • simulator`;
@@ -103,20 +148,265 @@
     logField.append(logLabel, logSelect);
     numericRow.appendChild(logField);
 
-    const ruleField = document.createElement("div");
-    ruleField.className = "simField";
-    const summoningRuleLabel = document.createElement("label");
-    summoningRuleLabel.className = "zoneMeta";
-    const summoningRuleInput = document.createElement("input");
-    summoningRuleInput.type = "checkbox";
-    summoningRuleInput.checked = !!simulatorState.summoningSickness;
-    summoningRuleInput.onchange = () => {
-      simulatorState.summoningSickness = !!summoningRuleInput.checked;
+    function appendRuleToggle(labelText, key) {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = !!simulatorState[key];
+      input.onchange = () => {
+        simulatorState[key] = !!input.checked;
+        persistPlayerSaveDebounced();
+      };
+      label.append(input, document.createTextNode(` ${labelText}`));
+      field.appendChild(label);
+      numericRow.appendChild(field);
+    }
+
+    function appendCertaintySlider(labelText, key) {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = `${labelText} certainty (${simulatorState[key]}%)`;
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.type = "range";
+      input.min = "0";
+      input.max = "100";
+      input.step = "1";
+      input.value = String(simulatorState[key]);
+      input.oninput = () => {
+        const v = Math.max(0, Math.min(100, Math.floor(Number(input.value) || 0)));
+        simulatorState[key] = v;
+        label.textContent = `${labelText} certainty (${v}%)`;
+        persistPlayerSaveDebounced();
+      };
+      field.append(label, input);
+      numericRow.appendChild(field);
+    }
+
+    appendRuleToggle("Summoning Sickness", "summoningSickness");
+    appendRuleToggle("No block after attacking (1-turn)", "noBlockAfterAttacking");
+    appendRuleToggle("SMART BLOCKING", "smartBlocking");
+    appendRuleToggle("SMART ATTACKING", "smartAttacking");
+    appendRuleToggle("AI Debug Decisions", "aiDebugDecisions");
+    appendCertaintySlider("Attack", "attackCertainty");
+    appendCertaintySlider("Defend", "defendCertainty");
+
+    const sweepEnabledField = document.createElement("div");
+    sweepEnabledField.className = "simField";
+    const sweepEnabledLabel = document.createElement("label");
+    sweepEnabledLabel.className = "zoneMeta";
+    const sweepEnabledInput = document.createElement("input");
+    sweepEnabledInput.type = "checkbox";
+    sweepEnabledInput.checked = !!simulatorState.sweepEnabled;
+    sweepEnabledInput.onchange = () => {
+      simulatorState.sweepEnabled = !!sweepEnabledInput.checked;
       persistPlayerSaveDebounced();
     };
-    summoningRuleLabel.append(summoningRuleInput, document.createTextNode(" Summoning Sickness"));
-    ruleField.appendChild(summoningRuleLabel);
-    numericRow.appendChild(ruleField);
+    sweepEnabledLabel.append(sweepEnabledInput, document.createTextNode(" Enable sweep"));
+    sweepEnabledField.appendChild(sweepEnabledLabel);
+    numericRow.appendChild(sweepEnabledField);
+
+    simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+    const sweepFeaturesField = document.createElement("div");
+    sweepFeaturesField.className = "simField";
+    const sweepFeaturesLabel = document.createElement("label");
+    sweepFeaturesLabel.className = "zoneMeta";
+    sweepFeaturesLabel.textContent = "Sweep strategies";
+    const sweepFeaturesWrap = document.createElement("div");
+    sweepFeaturesWrap.className = "simStack";
+
+    const makeStrategyFeaturePicker = (strategy) => {
+      const picker = document.createElement("details");
+      const summary = document.createElement("summary");
+      const selectedCount = Object.keys(strategy.toggles || {}).length;
+      summary.className = "zoneMeta";
+      summary.textContent = selectedCount ? `${selectedCount} features selected` : "Select features";
+      picker.appendChild(summary);
+
+      const actions = document.createElement("div");
+      actions.className = "simButtons";
+      const selectAllBtn = document.createElement("button");
+      selectAllBtn.className = "menuBtn";
+      selectAllBtn.type = "button";
+      selectAllBtn.textContent = "Select all";
+      selectAllBtn.onclick = (evt) => {
+        evt.preventDefault();
+        strategy.toggles = AVAILABLE_SWEEP_TOGGLES.reduce((acc, item) => {
+          acc[item.key] = true;
+          return acc;
+        }, {});
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+      const clearBtn = document.createElement("button");
+      clearBtn.className = "menuBtn";
+      clearBtn.type = "button";
+      clearBtn.textContent = "Clear";
+      clearBtn.onclick = (evt) => {
+        evt.preventDefault();
+        strategy.toggles = {};
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+      actions.append(selectAllBtn, clearBtn);
+      picker.appendChild(actions);
+
+      AVAILABLE_SWEEP_TOGGLES.forEach((feature) => {
+        const row = document.createElement("label");
+        row.className = "zoneMeta";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !!strategy.toggles?.[feature.key];
+        input.onchange = () => {
+          if (input.checked) strategy.toggles[feature.key] = true;
+          else delete strategy.toggles[feature.key];
+          persistPlayerSaveDebounced();
+          renderApp();
+        };
+        row.append(input, document.createTextNode(` ${feature.label}`));
+        picker.appendChild(row);
+      });
+      return picker;
+    };
+
+    simulatorState.sweepStrategies.forEach((strategy, idx) => {
+      const strategyRow = document.createElement("div");
+      strategyRow.className = "simStack";
+
+      const topRow = document.createElement("div");
+      topRow.className = "simButtons";
+
+      const enabledLabel = document.createElement("label");
+      enabledLabel.className = "zoneMeta";
+      const enabledInput = document.createElement("input");
+      enabledInput.type = "checkbox";
+      enabledInput.checked = strategy.enabled !== false;
+      enabledInput.onchange = () => {
+        strategy.enabled = !!enabledInput.checked;
+        persistPlayerSaveDebounced();
+      };
+      enabledLabel.append(enabledInput, document.createTextNode(" Enabled"));
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "menuInput";
+      nameInput.type = "text";
+      nameInput.value = strategy.name || `Strategy ${idx + 1}`;
+      nameInput.placeholder = `Strategy ${idx + 1}`;
+      nameInput.onchange = () => {
+        strategy.name = String(nameInput.value || "").trim() || `Strategy ${idx + 1}`;
+        persistPlayerSaveDebounced();
+      };
+
+      const duplicateBtn = document.createElement("button");
+      duplicateBtn.className = "menuBtn";
+      duplicateBtn.type = "button";
+      duplicateBtn.textContent = "Duplicate";
+      duplicateBtn.onclick = () => {
+        simulatorState.sweepStrategies.splice(idx + 1, 0, {
+          id: createSweepStrategyId(),
+          name: `${strategy.name || `Strategy ${idx + 1}`} copy`,
+          enabled: strategy.enabled !== false,
+          toggles: { ...(strategy.toggles || {}) }
+        });
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "menuBtn";
+      deleteBtn.type = "button";
+      deleteBtn.textContent = "Delete";
+      deleteBtn.onclick = () => {
+        simulatorState.sweepStrategies = simulatorState.sweepStrategies.filter((item) => item.id !== strategy.id);
+        simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+        persistPlayerSaveDebounced();
+        renderApp();
+      };
+
+      topRow.append(enabledLabel, nameInput, duplicateBtn, deleteBtn);
+      strategyRow.append(topRow, makeStrategyFeaturePicker(strategy));
+      sweepFeaturesWrap.appendChild(strategyRow);
+    });
+
+    const addStrategyBtn = document.createElement("button");
+    addStrategyBtn.className = "menuBtn";
+    addStrategyBtn.type = "button";
+    addStrategyBtn.textContent = "Add strategy";
+    addStrategyBtn.onclick = () => {
+      const count = Array.isArray(simulatorState.sweepStrategies) ? simulatorState.sweepStrategies.length : 0;
+      simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+      simulatorState.sweepStrategies.push({
+        id: createSweepStrategyId(),
+        name: `Strategy ${count + 1}`,
+        enabled: true,
+        toggles: {}
+      });
+      persistPlayerSaveDebounced();
+      renderApp();
+    };
+    sweepFeaturesWrap.appendChild(addStrategyBtn);
+
+    sweepFeaturesField.append(sweepFeaturesLabel, sweepFeaturesWrap);
+    numericRow.appendChild(sweepFeaturesField);
+
+    const sweepCertaintyField = document.createElement("div");
+    sweepCertaintyField.className = "simField";
+    const sweepCertaintyLabel = document.createElement("label");
+    sweepCertaintyLabel.className = "zoneMeta";
+    sweepCertaintyLabel.textContent = "Apply certainty to";
+    const sweepCertaintySelect = document.createElement("select");
+    sweepCertaintySelect.className = "menuInput";
+    [["attack", "Attack"], ["defend", "Defend"], ["both", "Both"]].forEach(([value, text]) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      if (simulatorState.sweepCertaintyKey === value) opt.selected = true;
+      sweepCertaintySelect.appendChild(opt);
+    });
+    sweepCertaintySelect.onchange = () => {
+      simulatorState.sweepCertaintyKey = sweepCertaintySelect.value;
+      persistPlayerSaveDebounced();
+    };
+    sweepCertaintyField.append(sweepCertaintyLabel, sweepCertaintySelect);
+    numericRow.appendChild(sweepCertaintyField);
+
+    [["Iterations / lane", "sweepIterationsPerLane", 1, 5000], ["Sweep concurrency", "sweepConcurrency", 1, 4]].forEach(([labelText, key, min, max]) => {
+      const field = document.createElement("div");
+      field.className = "simField";
+      const label = document.createElement("label");
+      label.className = "zoneMeta";
+      label.textContent = String(labelText);
+      const input = document.createElement("input");
+      input.className = "menuInput";
+      input.type = "number";
+      input.min = String(min);
+      input.max = String(max);
+      input.value = String(simulatorState[key]);
+      input.onchange = () => {
+        const v = Number(input.value);
+        if (Number.isFinite(v)) simulatorState[key] = Math.max(min, Math.min(max, Math.floor(v)));
+        input.value = String(simulatorState[key]);
+        persistPlayerSaveDebounced();
+      };
+      field.append(label, input);
+      numericRow.appendChild(field);
+    });
+
+    const sweepNote = document.createElement("div");
+    sweepNote.className = "zoneMeta";
+    sweepNote.textContent = "Sweep uses fixed certainty lanes: 0% to 100% by 10%.";
+    numericRow.appendChild(sweepNote);
+    const enabledStrategiesCount = (Array.isArray(simulatorState.sweepStrategies) ? simulatorState.sweepStrategies : []).filter((strategy) => strategy?.enabled !== false).length;
+    const sweepWorkload = enabledStrategiesCount * 11 * Number(simulatorState.sweepIterationsPerLane || 0);
+    const workloadNote = document.createElement("div");
+    workloadNote.className = "zoneMeta";
+    workloadNote.textContent = `Estimated sweep games: ${sweepWorkload}`;
+    numericRow.appendChild(workloadNote);
 
     controls.appendChild(numericRow);
     panel.appendChild(controls);
@@ -131,6 +421,45 @@
     stopBtn.className = "menuBtn";
     stopBtn.textContent = "Cancel";
     stopBtn.disabled = !simulatorState.isRunning;
+
+    const runSweepBtn = document.createElement("button");
+    runSweepBtn.className = "menuBtn";
+    runSweepBtn.textContent = simulatorState.isRunning ? "Running..." : "Run sweep";
+    runSweepBtn.disabled = simulatorState.isRunning;
+
+    function buildBaseRunQuery() {
+      return {
+        iterations: String(simulatorState.iterations),
+        seed: String(simulatorState.seed),
+        maxTurns: String(simulatorState.maxTurns),
+        startingLife: String(simulatorState.startingLife),
+        log: simulatorState.logMode,
+        includeSampleLog: "1",
+        summoningSickness: simulatorState.summoningSickness ? "1" : "0",
+        noBlockAfterAttacking: simulatorState.noBlockAfterAttacking ? "1" : "0",
+        smartBlocking: simulatorState.smartBlocking ? "1" : "0",
+        smartAttacking: simulatorState.smartAttacking ? "1" : "0",
+        attackCertainty: String(simulatorState.attackCertainty),
+        defendCertainty: String(simulatorState.defendCertainty),
+        aiDebugDecisions: simulatorState.aiDebugDecisions ? "1" : "0"
+      };
+    }
+
+    async function executeSimulationRun({ isSweep, sweepStrategies = [] }) {
+      const qs = new URLSearchParams({
+        ...buildBaseRunQuery(),
+        sweepEnabled: isSweep ? "1" : "0",
+        sweepCertaintyKey: String(simulatorState.sweepCertaintyKey || "both"),
+        sweepIterationsPerLane: String(simulatorState.sweepIterationsPerLane || simulatorState.iterations),
+        sweepConcurrency: String(simulatorState.sweepConcurrency || 2),
+        sweepStrategies: encodeURIComponent(JSON.stringify(sweepStrategies))
+      });
+      if (global.__SIM_SWEEP_DEBUG__ === true) console.info("[sim.sweep.ui] request strategies", sweepStrategies);
+      const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
+      const data = await resp.json();
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+      return data;
+    }
 
     runBtn.onclick = async () => {
       const deckA = getDeckById(simulatorState.deckAId);
@@ -153,10 +482,7 @@
       setAbortController(new AbortController());
 
       try {
-        const qs = new URLSearchParams({ iterations: String(simulatorState.iterations), seed: String(simulatorState.seed), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
-        const resp = await fetch(`/api/sim/run?${qs.toString()}`, { signal: getAbortController().signal });
-        const data = await resp.json();
-        if (!resp.ok || !data?.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+        const data = await executeSimulationRun({ isSweep: false });
 
         simulatorState.finishedAt = Date.now();
         simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
@@ -164,6 +490,7 @@
         simulatorState.sampleGame = data.sampleGame || null;
         simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
         simulatorState.lastRawResult = data;
+        simulatorState.sweepSummary = data.sweepSummary || null;
         simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
         simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA.name || simulatorState.deckAId, deckBName: deckB.name || simulatorState.deckBId });
         if (isSimReportDebugEnabled()) {
@@ -194,8 +521,59 @@
       }
     };
 
+    runSweepBtn.onclick = async () => {
+      const deckA = getDeckById(simulatorState.deckAId);
+      const deckB = getDeckById(simulatorState.deckBId);
+      if (!deckA || !deckB) { simulatorState.lastError = "Please select both Deck A and Deck B."; renderApp(); return; }
+      simulatorState.sweepStrategies = normalizeSweepStrategies(simulatorState.sweepStrategies);
+      const enabledStrategies = simulatorState.sweepStrategies
+        .filter((strategy) => strategy.enabled !== false)
+        .map((strategy, idx) => ({
+          id: String(strategy.id || "").trim() || createSweepStrategyId(),
+          name: String(strategy.name || `Strategy ${idx + 1}`),
+          enabled: true,
+          toggles: Object.entries(strategy.toggles || {}).reduce((acc, [key, value]) => {
+            if (SWEEP_TOGGLE_KEYS.has(key) && value) acc[key] = true;
+            return acc;
+          }, {})
+        }));
+      if (!enabledStrategies.length) { simulatorState.lastError = "Enable at least one sweep strategy."; renderApp(); return; }
+      const totalGames = enabledStrategies.length * 11 * Number(simulatorState.sweepIterationsPerLane || 0);
+      if (simulatorState.sweepIterationsPerLane > 2000 || totalGames > 50000) simulatorState.lastError = `Warning: selected sweep workload may be slow (${totalGames} games).`;
+
+      simulatorState.isRunning = true;
+      simulatorState.selectedReportText = "";
+      simulatorState.runId = uid();
+      simulatorState.startedAt = Date.now();
+      renderApp();
+
+      if (getAbortController()) getAbortController().abort();
+      setAbortController(new AbortController());
+
+      try {
+        const data = await executeSimulationRun({ isSweep: true, sweepStrategies: enabledStrategies });
+        simulatorState.finishedAt = Date.now();
+        simulatorState.elapsedMs = simulatorState.finishedAt - simulatorState.startedAt;
+        simulatorState.summary = data.summary || null;
+        simulatorState.sampleGame = data.sampleGame || null;
+        simulatorState.runsMeta = Array.isArray(data.runsMeta) ? data.runsMeta : [];
+        simulatorState.lastRawResult = data;
+        simulatorState.sweepSummary = data.sweepSummary || null;
+        simulatorState.selectedRunSeed = simulatorState.runsMeta[0]?.seed ?? simulatorState.seed;
+        simulatorState.selectedReportText = SimUI.formatSimGameReport(data.sampleGame, { deckAName: deckA.name || simulatorState.deckAId, deckBName: deckB.name || simulatorState.deckBId });
+      } catch (err) {
+        if (err?.name === "AbortError") simulatorState.lastError = "Simulation cancelled.";
+        else simulatorState.lastError = String(err?.message || err || "simulation failed");
+      } finally {
+        simulatorState.isRunning = false;
+        setAbortController(null);
+        persistPlayerSaveDebounced();
+        renderApp();
+      }
+    };
+
     stopBtn.onclick = () => { if (getAbortController()) getAbortController().abort(); simulatorState.isRunning = false; simulatorState.lastError = "Simulation cancelled."; renderApp(); };
-    btnRow.append(runBtn, stopBtn);
+    btnRow.append(runBtn, runSweepBtn, stopBtn);
 
     const copyJsonBtn = document.createElement("button");
     copyJsonBtn.className = "menuBtn";
@@ -274,6 +652,16 @@
         panel.appendChild(chartWrap);
       }
 
+      const sweepLanes = Array.isArray(simulatorState.sweepSummary?.lanes) ? simulatorState.sweepSummary.lanes : [];
+      const sweepSeries = SimUI.computeSweepSeries ? SimUI.computeSweepSeries(sweepLanes) : [];
+      if (sweepSeries.length) {
+        const strategyList = sweepSeries.map((s) => `<div>- ${s.label}</div>`).join("");
+        const chartWrap = document.createElement("div");
+        chartWrap.className = "simChartWrap";
+        chartWrap.innerHTML = `<div class="simChartHead"><strong>Deck A success rate vs certainty (strategy sweep)</strong><div class="zoneMeta">Strategies:${strategyList}</div><div class="simLegend">${sweepSeries.map((s) => `<span style="color:${s.color}">${s.label}</span>`).join("")}</div></div>${SimUI.renderSweepWinrateSvg(sweepSeries)}`;
+        panel.appendChild(chartWrap);
+      }
+
       const tableWrap = document.createElement("div");
       tableWrap.className = "simTableWrap";
       const table = document.createElement("table");
@@ -314,7 +702,7 @@
           simulatorState.selectedRunSeed = seedVal;
           const deckA = getDeckById(simulatorState.deckAId);
           const deckB = getDeckById(simulatorState.deckBId);
-          const qs = new URLSearchParams({ iterations: "1", seed: String(seedVal), maxTurns: String(simulatorState.maxTurns), startingLife: String(simulatorState.startingLife), log: simulatorState.logMode, includeSampleLog: "1", summoningSickness: simulatorState.summoningSickness ? "1" : "0" });
+          const qs = new URLSearchParams({ ...buildBaseRunQuery(), iterations: "1", seed: String(seedVal), sweepEnabled: "0" });
           const resp = await fetch(`/api/sim/run?${qs.toString()}`);
           const data = await resp.json();
           if (!resp.ok || !data?.ok) simulatorState.lastError = data?.error || `HTTP ${resp.status}`;

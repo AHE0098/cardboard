@@ -333,6 +333,15 @@ state.mode ||= "solo";
 state.activePlayerKey ||= "p1";
 
 function updateSubtitle() {
+  if (typeof opts.getSubtitleText === "function") {
+    subtitle.textContent = String(opts.getSubtitleText({
+      mode: getMode(),
+      activePlayer: getPlayer(getActivePlayerKey()),
+      state
+    }) || "");
+    return;
+  }
+
   // battle: show which player you're "viewing"
   if (getMode() === "battle") {
     const active = getPlayer(getActivePlayerKey());
@@ -2356,6 +2365,11 @@ Screen + data architecture:
     const subtitle = document.getElementById("subtitle");
     if (!root || !subtitle) throw new Error("Missing required DOM roots");
 
+    const uiIntentHub = window.UICore?.createIntentHub ? window.UICore.createIntentHub() : null;
+    uiIntentHub?.bindBack?.();
+    uiIntentHub?.on?.("back", () => onBack());
+    window.UICore?.updateViewportVars?.();
+
     const PLAYER_KEY = "cb_players";
     const SAVE_PREFIX = "cb_save_";
     const BATTLE_DECK_KEY_P1 = "cb_battle_deck_p1";
@@ -2442,7 +2456,22 @@ Screen + data architecture:
       maxTurns: 200,
       startingLife: 20,
       summoningSickness: false,
+      noBlockAfterAttacking: false,
+      smartBlocking: false,
+      smartAttacking: false,
+      attackCertainty: 100,
+      defendCertainty: 100,
+      aiDebugDecisions: false,
       logMode: "summary",
+      sweepEnabled: false,
+      sweepToggleKey: "smartBlocking",
+      sweepFeatureKeys: [],
+      sweepIncludeCombined: false,
+      sweepStrategies: [{ id: "default-strategy-1", name: "Strategy 1", enabled: true, toggles: { smartBlocking: true } }],
+      sweepCertaintyKey: "both",
+      sweepIterationsPerLane: 100,
+      sweepConcurrency: 2,
+      sweepSummary: null,
       isRunning: false,
       runId: "",
       startedAt: 0,
@@ -2909,7 +2938,40 @@ case "TOGGLE_TAP": {
         maxTurns: Number.isFinite(Number(savedSim.maxTurns)) ? Number(savedSim.maxTurns) : simulatorState.maxTurns,
         startingLife: Number.isFinite(Number(savedSim.startingLife)) ? Number(savedSim.startingLife) : simulatorState.startingLife,
         summoningSickness: !!savedSim.summoningSickness,
+        noBlockAfterAttacking: !!savedSim.noBlockAfterAttacking,
+        smartBlocking: !!savedSim.smartBlocking,
+        smartAttacking: !!savedSim.smartAttacking,
+        attackCertainty: Number.isFinite(Number(savedSim.attackCertainty)) ? Math.max(0, Math.min(100, Math.floor(Number(savedSim.attackCertainty)))) : simulatorState.attackCertainty,
+        defendCertainty: Number.isFinite(Number(savedSim.defendCertainty)) ? Math.max(0, Math.min(100, Math.floor(Number(savedSim.defendCertainty)))) : simulatorState.defendCertainty,
+        aiDebugDecisions: !!savedSim.aiDebugDecisions,
         logMode: ["none", "summary", "full"].includes(savedSim.logMode) ? savedSim.logMode : simulatorState.logMode,
+        sweepEnabled: !!savedSim.sweepEnabled,
+        sweepToggleKey: ["smartBlocking", "smartAttacking"].includes(savedSim.sweepToggleKey) ? savedSim.sweepToggleKey : simulatorState.sweepToggleKey,
+        sweepFeatureKeys: Array.isArray(savedSim.sweepFeatureKeys)
+          ? savedSim.sweepFeatureKeys.filter((key) => ["summoningSickness", "noBlockAfterAttacking", "smartBlocking", "smartAttacking"].includes(key))
+          : (["smartBlocking", "smartAttacking"].includes(savedSim.sweepToggleKey) ? [savedSim.sweepToggleKey] : simulatorState.sweepFeatureKeys),
+        sweepIncludeCombined: !!savedSim.sweepIncludeCombined,
+        sweepStrategies: Array.isArray(savedSim.sweepStrategies) && savedSim.sweepStrategies.length
+          ? savedSim.sweepStrategies.map((strategy, idx) => ({
+              id: String(strategy?.id || `saved-strategy-${idx + 1}`),
+              name: String(strategy?.name || `Strategy ${idx + 1}`),
+              enabled: strategy?.enabled !== false,
+              toggles: Object.entries(strategy?.toggles || {}).reduce((acc, [key, value]) => {
+                if (["summoningSickness", "noBlockAfterAttacking", "smartBlocking", "smartAttacking"].includes(key) && value) acc[key] = true;
+                return acc;
+              }, {})
+            }))
+          : (Array.isArray(savedSim.sweepFeatureKeys) && savedSim.sweepFeatureKeys.length
+            ? savedSim.sweepFeatureKeys.map((key, idx) => ({
+                id: `legacy-feature-${key}-${idx + 1}`,
+                name: key,
+                enabled: true,
+                toggles: { [key]: true }
+              }))
+            : simulatorState.sweepStrategies),
+        sweepCertaintyKey: ["attack", "defend", "both"].includes(savedSim.sweepCertaintyKey) ? savedSim.sweepCertaintyKey : simulatorState.sweepCertaintyKey,
+        sweepIterationsPerLane: Number.isFinite(Number(savedSim.sweepIterationsPerLane)) ? Math.max(1, Math.min(5000, Math.floor(Number(savedSim.sweepIterationsPerLane)))) : simulatorState.sweepIterationsPerLane,
+        sweepConcurrency: Number.isFinite(Number(savedSim.sweepConcurrency)) ? Math.max(1, Math.min(4, Math.floor(Number(savedSim.sweepConcurrency)))) : simulatorState.sweepConcurrency,
         isRunning: false,
         runId: "",
         startedAt: 0,
@@ -2926,6 +2988,7 @@ case "TOGGLE_TAP": {
         reportShowPhaseBands: true,
         reportShowStatusCards: true,
         reportExpandedTurns: {},
+        sweepSummary: null,
         lastRawResult: null,
         lastError: "",
         warnings: []
@@ -4014,7 +4077,12 @@ function onBack() {
       simBtn.textContent = "Simulator Mode";
       simBtn.onclick = () => { appMode = "simulator"; uiScreen = "mode"; renderApp(); };
 
-      card.append(sandboxBtn, battleBtn, deckBtn, simBtn);
+      const smokeBtn = document.createElement("button");
+      smokeBtn.className = "menuBtn";
+      smokeBtn.textContent = "UI Smoke Harness";
+      smokeBtn.onclick = () => { appMode = "ui-smoke"; uiScreen = "mode"; renderApp(); };
+
+      card.append(sandboxBtn, battleBtn, deckBtn, simBtn, smokeBtn);
       root.replaceChildren(card);
     }
 
@@ -4132,6 +4200,11 @@ function mountLegacyBattleInApp() {
     dispatch,
     authoritativeDispatch: true,
     debugDnD: DEBUG_DND,
+    getSubtitleText: ({ activePlayer }) => {
+      const viewing = activePlayer?.name || battleViewRole || session.role || "-";
+      const roomLabel = battleRoomId ? `Game ${battleRoomId}` : "Game -";
+      return `Battle • ${roomLabel} • Viewing: ${viewing}`;
+    },
     persistIntervalMs: 0
   });
 
@@ -4362,6 +4435,12 @@ function mountLegacyBattleInApp() {
 
   if (appMode === "simulator") {
     renderSimulatorMode(root);
+    return;
+  }
+
+  if (appMode === "ui-smoke") {
+    subtitle.textContent = `${session.playerName} • ui-smoke`;
+    window.UICore?.mountSmokeHarness?.(root);
     return;
   }
 

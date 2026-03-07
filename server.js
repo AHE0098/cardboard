@@ -23,6 +23,7 @@ const {
   simulateGame,
   simulateMany
 } = require("./sim/engine");
+const { createSeededRng, randomInt } = require("./shared/rng");
 
 const PORT = process.env.PORT || 3000;
 const PRIVATE_ZONES = ["hand", "deck", "graveyard"];
@@ -34,6 +35,8 @@ const socketPresence = new Map(); // socket.id -> { roomId, role }
 
 const PREFER_SHARED_DEFINITIONS = process.env.PREFER_SHARED_DEFINITIONS === "1";
 
+
+let roomCodeCounter = 0;
 
 function getSimulationRulesStamp() {
   const rulesPath = path.join(__dirname, "rules", "SIMULATION_RULES.md");
@@ -71,8 +74,9 @@ function getOpenRoomsList() {
 
 function code() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const rng = createSeededRng(`${Date.now()}|room-code`);
   let out = "";
-  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < 6; i++) out += chars[randomInt(rng, chars.length)];
   return out;
 }
 
@@ -103,13 +107,39 @@ function sanitizeDeckCardsByRole(payload) {
 }
 
 function shuffleInPlace(arr) {
+  const fallbackRng = createSeededRng(`${Date.now()}|shuffle|${arr.length}`);
   for (let i = arr.length - 1; i > 0; i -= 1) {
     const j = typeof crypto.randomInt === "function"
       ? crypto.randomInt(i + 1)
-      : Math.floor(Math.random() * (i + 1));
+      : randomInt(fallbackRng, i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+function summarizeRoomState(state) {
+  return {
+    version: state?.version,
+    p1: Object.fromEntries(Object.entries(state?.players?.p1?.zones || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])),
+    p2: Object.fromEntries(Object.entries(state?.players?.p2?.zones || {}).map(([k, v]) => [k, Array.isArray(v) ? v.length : 0])),
+    stack: Array.isArray(state?.sharedZones?.stack) ? state.sharedZones.stack.length : 0
+  };
+}
+
+function assertIntentInvariants(room, role, intent) {
+  const state = room.state;
+  if (!Number.isInteger(state?.version) || state.version < 1) {
+    throw new Error(`[invariant] invalid version; role=${role}; intent=${intent?.type}; summary=${JSON.stringify(summarizeRoomState(state))}`);
+  }
+  for (const owner of ["p1", "p2"]) {
+    const zones = state.players?.[owner]?.zones || {};
+    for (const zoneName of ["hand", "deck", "graveyard", "lands", "permanents"]) {
+      const zone = zones[zoneName] || [];
+      if (!Array.isArray(zone)) {
+        throw new Error(`[invariant] zone not array (${owner}.${zoneName}); role=${role}; intent=${intent?.type}; summary=${JSON.stringify(summarizeRoomState(state))}`);
+      }
+    }
+  }
 }
 
 function applyDeckToPlayer(player, cards) {
@@ -309,6 +339,7 @@ function applyIntent(room, role, intent) {
   }
 
   s.version += 1;
+  assertIntentInvariants(room, role, intent);
   return { ok: true };
 }
 
@@ -372,6 +403,176 @@ function createServer() {
     };
   }
 
+  function applyLaneCertainty(aiConfig, certaintyKey, certaintyPct) {
+    const next = { ...(aiConfig || {}), certainty: { ...(aiConfig?.certainty || {}) } };
+    if (certaintyKey === "attack" || certaintyKey === "both") next.certainty.attack = certaintyPct;
+    if (certaintyKey === "defend" || certaintyKey === "both") next.certainty.defend = certaintyPct;
+    return next;
+  }
+
+  const SWEEP_FEATURE_DEFS = {
+    summoningSickness: { scope: "rules", label: "Summoning Sickness" },
+    noBlockAfterAttacking: { scope: "rules", label: "No block after attacking" },
+    smartBlocking: { scope: "ai", label: "Smart Blocking" },
+    smartAttacking: { scope: "ai", label: "Smart Attacking" }
+  };
+
+  function applyStrategyTogglesToConfig(baseConfig, toggles) {
+    const nextConfig = {
+      ...baseConfig,
+      rules: { ...(baseConfig?.rules || {}) },
+      ai: { ...(baseConfig?.ai || {}) }
+    };
+    Object.entries(toggles || {}).forEach(([key, value]) => {
+      const featureDef = SWEEP_FEATURE_DEFS[key];
+      if (!featureDef) return;
+      if (featureDef.scope === "rules") nextConfig.rules[key] = !!value;
+      if (featureDef.scope === "ai") nextConfig.ai[key] = !!value;
+    });
+    return nextConfig;
+  }
+
+
+
+  function hashStringToUInt32(value) {
+    const str = String(value || "");
+    let hash = 2166136261;
+    for (let i = 0; i < str.length; i += 1) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  function parseSweepStrategiesParam(rawValue) {
+    if (!rawValue) return null;
+    const normalized = String(rawValue).trim();
+    if (!normalized) return null;
+    const candidates = [normalized];
+    try { candidates.push(decodeURIComponent(normalized)); } catch {}
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    throw new Error("Invalid sweepStrategies payload");
+  }
+
+  function normalizeSweepStrategiesInput(strategies) {
+    const seen = new Set();
+    const normalized = [];
+    (Array.isArray(strategies) ? strategies : []).forEach((strategy, idx) => {
+      const id = String(strategy?.id || "").trim();
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      const name = String(strategy?.name || `Strategy ${idx + 1}`).trim() || `Strategy ${idx + 1}`;
+      const enabled = strategy?.enabled !== false;
+      const toggles = {};
+      Object.entries(strategy?.toggles || {}).forEach(([key, value]) => {
+        if (!SWEEP_FEATURE_DEFS[key]) return;
+        if (value) toggles[key] = true;
+      });
+      normalized.push({ id, name, enabled, toggles });
+    });
+    return normalized;
+  }
+
+  function buildLaneSummary({ lane, batch }) {
+    const winsA = Number(batch?.summary?.winsA || 0);
+    const winsB = Number(batch?.summary?.winsB || 0);
+    const games = Number(batch?.summary?.games || 0);
+    return {
+      strategyId: lane.strategyId,
+      strategyName: lane.strategyName,
+      strategyIndex: lane.strategyIndex,
+      strategyToggles: lane.strategyToggles,
+      toggleKey: lane.toggleKey,
+      toggleValue: lane.toggleValue,
+      certaintyPct: lane.certaintyPct,
+      seed: lane.seed,
+      games,
+      deckA_wins: winsA,
+      deckA_losses: winsB,
+      deckA_winRate: games > 0 ? Number((winsA / games).toFixed(6)) : 0
+    };
+  }
+
+  function runSimulationSweep({ sweep, config, deckA, deckB }) {
+    const certaintySteps = Array.isArray(sweep.certaintySteps) && sweep.certaintySteps.length
+      ? sweep.certaintySteps
+      : [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    const strategies = Array.isArray(sweep.strategies) && sweep.strategies.length
+      ? sweep.strategies
+      : [
+          {
+            name: `${sweep.toggleKey} OFF`,
+            toggles: { [sweep.toggleKey]: false },
+            legacyToggleValue: false
+          },
+          {
+            name: `${sweep.toggleKey} ON`,
+            toggles: { [sweep.toggleKey]: true },
+            legacyToggleValue: true
+          }
+        ];
+    const sweepRows = [];
+
+    strategies.forEach((strategy, strategyIdx) => {
+      certaintySteps.forEach((certaintyPct) => {
+        const strategySeedComponent = hashStringToUInt32(strategy.id || strategy.name || strategyIdx) % 1000000;
+        const laneSeed = (Number(sweep.baseSeed || 0) + Number(certaintyPct || 0) + (strategySeedComponent * 1000)) >>> 0;
+        const laneConfigWithStrategy = applyStrategyTogglesToConfig(config, strategy.toggles || {});
+        const laneAi = applyLaneCertainty({ ...(laneConfigWithStrategy.ai || {}) }, sweep.certaintyKey, certaintyPct);
+        const laneConfig = { ...laneConfigWithStrategy, ai: laneAi };
+        const batch = simulateMany({ iterations: sweep.iterationsPerLane, seedBase: laneSeed, deckA, deckB, config: laneConfig });
+        const lane = {
+          strategyId: String(strategy.id || `strategy-${strategyIdx + 1}`),
+          strategyName: String(strategy.name || `Strategy ${strategyIdx + 1}`),
+          strategyIndex: strategyIdx,
+          strategyToggles: strategy.toggles || {},
+          toggleKey: sweep.toggleKey,
+          toggleValue: strategy.legacyToggleValue,
+          certaintyPct,
+          seed: laneSeed
+        };
+        const laneSummary = buildLaneSummary({ lane, batch });
+        if (sweep.debugSweep) {
+          console.info("[sim.sweep] lane", {
+            toggleKey: lane.toggleKey,
+            toggleValue: lane.toggleValue,
+            strategyId: lane.strategyId,
+            strategyName: lane.strategyName,
+            strategyIndex: lane.strategyIndex,
+            certaintyPct: lane.certaintyPct,
+            seed: lane.seed,
+            games: laneSummary.games,
+            deckA_wins: laneSummary.deckA_wins,
+            deckA_losses: laneSummary.deckA_losses
+          });
+        }
+        sweepRows.push(laneSummary);
+      });
+    });
+
+    return { sweepRows };
+  }
+
+  function runSingleSimulation({ iterations, seed, config, deckA, deckB }) {
+    const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
+    const batch = simulateMany({ iterations, seedBase: seed, deckA, deckB, config });
+    const runsMeta = Array.isArray(batch.games)
+      ? batch.games.map((g, idx) => ({
+          index: idx,
+          seed: g.seed,
+          winner: g.winner,
+          turns: g.turns,
+          endedReason: g.endedReason
+        }))
+      : [];
+    return { sampleGame, batch, runsMeta };
+  }
+
   app.get("/api/sim/run", (req, res) => {
     try {
       const iterations = parsePositiveInt(req.query.iterations, 100, { min: 1, max: 10000 });
@@ -384,6 +585,34 @@ function createServer() {
       const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
       const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
       const summoningSickness = String(req.query.summoningSickness || "0") === "1";
+      const noBlockAfterAttacking = String(req.query.noBlockAfterAttacking || "0") === "1";
+      const smartBlocking = String(req.query.smartBlocking || "0") === "1";
+      const smartAttacking = String(req.query.smartAttacking || "0") === "1";
+      const aiDebugDecisions = String(req.query.aiDebugDecisions || "0") === "1";
+      const attackCertainty = parsePositiveInt(req.query.attackCertainty, 100, { min: 0, max: 100 });
+      const defendCertainty = parsePositiveInt(req.query.defendCertainty, 100, { min: 0, max: 100 });
+
+      const sweepEnabled = String(req.query.sweepEnabled || "0") === "1";
+      const sweepToggleKeyRaw = String(req.query.sweepToggleKey || "smartBlocking").trim();
+      const sweepToggleKey = ["smartBlocking", "smartAttacking"].includes(sweepToggleKeyRaw) ? sweepToggleKeyRaw : "smartBlocking";
+      const sweepCertaintyKeyRaw = String(req.query.sweepCertaintyKey || "both").trim();
+      const sweepCertaintyKey = ["attack", "defend", "both"].includes(sweepCertaintyKeyRaw) ? sweepCertaintyKeyRaw : "both";
+      const sweepIterationsPerLane = parsePositiveInt(req.query.sweepIterationsPerLane, iterations, { min: 1, max: 10000 });
+      const sweepConcurrency = parsePositiveInt(req.query.sweepConcurrency, 2, { min: 1, max: 4 });
+      const sweepToggleValuesRaw = String(req.query.sweepToggleValues || "0,1").trim();
+      const sweepToggleValues = sweepToggleValuesRaw
+        .split(",")
+        .map((x) => String(x).trim())
+        .filter((x) => x === "0" || x === "1")
+        .map((x) => x === "1");
+      const sweepFeatureKeysRaw = String(req.query.sweepFeatureKeys || "").trim();
+      const sweepFeatureKeys = sweepFeatureKeysRaw
+        .split(",")
+        .map((x) => String(x).trim())
+        .filter((x) => !!SWEEP_FEATURE_DEFS[x]);
+      const sweepIncludeCombined = String(req.query.sweepIncludeCombined || "0") === "1";
+      const parsedSweepStrategies = parseSweepStrategiesParam(req.query.sweepStrategies);
+      const debugSweep = String(req.query.simDebugSweep || "0") === "1";
 
       const { deckA, deckB } = buildSimDecks(deckMode);
       const config = {
@@ -392,22 +621,90 @@ function createServer() {
         logMode,
         devAssertions: true,
         rules: {
-          summoningSickness
+          summoningSickness,
+          noBlockAfterAttacking
+        },
+        ai: {
+          smartBlocking,
+          smartAttacking,
+          debugDecisions: aiDebugDecisions,
+          certainty: {
+            attack: attackCertainty,
+            defend: defendCertainty
+          }
         }
       };
 
-      const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
+      const { sampleGame, batch, runsMeta } = runSingleSimulation({ iterations, seed, config, deckA, deckB });
       const ruleStamp = getSimulationRulesStamp();
-      const batch = simulateMany({ iterations, seedBase: seed, deckA, deckB, config });
-      const runsMeta = Array.isArray(batch.games)
-        ? batch.games.map((g, idx) => ({
-            index: idx,
-            seed: g.seed,
-            winner: g.winner,
-            turns: g.turns,
-            endedReason: g.endedReason
-          }))
-        : [];
+
+      const strategyLabel = (featureKey) => SWEEP_FEATURE_DEFS[featureKey]?.label || featureKey;
+      const strategyLabelCombined = (keys) => {
+        if (keys.length <= 1) return strategyLabel(keys[0] || "Combined");
+        const short = keys.map((k) => strategyLabel(k).split(" ").map((word) => word[0]).join(""));
+        return `Combined ${short.join(" + ")}`;
+      };
+
+      const legacySweepStrategies = sweepFeatureKeys.map((featureKey, idx) => ({
+        id: `legacy-${featureKey}-${idx + 1}`,
+        name: strategyLabel(featureKey),
+        enabled: true,
+        toggles: { [featureKey]: true }
+      }));
+      if (sweepIncludeCombined && sweepFeatureKeys.length > 1) {
+        legacySweepStrategies.push({
+          id: `legacy-combined-${sweepFeatureKeys.join("-")}`,
+          name: strategyLabelCombined(sweepFeatureKeys),
+          enabled: true,
+          toggles: sweepFeatureKeys.reduce((acc, key) => {
+            acc[key] = true;
+            return acc;
+          }, {})
+        });
+      }
+
+      const normalizedSweepStrategies = normalizeSweepStrategiesInput(
+        Array.isArray(parsedSweepStrategies) ? parsedSweepStrategies : legacySweepStrategies
+      )
+        .filter((strategy) => strategy.enabled)
+        .slice(0, 12);
+
+      if (Array.isArray(parsedSweepStrategies) && parsedSweepStrategies.length > 12) {
+        throw new Error("Too many sweep strategies (max 12)");
+      }
+      if (sweepEnabled && !normalizedSweepStrategies.length) {
+        throw new Error("At least one enabled sweep strategy is required");
+      }
+      if (debugSweep) {
+        console.info("[sim.sweep] parsed strategies", {
+          count: normalizedSweepStrategies.length,
+          strategies: normalizedSweepStrategies
+        });
+      }
+
+      const sweep = sweepEnabled
+        ? {
+            enabled: true,
+            toggleKey: sweepToggleKey,
+            toggleValues: sweepToggleValues.length ? sweepToggleValues : [false, true],
+            strategies: normalizedSweepStrategies,
+            certaintyKey: sweepCertaintyKey,
+            certaintySteps: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+            iterationsPerLane: sweepIterationsPerLane,
+            baseSeed: seed,
+            concurrency: sweepConcurrency,
+            debugSweep
+          }
+        : null;
+
+      const sweepResult = sweep ? runSimulationSweep({ sweep, config, deckA, deckB }) : null;
+      if (debugSweep) {
+        console.info("[sim.sweep] lane-count", {
+          strategies: normalizedSweepStrategies.length,
+          certaintySteps: sweep?.certaintySteps?.length || 0,
+          lanes: sweepResult?.sweepRows?.length || 0
+        });
+      }
 
       return res.json({
         ok: true,
@@ -419,8 +716,19 @@ function createServer() {
           deckMode,
           logMode,
           rules: {
-            summoningSickness
-          }
+            summoningSickness,
+            noBlockAfterAttacking
+          },
+          ai: {
+            smartBlocking,
+            smartAttacking,
+            debugDecisions: aiDebugDecisions,
+            certainty: {
+              attack: attackCertainty,
+              defend: defendCertainty
+            }
+          },
+          sweep
         },
         sampleGame: {
           seed: sampleGame.seed,
@@ -435,102 +743,8 @@ function createServer() {
         },
         summary: batch.summary,
         runsMeta,
+        sweepSummary: sweepResult ? { lanes: sweepResult.sweepRows } : null,
         ruleStamp: { path: ruleStamp.path, mtimeMs: ruleStamp.mtimeMs, hash: ruleStamp.hash }
-      });
-    } catch (error) {
-      return res.status(400).json({ ok: false, error: error.message || "simulation_failed" });
-    }
-  });
-
-  function parsePositiveInt(raw, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return fallback;
-    const i = Math.floor(n);
-    if (i < min || i > max) return fallback;
-    return i;
-  }
-
-  function buildSimDecks(mode) {
-    if (mode === "lands-only") {
-      return {
-        deckA: buildDeckFromList([{ type: "land", name: "Basic Land", qty: 40 }], "RA"),
-        deckB: buildDeckFromList([{ type: "land", name: "Basic Land", qty: 40 }], "RB")
-      };
-    }
-
-    if (mode === "low-land") {
-      return {
-        deckA: buildDeckFromList([
-          { type: "land", name: "Basic Land", qty: 8 },
-          { type: "creature", name: "Greedy 4/4", cost: 4, power: 4, toughness: 4, qty: 16 },
-          { type: "creature", name: "Huge 6/6", cost: 6, power: 6, toughness: 6, qty: 16 }
-        ], "RLA"),
-        deckB: buildDeckFromList([
-          { type: "land", name: "Basic Land", qty: 8 },
-          { type: "creature", name: "Greedy 4/4", cost: 4, power: 4, toughness: 4, qty: 16 },
-          { type: "creature", name: "Huge 6/6", cost: 6, power: 6, toughness: 6, qty: 16 }
-        ], "RLB")
-      };
-    }
-
-    return {
-      deckA: buildStarterDeck("RA"),
-      deckB: buildStarterDeck("RB")
-    };
-  }
-
-  app.get("/api/sim/run", (req, res) => {
-    try {
-      const iterations = parsePositiveInt(req.query.iterations, 100, { min: 1, max: 10000 });
-      const seed = parsePositiveInt(req.query.seed, 1337, { min: 0, max: 0xffffffff });
-      const maxTurns = parsePositiveInt(req.query.maxTurns, 200, { min: 1, max: 10000 });
-      const startingLife = parsePositiveInt(req.query.startingLife, 20, { min: 1, max: 1000 });
-      const deckModeRaw = String(req.query.deckMode || "starter").trim();
-      const deckMode = ["starter", "lands-only", "low-land"].includes(deckModeRaw) ? deckModeRaw : "starter";
-      const logModeRaw = String(req.query.log || "summary").trim();
-      const logMode = ["none", "summary", "full"].includes(logModeRaw) ? logModeRaw : "summary";
-      const includeSampleLog = String(req.query.includeSampleLog || "0") === "1";
-      const summoningSickness = String(req.query.summoningSickness || "0") === "1";
-
-      const { deckA, deckB } = buildSimDecks(deckMode);
-      const config = {
-        startingLife,
-        maxTurns,
-        logMode,
-        devAssertions: true,
-        rules: {
-          summoningSickness
-        }
-      };
-
-      const sampleGame = simulateGame({ seed, deckA, deckB, config: { ...config, logMode: "full" } });
-      const batch = simulateMany({ iterations, seedBase: seed, deckA, deckB, config });
-
-      return res.json({
-        ok: true,
-        config: {
-          iterations,
-          seed,
-          maxTurns,
-          startingLife,
-          deckMode,
-          logMode,
-          rules: {
-            summoningSickness
-          }
-        },
-        sampleGame: {
-          seed: sampleGame.seed,
-          winner: sampleGame.winner,
-          turns: sampleGame.turns,
-          endedReason: sampleGame.endedReason,
-          finalLife: sampleGame.finalLife,
-          turnSummaries: sampleGame.turnSummaries || {},
-          warnings: sampleGame.warnings || [],
-          logLength: sampleGame.log.length,
-          log: includeSampleLog ? sampleGame.log : undefined
-        },
-        summary: batch.summary
       });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error.message || "simulation_failed" });

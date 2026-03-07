@@ -5,9 +5,17 @@
   function createSimulatorShell() {
     const wrap = document.createElement("div");
     wrap.className = "view simulatorShell";
+    wrap.style.minHeight = "0";
+    wrap.style.flex = "1 1 auto";
+
     const panel = document.createElement("div");
     panel.className = "menuCard simWrap simScrollRoot";
     panel.id = SCROLL_ROOT_ID;
+    panel.style.minHeight = "0";
+    panel.style.flex = "1 1 auto";
+    panel.style.overflowY = "auto";
+    panel.style.overflowX = "hidden";
+    panel.style.webkitOverflowScrolling = "touch";
     panel.innerHTML = "<h2>Simulator</h2>";
     wrap.appendChild(panel);
     return { wrap, panel };
