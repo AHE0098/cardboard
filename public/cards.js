@@ -653,9 +653,9 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
     kindFallback: {
       land: "/cards/lands/image10.png",
       creature: "/cards/image44.png",
-      instant: "/cards/image45.png",
-      sorcery: "/cards/image42.png",
-      spell: "/cards/image43.png",
+      instant: "/cards/image202.png",
+      sorcery: "/cards/image202.png",
+      spell: "/cards/image202.png",
       unknown: "/cards/image44.png",
     },
     // optional: final URL fallback; set to null to use silhouette
