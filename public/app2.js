@@ -454,8 +454,8 @@ function renderManaCostOverlay(costStr, opts = {}) {
   if (!tokens.length) return null;
 
   // icon sizing assumptions (must match CSS presets)
-  const icon = mode === "inspector" ? 22 : 12;
-  const gap = mode === "inspector" ? 6 : 3;
+  const icon = mode === "inspector" ? 26 : 15;
+  const gap = mode === "inspector" ? 7 : 3;
 
   // card widths in your UI:
   // miniCard = 56px; inspectorCard varies but we can estimate 260 max (you set max-width 260)
@@ -879,6 +879,11 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
   const CENTER_ON_DROP = true;
 
   const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const inspectorTouchDebugEnabled = () => Boolean(window.__INSPECTOR_TOUCH_DEBUG__);
+  const logInspectorTouch = (event, payload = {}) => {
+    if (!inspectorTouchDebugEnabled()) return;
+    console.info("[inspector-touch]", event, payload);
+  };
 
   const cleanupOverlay = () => {
     if (!overlayEl) return;
@@ -1114,6 +1119,19 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
 
     if (!overlayEl || !trackEl) return;
 
+    const scrollContainer = e.target?.closest?.(".inspectorOverlay, .inspectorTrack") || overlayEl;
+    const scrollRect = scrollContainer?.getBoundingClientRect?.();
+    logInspectorTouch("pointerdown", {
+      pointerType: e.pointerType,
+      targetClass: e.target?.className || null,
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollContainer: scrollContainer?.className || scrollContainer?.id || null,
+      scrollBounds: scrollRect
+        ? { left: Math.round(scrollRect.left), right: Math.round(scrollRect.right), top: Math.round(scrollRect.top), bottom: Math.round(scrollRect.bottom) }
+        : null
+    });
+
     start = { x: e.clientX, y: e.clientY };
     lastClientX = e.clientX;
     lifted = false;
@@ -1168,6 +1186,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
       if (!lifted && !reordering) {
         if (Math.abs(dx) > ACTIVATION_DX && Math.abs(dx) > Math.abs(dy)) {
           beginReorderMode();
+          logInspectorTouch("capture", { mode: "reorder", dx: Math.round(dx), dy: Math.round(dy) });
         }
 
         // if they move a lot vertically, cancel lift timer
@@ -1187,6 +1206,7 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
       // Lift-mode ghost drag to zones
       if (inspectorDragging?.ghostEl) {
         ev.preventDefault();
+        logInspectorTouch("capture", { mode: "lift", dx: Math.round(dx), dy: Math.round(dy) });
         positionGhost(inspectorDragging.ghostEl, ev.clientX, ev.clientY);
         const overZoneKey = hitTestZone(ev.clientX, ev.clientY);
         syncDropTargetHighlights(overZoneKey);
@@ -3219,8 +3239,8 @@ function onBack() {
       const mode = opts.mode || "mini";
       const tokens = parseManaCost(costStr);
       if (!tokens.length) return null;
-      const icon = mode === "inspector" ? 22 : 12;
-      const gap = mode === "inspector" ? 6 : 3;
+      const icon = mode === "inspector" ? 26 : 15;
+      const gap = mode === "inspector" ? 7 : 3;
       const cardW = mode === "inspector" ? 260 : 56;
       const cols = Math.max(1, Math.floor((Math.max(10, cardW - 10) + gap) / (icon + gap)));
       const wrap = document.createElement("div");
