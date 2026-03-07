@@ -2784,7 +2784,6 @@ case "TOGGLE_TAP": {
     }
 
     function appendInspectorRulesText(cardEl, cardLike = {}) {
-      if (!cardEl) return;
       const text = cardLike?.text == null ? "" : String(cardLike.text);
       const trimmed = text.trim();
       if (!trimmed) return;
