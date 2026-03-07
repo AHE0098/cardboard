@@ -668,11 +668,8 @@ const inspected = analyzeCardPool(cardsSource);
 
 
   function getRenderableCombatStatText(cardId, cardData = {}) {
-    const shouldRender = window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(cardData, cardId);
-    if (!shouldRender) return null;
-    const power = Number.isFinite(cardData?.power) ? Number(cardData.power) : 0;
-    const toughness = Number.isFinite(cardData?.toughness) ? Number(cardData.toughness) : 0;
-    return `${power}|${toughness}`;
+    const stats = window.CARD_GET_RENDERABLE_COMBAT_STATS?.(cardData, cardId);
+    return stats?.text || null;
   }
 
   function renderMiniCardTile(cardId, cardData = {}, opts = {}) {
@@ -702,7 +699,8 @@ const inspected = analyzeCardPool(cardsSource);
 
     const pt = document.createElement("div");
     pt.className = "miniPT";
-    const combatStatText = isLand ? null : getRenderableCombatStatText(cardId, cardData);
+    const combatStats = isLand ? null : window.CARD_GET_RENDERABLE_COMBAT_STATS?.(cardData, cardId);
+    const combatStatText = combatStats?.text || null;
     if (combatStatText) {
       pt.textContent = combatStatText;
       tile.appendChild(pt);
@@ -724,8 +722,8 @@ const inspected = analyzeCardPool(cardsSource);
         isLand,
         name: title,
         cost: isLand ? "LAND" : String(cardData?.rawCost || cardData?.cmc || "0"),
-        power: combatStatText ? Number(cardData?.power) : null,
-        toughness: combatStatText ? Number(cardData?.toughness) : null,
+        power: combatStats ? Number(combatStats.left) : null,
+        toughness: combatStats ? Number(combatStats.right) : null,
         value: Number(cardData?.value || 0)
       });
     };
@@ -761,14 +759,14 @@ const inspected = analyzeCardPool(cardsSource);
         const row = document.createElement("tr");
         row.innerHTML = `<td>${item.data.name}</td><td>${item.isLand ? "LAND" : item.data.rawCost || item.data.cmc}</td><td>${item.isLand ? "" : (getRenderableCombatStatText(item.id, item.data) || "")}</td><td>${Number(item.data.value || 0).toFixed(2)}</td>`;
         row.onclick = () => {
-          const combatStatText = item.isLand ? null : getRenderableCombatStatText(item.id, item.data);
+          const combatStats = item.isLand ? null : window.CARD_GET_RENDERABLE_COMBAT_STATS?.(item.data, item.id);
           opts.onInspect?.({
             id: item.id,
             isLand: item.isLand,
             name: item.data.name,
             cost: item.data.rawCost || item.data.cmc,
-            power: combatStatText ? Number(item.data.power) : null,
-            toughness: combatStatText ? Number(item.data.toughness) : null,
+            power: combatStats ? Number(combatStats.left) : null,
+            toughness: combatStats ? Number(combatStats.right) : null,
             value: item.data.value
           });
         };

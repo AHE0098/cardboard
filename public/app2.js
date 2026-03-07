@@ -726,10 +726,11 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false, flipped = false 
 
   // ===== PT badge =====
   const data = window.CARD_REPO?.[String(cardId)];
-  if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, cardId) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+  const combatStats = window.CARD_GET_RENDERABLE_COMBAT_STATS?.(data, cardId);
+  if (combatStats) {
     const pt = document.createElement("div");
     pt.className = "miniPT";
-    pt.textContent = `${data.power}|${data.toughness}`;
+    pt.textContent = combatStats.text;
     c.appendChild(pt);
   }
 
@@ -1621,10 +1622,11 @@ function renderInspector(zoneKey) {
       name.textContent = data.name || `Card ${id}`;
       card.appendChild(name);
 
-      if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, id) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+      const combatStats = window.CARD_GET_RENDERABLE_COMBAT_STATS?.(data, id);
+      if (combatStats) {
         const pt = document.createElement("div");
         pt.className = "inspectorPT";
-        pt.textContent = `${data.power}|${data.toughness}`;
+        pt.textContent = combatStats.text;
         card.appendChild(pt);
       }
 
@@ -3673,10 +3675,11 @@ function onBack() {
       if (costEl) card.appendChild(costEl);
 
       const data = getCardDef(cardId);
-      if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, cardId) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+      const combatStats = window.CARD_GET_RENDERABLE_COMBAT_STATS?.(data, cardId);
+      if (combatStats) {
         const pt = document.createElement("div");
         pt.className = "miniPT";
-        pt.textContent = `${data.power}|${data.toughness}`;
+        pt.textContent = combatStats.text;
         card.appendChild(pt);
       }
 
@@ -4167,10 +4170,11 @@ function onBack() {
         name.textContent = cardName(id);
         row.appendChild(name);
         const data = getCardDef(id);
-        if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, id) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+        const combatStats = window.CARD_GET_RENDERABLE_COMBAT_STATS?.(data, id);
+        if (combatStats) {
           const pt = document.createElement("div");
           pt.className = "inspectorPT";
-          pt.textContent = `${data.power}|${data.toughness}`;
+          pt.textContent = combatStats.text;
           row.appendChild(pt);
         }
         appendInspectorRulesText(row, data);
