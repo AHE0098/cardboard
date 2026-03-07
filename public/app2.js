@@ -2646,7 +2646,73 @@ Screen + data architecture:
         return !!window.DEBUG;
       }
     })();
+    const scrollDebugEnabled = (() => {
+      try {
+        const q = new URLSearchParams(window.location.search || "");
+        return q.get("scrollDebug") === "1" || !!window.CARDBOARD_SCROLL_DEBUG;
+      } catch {
+        return !!window.CARDBOARD_SCROLL_DEBUG;
+      }
+    })();
     let layoutQaEl = null;
+    let lastScrollAuditTs = 0;
+
+    function getNodeLabel(el) {
+      if (!el) return "none";
+      const id = el.id ? `#${el.id}` : "";
+      const cls = el.classList?.length ? `.${Array.from(el.classList).slice(0, 2).join(".")}` : "";
+      return `${el.tagName?.toLowerCase?.() || "node"}${id}${cls}`;
+    }
+
+    function readOverflowSnapshot(el) {
+      if (!el) return null;
+      const style = window.getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return {
+        node: getNodeLabel(el),
+        overflowX: style.overflowX,
+        overflowY: style.overflowY,
+        scrollHeight: Math.round(el.scrollHeight || 0),
+        clientHeight: Math.round(el.clientHeight || 0),
+        scrollWidth: Math.round(el.scrollWidth || 0),
+        clientWidth: Math.round(el.clientWidth || 0),
+        scrollTop: Math.round(el.scrollTop || 0),
+        scrollLeft: Math.round(el.scrollLeft || 0),
+        bounds: {
+          top: Math.round(r.top),
+          left: Math.round(r.left),
+          width: Math.round(r.width),
+          height: Math.round(r.height)
+        }
+      };
+    }
+
+    function logBattleScrollAudit(reason = "manual") {
+      if (!scrollDebugEnabled || appMode !== "battle") return;
+      const now = Date.now();
+      if (reason === "scroll" && now - lastScrollAuditTs < 250) return;
+      lastScrollAuditTs = now;
+
+      const rootMain = document.getElementById("appMainScroll");
+      const root = document.getElementById("root");
+      const board = document.querySelector(".board.battleBoard");
+      const overlay = document.getElementById("inspectorOverlay");
+      const track = overlay?.querySelector?.(".inspectorTrack") || null;
+      console.info("[scroll-debug:battle]", {
+        reason,
+        uiScreen,
+        appMode,
+        hasBattleState: !!battleState,
+        scrollOwners: {
+          page: readOverflowSnapshot(document.scrollingElement),
+          appMainScroll: readOverflowSnapshot(rootMain),
+          root: readOverflowSnapshot(root),
+          battleBoard: readOverflowSnapshot(board),
+          inspectorOverlay: readOverflowSnapshot(overlay),
+          inspectorTrack: readOverflowSnapshot(track)
+        }
+      });
+    }
     const moveDebug = (stage, payload = {}) => {
       if (!MOVE_DEBUG) return;
       console.info("[move]", {
@@ -4826,9 +4892,11 @@ function mountLegacyBattleInApp() {
       const bp = computeBreakpointName(w, h);
       const tv = isTvIshViewport();
       document.body.classList.toggle("tv-ish", tv);
+      document.body.classList.toggle("battle-active", appMode === "battle");
       document.body.classList.remove("bp-sm", "bp-md", "bp-lg", "bp-xl");
       document.body.classList.add(`bp-${bp}`);
       mountOrUpdateLayoutQa();
+      logBattleScrollAudit("layout_classes");
     }
 
     function renderApp() {
@@ -4855,7 +4923,9 @@ function mountLegacyBattleInApp() {
       try {
         if (uiScreen === "playerMenu") return renderPlayerMenu();
         if (uiScreen === "mainMenu") return renderMainMenu();
-        return renderModeScreen();
+        const out = renderModeScreen();
+        logBattleScrollAudit("render");
+        return out;
       } catch (err) {
         console.error("[battle] renderApp failed", err);
         const fallback = document.createElement("div");
@@ -4868,6 +4938,7 @@ function mountLegacyBattleInApp() {
     window.addEventListener("resize", applyLayoutModeClasses, { passive: true });
     window.addEventListener("orientationchange", applyLayoutModeClasses, { passive: true });
     document.addEventListener("scroll", mountOrUpdateLayoutQa, { passive: true, capture: true });
+    document.addEventListener("scroll", () => logBattleScrollAudit("scroll"), { passive: true, capture: true });
 
     if (playerRegistry.lastPlayerId) {
       const last = playerRegistry.players.find((p) => p.id === playerRegistry.lastPlayerId);

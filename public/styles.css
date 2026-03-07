@@ -2128,6 +2128,28 @@ body.deckbuilder-active #deck-scroll-root {
   min-height: 100%;
 }
 
+/*
+  2p scroll ownership:
+  - appMainScroll (.view.ui-main) is the vertical scroll owner for the main battle page.
+  - inspectorOverlay owns modal scroll; inspectorTrack owns horizontal strip scroll.
+  This avoids clipped/dead content caused by nested hidden overflow on #root.
+*/
+body.battle-active .view.ui-main {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+body.battle-active #root {
+  min-height: 0;
+  overflow: visible;
+}
+
+body.battle-active #root > .view {
+  min-height: max-content;
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -2155,6 +2177,18 @@ button.menuBtn,
 .inspectorTrack {
   overflow: auto;
   min-height: 0;
+}
+
+/* allow natural panning on card surfaces unless an explicit drag mode takes over */
+.inspectorCard,
+.miniCard {
+  touch-action: manipulation;
+}
+
+body.battle-active .inspectorTrack {
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
 }
 
 #dragLayer { z-index: 2200; }
