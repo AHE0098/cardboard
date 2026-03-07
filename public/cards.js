@@ -651,7 +651,7 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
       colorless: "/cards/lands/land-red.png",
     },
     kindFallback: {
-      land: "/cards/lands/land-red.png",
+      land: "/cards/lands/image10.png",
       creature: "/cards/image44.png",
       instant: "/cards/image45.png",
       sorcery: "/cards/image42.png",
