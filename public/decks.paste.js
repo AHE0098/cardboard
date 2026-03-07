@@ -1008,6 +1008,7 @@ window.CARDBOARD_PASTED_DECKS = window.CARDBOARD_PASTED_DECKS || [
     const normalized = {
       ...src,
       name: String(src.name || "").trim() || `Card ${id || "?"}`,
+      text: src.text == null ? "" : String(src.text),
       color: src.color == null ? "" : String(src.color),
       cost: src.cost == null ? "" : String(src.cost),
       kind,
