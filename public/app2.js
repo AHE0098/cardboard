@@ -1064,10 +1064,13 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
   // auto-scroll
   let autoScrollRaf = null;
   let autoScrollDir = 0; // -1 left, +1 right, 0 none
+  let autoScrollVelocity = 0;
+  let autoScrollLastTs = 0;
 
   // tuning
-  const EDGE_PX = 84;            // edge zone for auto-scroll
-  const MAX_SPEED = 22;          // px/frame at extreme edge
+  const EDGE_PX = 96;            // edge zone for auto-scroll
+  const MIN_SPEED_PX_S = 80;     // gentle motion when barely in edge zone
+  const MAX_SPEED_PX_S = 1250;   // max speed near extreme edge
   const ACTIVATION_DX = 10;      // how quickly reorder starts
   const SWAP_HYSTERESIS = 0.08;  // deadzone around midpoints (0.0-0.2)
   const CENTER_ON_DROP = true;
@@ -1079,6 +1082,51 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
     console.info("[inspector-touch]", event, payload);
   };
 
+  const getContainerRect = () => {
+    if (!overlayEl) return null;
+    return overlayEl.getBoundingClientRect();
+  };
+
+  const getDraggedCardRect = () => {
+    if (!dragStartRect || !start) return null;
+    const dx = lastClientX - start.x;
+    const left = dragStartRect.left + dx;
+    return {
+      left,
+      right: left + dragStartRect.width,
+      width: dragStartRect.width
+    };
+  };
+
+  const computeAutoScrollIntent = () => {
+    const rect = getContainerRect();
+    if (!rect || !reordering) return { dir: 0, intensity: 0, velocity: 0, edgeZone: "none", rect: null };
+
+    const dragRect = getDraggedCardRect();
+    const triggerX = dragRect ? (autoScrollDir < 0 ? dragRect.left : dragRect.right) : lastClientX;
+    const leftPressure = clamp01((rect.left + EDGE_PX - (dragRect?.left ?? triggerX)) / EDGE_PX);
+    const rightPressure = clamp01(((dragRect?.right ?? triggerX) - (rect.right - EDGE_PX)) / EDGE_PX);
+
+    let dir = 0;
+    let intensity = 0;
+    let edgeZone = "none";
+    if (leftPressure > rightPressure && leftPressure > 0) {
+      dir = -1;
+      intensity = leftPressure;
+      edgeZone = "left";
+    } else if (rightPressure > 0) {
+      dir = 1;
+      intensity = rightPressure;
+      edgeZone = "right";
+    }
+
+    // Smooth nonlinear ramp: soft at edge entry, strong near extremes.
+    const eased = Math.pow(intensity, 1.35);
+    const velocity = dir === 0 ? 0 : (MIN_SPEED_PX_S + (MAX_SPEED_PX_S - MIN_SPEED_PX_S) * eased);
+
+    return { dir, intensity, velocity, edgeZone, rect, dragRect };
+  };
+
   const cleanupOverlay = () => {
     if (!overlayEl) return;
     overlayEl.classList.remove("reordering");
@@ -1088,48 +1136,76 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
 
   const stopAutoScroll = () => {
     autoScrollDir = 0;
+    autoScrollVelocity = 0;
+    autoScrollLastTs = 0;
     if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
     autoScrollRaf = null;
   };
 
   const updateAutoScrollDir = (clientX) => {
     if (!overlayEl) return;
-    const rect = overlayEl.getBoundingClientRect();
+    const intent = computeAutoScrollIntent();
 
-    let dir = 0;
-    if (clientX < rect.left + EDGE_PX) dir = -1;
-    else if (clientX > rect.right - EDGE_PX) dir = +1;
+    autoScrollVelocity = intent.velocity;
 
-    if (dir !== autoScrollDir) {
-      autoScrollDir = dir;
+    if (intent.dir !== autoScrollDir) {
+      autoScrollDir = intent.dir;
       if (autoScrollDir === 0) stopAutoScroll();
       else if (!autoScrollRaf) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
     }
+
+    logInspectorTouch("autoScrollIntent", {
+      pointerX: Math.round(clientX),
+      scrollLeft: Math.round(overlayEl.scrollLeft),
+      dir: autoScrollDir,
+      velocity: Math.round(autoScrollVelocity),
+      edgeZone: intent.edgeZone,
+      inLeftZone: intent.edgeZone === "left",
+      inRightZone: intent.edgeZone === "right",
+      loopActive: Boolean(autoScrollRaf),
+      containerBounds: intent.rect
+        ? { left: Math.round(intent.rect.left), right: Math.round(intent.rect.right) }
+        : null,
+      dragBounds: intent.dragRect
+        ? { left: Math.round(intent.dragRect.left), right: Math.round(intent.dragRect.right) }
+        : null
+    });
   };
 
-  const tickAutoScroll = () => {
+  const tickAutoScroll = (ts) => {
     if (!reordering || !overlayEl || autoScrollDir === 0) {
       stopAutoScroll();
       return;
     }
 
-    const rect = overlayEl.getBoundingClientRect();
+    if (!autoScrollLastTs) autoScrollLastTs = ts;
+    const dt = Math.min(32, Math.max(8, ts - autoScrollLastTs));
+    autoScrollLastTs = ts;
 
-    // intensity based on how deep into edge zone pointer is
-    let intensity = 0;
-    if (autoScrollDir < 0) {
-      intensity = (rect.left + EDGE_PX - lastClientX) / EDGE_PX;
-    } else {
-      intensity = (lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
+    const intent = computeAutoScrollIntent();
+    if (intent.dir === 0 || intent.velocity <= 0) {
+      stopAutoScroll();
+      return;
     }
-    intensity = clamp01(intensity);
 
-    const speed = Math.round(MAX_SPEED * intensity);
-    if (speed > 0) {
-      overlayEl.scrollLeft += autoScrollDir * speed;
-      // while scrolling, keep placeholder updated
-      updatePlaceholderFromPointer(lastClientX);
+    autoScrollDir = intent.dir;
+    autoScrollVelocity = intent.velocity;
+
+    const maxScrollLeft = Math.max(0, overlayEl.scrollWidth - overlayEl.clientWidth);
+    if ((autoScrollDir < 0 && overlayEl.scrollLeft <= 0) || (autoScrollDir > 0 && overlayEl.scrollLeft >= maxScrollLeft)) {
+      stopAutoScroll();
+      logInspectorTouch("autoScrollBoundaryStop", {
+        dir: autoScrollDir,
+        scrollLeft: Math.round(overlayEl.scrollLeft),
+        maxScrollLeft: Math.round(maxScrollLeft)
+      });
+      return;
     }
+
+    const delta = autoScrollDir * autoScrollVelocity * (dt / 1000);
+    overlayEl.scrollLeft = Math.max(0, Math.min(maxScrollLeft, overlayEl.scrollLeft + delta));
+    // while scrolling, keep placeholder updated
+    updatePlaceholderFromPointer(lastClientX);
 
     autoScrollRaf = requestAnimationFrame(tickAutoScroll);
   };
@@ -1338,6 +1414,11 @@ function attachInspectorLongPress(cardEl, cardId, fromZoneKey, ownerKey) {
     const cancel = () => {
       clearTimeout(holdTimer);
       stopAutoScroll();
+      logInspectorTouch("cancel", {
+        reason: reordering ? "reorder-end" : (lifted ? "lift-end" : "gesture-end"),
+        scrollLeft: overlayEl ? Math.round(overlayEl.scrollLeft) : null,
+        loopActive: Boolean(autoScrollRaf)
+      });
 
       try { cardEl.releasePointerCapture(pointerId); } catch {}
       cardEl.removeEventListener("pointermove", onMove);
@@ -3812,14 +3893,45 @@ function onBack() {
       let trackEl = null;
       let placeholderEl = null;
       let draggingEl = null;
+      let dragStartRect = null;
       let lastClientX = 0;
       let autoScrollRaf = null;
       let autoScrollDir = 0;
-      const EDGE_PX = 84;
-      const MAX_SPEED = 22;
+      let autoScrollVelocity = 0;
+      let autoScrollLastTs = 0;
+      const EDGE_PX = 96;
+      const MIN_SPEED_PX_S = 80;
+      const MAX_SPEED_PX_S = 1250;
       const ACTIVATION_DX = 10;
       const SWAP_HYSTERESIS = 0.08;
       const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+      const getDraggedCardRect = () => {
+        if (!dragStartRect || !start) return null;
+        const dx = lastClientX - start.x;
+        const left = dragStartRect.left + dx;
+        return { left, right: left + dragStartRect.width };
+      };
+
+      const computeAutoScrollIntent = () => {
+        if (!overlayEl || !reordering) return { dir: 0, velocity: 0 };
+        const rect = overlayEl.getBoundingClientRect();
+        const dragRect = getDraggedCardRect();
+        const leftPressure = clamp01((rect.left + EDGE_PX - (dragRect?.left ?? lastClientX)) / EDGE_PX);
+        const rightPressure = clamp01(((dragRect?.right ?? lastClientX) - (rect.right - EDGE_PX)) / EDGE_PX);
+        let dir = 0;
+        let intensity = 0;
+        if (leftPressure > rightPressure && leftPressure > 0) {
+          dir = -1;
+          intensity = leftPressure;
+        } else if (rightPressure > 0) {
+          dir = 1;
+          intensity = rightPressure;
+        }
+        const eased = Math.pow(intensity, 1.35);
+        const velocity = dir === 0 ? 0 : (MIN_SPEED_PX_S + (MAX_SPEED_PX_S - MIN_SPEED_PX_S) * eased);
+        return { dir, velocity };
+      };
 
       const cleanupOverlay = () => {
         if (!overlayEl) return;
@@ -3830,6 +3942,8 @@ function onBack() {
 
       const stopAutoScroll = () => {
         autoScrollDir = 0;
+        autoScrollVelocity = 0;
+        autoScrollLastTs = 0;
         if (autoScrollRaf) cancelAnimationFrame(autoScrollRaf);
         autoScrollRaf = null;
       };
@@ -3853,28 +3967,32 @@ function onBack() {
         else trackEl.insertBefore(placeholderEl, best.nextSibling);
       };
 
-      const tickAutoScroll = () => {
+      const tickAutoScroll = (ts) => {
         if (!reordering || !overlayEl || autoScrollDir === 0) { stopAutoScroll(); return; }
-        const rect = overlayEl.getBoundingClientRect();
-        let intensity = 0;
-        if (autoScrollDir < 0) intensity = (rect.left + EDGE_PX - lastClientX) / EDGE_PX;
-        else intensity = (lastClientX - (rect.right - EDGE_PX)) / EDGE_PX;
-        const speed = Math.round(MAX_SPEED * clamp01(intensity));
-        if (speed > 0) {
-          overlayEl.scrollLeft += autoScrollDir * speed;
-          updatePlaceholderFromPointer(lastClientX);
-        }
+        if (!autoScrollLastTs) autoScrollLastTs = ts;
+        const dt = Math.min(32, Math.max(8, ts - autoScrollLastTs));
+        autoScrollLastTs = ts;
+
+        const intent = computeAutoScrollIntent();
+        if (intent.dir === 0 || intent.velocity <= 0) { stopAutoScroll(); return; }
+        autoScrollDir = intent.dir;
+        autoScrollVelocity = intent.velocity;
+
+        const maxScrollLeft = Math.max(0, overlayEl.scrollWidth - overlayEl.clientWidth);
+        if ((autoScrollDir < 0 && overlayEl.scrollLeft <= 0) || (autoScrollDir > 0 && overlayEl.scrollLeft >= maxScrollLeft)) { stopAutoScroll(); return; }
+
+        const delta = autoScrollDir * autoScrollVelocity * (dt / 1000);
+        overlayEl.scrollLeft = Math.max(0, Math.min(maxScrollLeft, overlayEl.scrollLeft + delta));
+        updatePlaceholderFromPointer(lastClientX);
         autoScrollRaf = requestAnimationFrame(tickAutoScroll);
       };
 
       const updateAutoScrollDir = (clientX) => {
-        const rect = overlayEl.getBoundingClientRect();
-        let dir = 0;
-        if (clientX < rect.left + EDGE_PX) dir = -1;
-        else if (clientX > rect.right - EDGE_PX) dir = 1;
-        if (dir !== autoScrollDir) {
-          autoScrollDir = dir;
-          if (!dir) stopAutoScroll();
+        const intent = computeAutoScrollIntent();
+        autoScrollVelocity = intent.velocity;
+        if (intent.dir !== autoScrollDir) {
+          autoScrollDir = intent.dir;
+          if (!autoScrollDir) stopAutoScroll();
           else if (!autoScrollRaf) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
         }
       };
@@ -3930,6 +4048,7 @@ function onBack() {
             placeholderEl.style.width = `${r.width}px`;
             placeholderEl.style.height = `${r.height}px`;
             trackEl.insertBefore(placeholderEl, cardEl.nextSibling);
+            dragStartRect = r;
             draggingEl = cardEl;
             draggingEl.style.zIndex = "10010";
             draggingEl.style.transition = "transform 0ms";
@@ -3960,6 +4079,7 @@ function onBack() {
             const ids = Array.from(trackEl.querySelectorAll(".inspectorCard")).map((el) => String(el.dataset.cardId || "").trim()).filter((id) => id.length > 0);
             setZone(fromZoneKey, ids, ownerRole);
             reordering = false;
+            dragStartRect = null;
             cleanupOverlay();
             renderApp();
             cancel();
@@ -3983,6 +4103,7 @@ function onBack() {
           ev.preventDefault();
           clearTimeout(holdTimer);
           placeholderEl?.remove();
+          dragStartRect = null;
           if (draggingEl) {
             draggingEl.style.transform = "";
             draggingEl.style.zIndex = "";
