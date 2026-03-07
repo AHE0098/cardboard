@@ -643,12 +643,12 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
   global: {
     // Deck images by kind/type: point these URLs to your real files under /cards/...
     landByColor: {
-      white: "/cards/lands/land-red.png",
-      blue: "/cards/lands/land-red.png",
-      black: "/cards/lands/land-red.png",
-      red: "/cards/lands/land-red.png",
-      green: "/cards/lands/land-red.png",
-      colorless: "/cards/lands/land-red.png",
+      white: "/cards/lands/image10.png",
+      blue: "/cards/lands/image10.png",
+      black: "/cards/lands/image10.png",
+      red: "/cards/lands/image10.png",
+      green: "/cards/lands/image10.png",
+      colorless: "/cards/lands/image10.png",
     },
     kindFallback: {
       land: "/cards/lands/image10.png",
