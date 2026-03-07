@@ -665,6 +665,16 @@ const inspected = analyzeCardPool(cardsSource);
     };
   }
 
+
+
+  function getRenderableCombatStatText(cardId, cardData = {}) {
+    const shouldRender = window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(cardData, cardId);
+    if (!shouldRender) return null;
+    const power = Number.isFinite(cardData?.power) ? Number(cardData.power) : 0;
+    const toughness = Number.isFinite(cardData?.toughness) ? Number(cardData.toughness) : 0;
+    return `${power}|${toughness}`;
+  }
+
   function renderMiniCardTile(cardId, cardData = {}, opts = {}) {
     const tile = document.createElement("button");
     tile.type = "button";
@@ -692,8 +702,11 @@ const inspected = analyzeCardPool(cardsSource);
 
     const pt = document.createElement("div");
     pt.className = "miniPT";
-    pt.textContent = isLand ? "-|-" : `${Number(cardData?.power || 0)}|${Number(cardData?.toughness || 0)}`;
-    tile.appendChild(pt);
+    const combatStatText = isLand ? null : getRenderableCombatStatText(cardId, cardData);
+    if (combatStatText) {
+      pt.textContent = combatStatText;
+      tile.appendChild(pt);
+    }
 
     const valueBadge = document.createElement("div");
     valueBadge.className = "miniValue";
@@ -701,7 +714,9 @@ const inspected = analyzeCardPool(cardsSource);
     tile.appendChild(valueBadge);
 
     const title = isLand ? "Basic Land" : (cardData?.name || `Card ${cardId}`);
-    tile.title = `${title} (${cost.textContent}, ${pt.textContent})`;
+    const titleParts = [cost.textContent];
+    if (combatStatText) titleParts.push(combatStatText);
+    tile.title = `${title} (${titleParts.join(", ")})`;
 
     tile.onclick = () => {
       opts.onInspect?.({
@@ -709,8 +724,8 @@ const inspected = analyzeCardPool(cardsSource);
         isLand,
         name: title,
         cost: isLand ? "LAND" : String(cardData?.rawCost || cardData?.cmc || "0"),
-        power: isLand ? null : Number(cardData?.power || 0),
-        toughness: isLand ? null : Number(cardData?.toughness || 0),
+        power: combatStatText ? Number(cardData?.power) : null,
+        toughness: combatStatText ? Number(cardData?.toughness) : null,
         value: Number(cardData?.value || 0)
       });
     };
@@ -744,8 +759,19 @@ const inspected = analyzeCardPool(cardsSource);
       table.appendChild(head);
       cards.forEach((item) => {
         const row = document.createElement("tr");
-        row.innerHTML = `<td>${item.data.name}</td><td>${item.isLand ? "LAND" : item.data.rawCost || item.data.cmc}</td><td>${item.isLand ? "-|-" : `${item.data.power}|${item.data.toughness}`}</td><td>${Number(item.data.value || 0).toFixed(2)}</td>`;
-        row.onclick = () => opts.onInspect?.({ id: item.id, isLand: item.isLand, name: item.data.name, cost: item.data.rawCost || item.data.cmc, power: item.data.power, toughness: item.data.toughness, value: item.data.value });
+        row.innerHTML = `<td>${item.data.name}</td><td>${item.isLand ? "LAND" : item.data.rawCost || item.data.cmc}</td><td>${item.isLand ? "" : (getRenderableCombatStatText(item.id, item.data) || "")}</td><td>${Number(item.data.value || 0).toFixed(2)}</td>`;
+        row.onclick = () => {
+          const combatStatText = item.isLand ? null : getRenderableCombatStatText(item.id, item.data);
+          opts.onInspect?.({
+            id: item.id,
+            isLand: item.isLand,
+            name: item.data.name,
+            cost: item.data.rawCost || item.data.cmc,
+            power: combatStatText ? Number(item.data.power) : null,
+            toughness: combatStatText ? Number(item.data.toughness) : null,
+            value: item.data.value
+          });
+        };
         table.appendChild(row);
       });
       host.appendChild(table);
