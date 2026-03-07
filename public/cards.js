@@ -667,19 +667,91 @@ window.IMAGE_RULES = window.IMAGE_RULES || {
 };
 
 // Kind detector (safe defaults)
+function normalizeKindToken(raw) {
+  const token = String(raw || "").trim().toLowerCase();
+  if (!token) return "";
+  if (["creature", "animal"].includes(token)) return "creature";
+  if (["land", "basic_land"].includes(token)) return "land";
+  if (["spell", "instant", "sorcery"].includes(token)) return "spell";
+  return token;
+}
+
+function kindFromCardLike(cardLike = {}) {
+  if (!cardLike || typeof cardLike !== "object") return "";
+  const direct = [cardLike.kind, cardLike.type, cardLike.cardType, cardLike.card_type]
+    .map(normalizeKindToken)
+    .find(Boolean);
+  if (direct) return direct;
+
+  if (Array.isArray(cardLike.types)) {
+    const fromTypes = cardLike.types.map(normalizeKindToken).find((kind) => ["creature", "land", "spell"].includes(kind));
+    if (fromTypes) return fromTypes;
+  }
+  return "";
+}
+
+function shouldWarnCardStats() {
+  if (window.CARDBOARD_DEV_WARNINGS === true) return true;
+  if (window.CARDBOARD_DEV_WARNINGS === false) return false;
+  const host = window.location?.hostname || "";
+  return host === "localhost" || host === "127.0.0.1";
+}
+
 window.CARD_KIND = window.CARD_KIND || function CARD_KIND(cardId) {
   const data = window.CARD_REPO?.[String(cardId)] || {};
   if (!data || Object.keys(data).length === 0) return "unknown";
-  if (typeof data.kind === "string" && data.kind.trim()) return data.kind.trim().toLowerCase();
+
+  const explicitKind = kindFromCardLike(data);
+  if (explicitKind) return explicitKind;
+
   const name = (data.name || "").toLowerCase().trim();
+  const basicLands = new Set(["mountain", "island", "forest", "plains", "swamp", "wastes"]);
+  if (basicLands.has(name)) return "land";
 
   const isCreature = Number.isFinite(data.power) && Number.isFinite(data.toughness);
   if (isCreature) return "creature";
 
-  const basicLands = new Set(["mountain", "island", "forest", "plains", "swamp", "wastes"]);
-  if (basicLands.has(name)) return "land";
-
   return "spell";
+};
+
+window.CARD_HAS_RENDERABLE_COMBAT_STATS = window.CARD_HAS_RENDERABLE_COMBAT_STATS || function CARD_HAS_RENDERABLE_COMBAT_STATS(cardLike = {}, cardId = "") {
+  const id = cardId == null ? "" : String(cardId);
+  const fromRepo = id ? (window.CARD_REPO?.[id] || {}) : {};
+  const data = (cardLike && typeof cardLike === "object") ? cardLike : fromRepo;
+  const kind = kindFromCardLike(data) || (id ? window.CARD_KIND(id) : "unknown");
+  const hasNumericStats = Number.isFinite(data?.power) && Number.isFinite(data?.toughness);
+  const shouldRender = kind === "creature";
+
+  if (shouldWarnCardStats()) {
+    if (!shouldRender && hasNumericStats) {
+      console.warn("[card-stats] Suppressed non-creature combat stats render", {
+        cardId: id || null,
+        name: data?.name || null,
+        kind,
+        kindField: data?.kind,
+        typeField: data?.type,
+        cardType: data?.cardType,
+        types: data?.types,
+        power: data?.power,
+        toughness: data?.toughness,
+      });
+    }
+    if (shouldRender && !hasNumericStats) {
+      console.warn("[card-stats] Creature-like card missing numeric combat stats", {
+        cardId: id || null,
+        name: data?.name || null,
+        kind,
+        kindField: data?.kind,
+        typeField: data?.type,
+        cardType: data?.cardType,
+        types: data?.types,
+        power: data?.power,
+        toughness: data?.toughness,
+      });
+    }
+  }
+
+  return shouldRender;
 };
 
 window.resolveCardImage = function resolveCardImage(cardId, opts = {}) {

@@ -532,7 +532,7 @@ function makeMiniCardEl(cardId, fromZoneKey, { overlay = false, flipped = false 
 
   // ===== PT badge =====
   const data = window.CARD_REPO?.[String(cardId)];
-  if (data && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+  if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, cardId) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
     const pt = document.createElement("div");
     pt.className = "miniPT";
     pt.textContent = `${data.power}|${data.toughness}`;
@@ -1326,7 +1326,7 @@ function renderInspector(zoneKey) {
       name.textContent = data.name || `Card ${id}`;
       card.appendChild(name);
 
-      if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+      if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, id) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
         const pt = document.createElement("div");
         pt.className = "inspectorPT";
         pt.textContent = `${data.power}|${data.toughness}`;
@@ -3457,7 +3457,7 @@ function onBack() {
       if (costEl) card.appendChild(costEl);
 
       const data = getCardDef(cardId);
-      if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+      if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, cardId) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
         const pt = document.createElement("div");
         pt.className = "miniPT";
         pt.textContent = `${data.power}|${data.toughness}`;
@@ -3911,7 +3911,7 @@ function onBack() {
         name.textContent = cardName(id);
         row.appendChild(name);
         const data = getCardDef(id);
-        if (Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
+        if (window.CARD_HAS_RENDERABLE_COMBAT_STATS?.(data, id) && Number.isFinite(data.power) && Number.isFinite(data.toughness)) {
           const pt = document.createElement("div");
           pt.className = "inspectorPT";
           pt.textContent = `${data.power}|${data.toughness}`;
