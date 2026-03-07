@@ -564,6 +564,17 @@ function removeInspectorOverlay() {
   if (existing) existing.remove();
 }
 
+function appendInspectorRulesText(cardEl, cardLike = {}) {
+  if (!cardEl) return;
+  const text = cardLike?.text == null ? "" : String(cardLike.text);
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const rules = document.createElement("div");
+  rules.className = "inspectorText";
+  rules.textContent = trimmed;
+  cardEl.appendChild(rules);
+}
+
 function layoutHandFan(slotRowEl, cardIds) {
   // Tweak these constants to taste (they map to CSS vars too)
   const overlap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--hand-overlap")) || 0.55;
